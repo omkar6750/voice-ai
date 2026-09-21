@@ -1,0 +1,45 @@
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Node
+node_modules/
+apps/dashboard/dist/
+apps/dashboard/vite.config.js
+apps/dashboard/vite.config.d.ts
+*.tsbuildinfo
+npm-debug.log*
+
+# Runtime data
+data/
+*.wav
+*.ulaw
+*.sqlite
+*.db
+
+# Editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
