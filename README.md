@@ -28,13 +28,13 @@ uv run ruff check .
 uv run ruff format --check .
 ```
 
-Run local agent after setting `VOICE_OPENAI_API_KEY`, `VOICE_MODEM_AT_PORT`, and audio device indexes in `.env`:
+Run the validated demo agent after setting `VOICE_SARVAM_API_KEY`, `VOICE_GROQ_API_KEY`, `VOICE_MODEM_AT_PORT`, and `VOICE_MODEM_AUDIO_PORT` in `.env`:
 
 ```powershell
-uv run voice-agent --number +15551234567 --modem-port COM7 --openai-api-key $env:VOICE_OPENAI_API_KEY
+uv run python scripts/demo_call.py --number +15551234567
 ```
 
-The runtime opens the modem AT port, dials, and sends audio through Pipecat's local audio transport. Select the SIM7600 USB audio device for input and output. Hardware validation remains required because Windows exposes modem audio names and sample rates differently by driver.
+The runtime opens COM16 for AT control and COM17 for 16 kHz mono signed 16-bit USB PCM. The validated provider path uses Sarvam STT, Groq Qwen 3.8 27B, and Sarvam TTS. Cartesia remains available as an alternate TTS provider.
 
 ## Project shape
 
