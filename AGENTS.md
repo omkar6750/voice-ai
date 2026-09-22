@@ -37,7 +37,7 @@ uv run pipecat --help
 uv run pipecat --version
 uv run pipecat init --list-options
 uv run pipecat init . --dry-run
-uv run voice-agent --number +15551234567 --modem-port COM7 --openai-api-key $env:VOICE_OPENAI_API_KEY
+uv run voice-agent --number +15551234567 --modem-port COM16 --audio-port COM17
 ```
 
 `pipecat init` is useful for checking current scaffold options. Do not scaffold over this repository because its layout and SIM7600 boundary are deliberate. The local development server for this project is FastAPI on port 8000. Vite runs on port 5173. Pipecat's runner is not the public control plane.
@@ -51,9 +51,9 @@ Context Hub is installed through the Pipecat CLI and has a local indexed copy of
 ```powershell
 uv run pipecat context-hub status
 uv run pipecat context-hub search-docs "PipelineWorker"
-uv run pipecat context-hub search-api "LocalAudioTransport"
-uv run pipecat context-hub search-examples "OpenAI voice pipeline"
-uv run pipecat context-hub get-code-snippet --symbol "OpenAITTSService"
+uv run pipecat context-hub search-api "Sim7600UsbAudioTransport"
+uv run pipecat context-hub search-examples "Groq voice pipeline"
+uv run pipecat context-hub get-code-snippet --symbol "CartesiaTTSService"
 uv run pipecat context-hub check-deprecation "pipecat.pipeline.task.PipelineTask"
 uv run pipecat context-hub refresh
 uv run pipecat context-hub serve
