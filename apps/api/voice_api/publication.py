@@ -1,0 +1,135 @@
+"""Synchronize draft bindings and clone versioned definitions (ADR-0006)."""
+
+from copy import deepcopy
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from voice_runtime.contracts import AgentConfig
+
+from voice_api.auth import require_operator
+from voice_api.db import get_session
+from voice_api.models import (
+    Agent,
+    AgentVersion,
+    AgentVersionKnowledge,
+    AgentVersionTool,
+    KnowledgeBase,
+    Tool,
+    ToolVersion,
+)
+from voice_api.models.common import new_id
+
+router = APIRouter(prefix="/api", tags=["publication"])
+Session = Depends(get_session)
+Operator = Depends(require_operator)
+
+
+class ExpectedRevision(BaseModel):
+    revision: int = Field(gt=0)
+
+
+async def sync_bindings(session: AsyncSession, version: AgentVersion) -> None:
+    config = AgentConfig.model_validate(version.config)
+    for binding in config.tool_bindings.values():
+        tool = await session.get(ToolVersion, binding.tool_version_id)
+        if tool is None or tool.tool_id != binding.tool_id or tool.status != "published":
+            raise HTTPException(422, "Binding requires matching published tool version")
+    if len(set(config.knowledge_base_ids)) != len(config.knowledge_base_ids):
+        raise HTTPException(422, "Knowledge base bindings must be unique")
+    for base_id in config.knowledge_base_ids:
+        if await session.get(KnowledgeBase, base_id) is None:
+            raise HTTPException(422, "Knowledge base not found")
+    previous = {
+        row.binding_key: row.config
+        for row in (
+            await session.scalars(
+                select(AgentVersionTool).where(AgentVersionTool.agent_version_id == version.id)
+            )
+        ).all()
+    }
+    await session.execute(
+        delete(AgentVersionTool).where(AgentVersionTool.agent_version_id == version.id)
+    )
+    await session.execute(
+        delete(AgentVersionKnowledge).where(AgentVersionKnowledge.agent_version_id == version.id)
+    )
+    session.add_all(
+        [
+            AgentVersionTool(
+                agent_version_id=version.id,
+                binding_key=key,
+                tool_version_id=value.tool_version_id,
+                config=previous.get(key, {}),
+            )
+            for key, value in config.tool_bindings.items()
+        ]
+    )
+    session.add_all(
+        [
+            AgentVersionKnowledge(agent_version_id=version.id, knowledge_base_id=base_id)
+            for base_id in config.knowledge_base_ids
+        ]
+    )
+    await session.flush()
+
+
+async def clone_version(session: AsyncSession, source_id: str, kind: str, revision: int) -> dict:
+    model, owner_model, owner_key = (
+        (AgentVersion, Agent, "agent_id") if kind == "agent" else (ToolVersion, Tool, "tool_id")
+    )
+    source = await session.get(model, source_id)
+    if source is None:
+        raise HTTPException(404, "Version not found")
+    owner_id = getattr(source, owner_key)
+    # Parent lock serializes version number allocation across different source versions.
+    await session.get(owner_model, owner_id, with_for_update=True)
+    source = await session.get(model, source_id, with_for_update=True, populate_existing=True)
+    if source.revision != revision:
+        raise HTTPException(409, "Source changed; reload before cloning")
+    latest = await session.scalar(
+        select(func.max(model.version)).where(getattr(model, owner_key) == owner_id)
+    )
+    clone = model(
+        id=new_id(),
+        **{owner_key: owner_id},
+        version=latest + 1,
+        revision=1,
+        status="draft",
+        parent_id=source.id,
+        config=deepcopy(source.config),
+    )
+    session.add(clone)
+    await session.flush()
+    if kind == "agent":
+        await sync_bindings(session, clone)
+        source_bindings = (
+            await session.scalars(
+                select(AgentVersionTool).where(AgentVersionTool.agent_version_id == source.id)
+            )
+        ).all()
+        for binding in source_bindings:
+            copied = await session.get(AgentVersionTool, (clone.id, binding.binding_key))
+            copied.config = deepcopy(binding.config)
+    await session.commit()
+    return {
+        "id": clone.id,
+        "version": clone.version,
+        "revision": clone.revision,
+        "status": clone.status,
+    }
+
+
+@router.post("/agent-versions/{version_id}/clone", status_code=201)
+async def clone_agent(
+    version_id: str, body: ExpectedRevision, session: AsyncSession = Session, _: None = Operator
+) -> dict:
+    return await clone_version(session, version_id, "agent", body.revision)
+
+
+@router.post("/tool-versions/{version_id}/clone", status_code=201)
+async def clone_tool(
+    version_id: str, body: ExpectedRevision, session: AsyncSession = Session, _: None = Operator
+) -> dict:
+    return await clone_version(session, version_id, "tool", body.revision)

@@ -174,6 +174,3 @@ class Sim7600Modem(TelephonyTransport):
                 ):
                     raise ModemCommandError(f"modem rejected {label}: {line}")
         raise ModemCommandError(f"timed out waiting for response to {label}")
-
-
-Sim7600Transport = Sim7600Modem
