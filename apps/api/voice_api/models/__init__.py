@@ -1,3 +1,5 @@
+from .analysis import Classification, ContactFact, ContextSummary
+from .artifacts import RunArtifact
 from .configuration import (
     Agent,
     AgentVersion,
@@ -20,7 +22,10 @@ __all__ = [
     "AgentVersionTool",
     "Call",
     "Callback",
+    "Classification",
     "Contact",
+    "ContactFact",
+    "ContextSummary",
     "ConversationMessage",
     "Exchange",
     "FlowNodeVisit",
@@ -31,6 +36,7 @@ __all__ = [
     "KnowledgeChunk",
     "KnowledgeSource",
     "Run",
+    "RunArtifact",
     "RuntimeEndpoint",
     "Tool",
     "ToolInvocation",

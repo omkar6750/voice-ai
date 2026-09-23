@@ -45,11 +45,52 @@ Second slice implemented:
 - Validation: 37 tests passed against isolated migrated PostgreSQL on port 55433;
   scoped Ruff checks passed; protected demo hash unchanged. No live calls made.
 
-Remaining: complete model/migration constraint parity, additional same-run operation
-relationships, remove duplicate legacy ownership once migrated, typed provider lifecycle
-and audio validation, complete configuration resolution/hash, live Pipecat evidence
-wiring, analysis/fact records, callback claims/recovery, mutable-KB contract unification,
-parallel receipt-race tests, artifact retention and runtime dispatch.
+Third slice implemented:
+
+Validation: 55 tests passed; Ruff and dashboard build pass; OpenAPI/TypeScript regenerate.
+Protected demo hash remains `3fe545de555fbb40bdfa187031b67484ebf87199`.
+
+- Migrations 0005-0010 preserve existing IDs/data, align ORM indexes and legacy nullable
+  timestamps, and enforce cross-run span/tool ownership. `alembic check` reports no new
+  upgrade operations. This is schema-diff evidence, not proof of every runtime guarantee.
+- Resolved snapshots retain exact tool definitions/bindings, KB identity/name, effective
+  logging/retention, application revision/dirty flag and dependency versions. Canonical
+  SHA-256 identifies configuration. Endpoint config is pinned at claim; claimed snapshots
+  cannot change. Historical snapshots lacking these facts remain unchanged.
+- Contact phones normalize explicit international format; timezone validates against IANA
+  data. `tzdata` is installed for Windows. Missing timezone remains unknown.
+- Callback scheduling is replay-safe; launch locks the row and pins one call. Automatic
+  launch respects off-by-default workspace settings, due window and one-attempt limit.
+  A polling scheduler is not running yet. Missed windows require manual launch.
+- Endpoint claims serialize concurrent workers, validate PCM rates and renew leases.
+  Expired work becomes uncertain and reserves the modem. Explicit reconciliation requires
+  operator confirmation that worker stopped and modem is idle; it never redials or invents
+  a successful outcome/hangup timestamp. Actual dispatch remains a separate process step.
+- Runtime executor fences before side effects, closes transport before terminal reporting,
+  delivers finalized evidence, and reports incomplete delivery. Fake drivers exercise the
+  full API/database path. SIM7600 driver wraps the tested session, but its configurable
+  Pipecat host remains to be implemented. No hardware/provider calls run in tests.
+- Append-only classification/summary/contact-fact evidence validates source messages,
+  operation outcomes and supersession. Summary-prefix application preserves newer messages
+  and complete tool pairs. Neither module is wired to live classifier cadence yet.
+- Artifact APIs register finalized WAV/debug files, inspect audio/checksum metadata, enforce
+  per-call logging policy and expire only registered files. Safe relative paths reject
+  traversal/links. Reusable integration media is excluded. Runtime registration is pending.
+- KB APIs share runtime contracts. Agent/request retrieval settings own weighted RRF,
+  thresholds/budget/timeout. Fractional SQL weight typing is fixed. Ingestion settings own
+  chunking, Markdown handling and 768-dimensional embeddings. Existing legacy KB retrieval
+  JSON is preserved but ignored by search. Explicit rebuild fences stale jobs and preserves
+  active chunks on failure; source deletion removes chunks. No KB history added.
+- Embedding adapter client lifetime is fixed. Request shape checked against the
+  [official Gemini embeddings API](https://ai.google.dev/api/embeddings).
+- OpenAPI export and frontend contract generation work; dashboard build remains valid.
+  Operator token is now memory-only. No dashboard redesign performed.
+
+Remaining: native configurable Pipecat host, provider OTel capture, reviewed action execution
+and live tool/flow links, cadence integration, automatic callback polling, recording/log
+registration from runtime, durable ingestion-job recovery, parallel WhatsApp receipt tests,
+and migration of compatibility readers before removing duplicate legacy Call columns.
+HTTP tool egress controls and full model-setting capability validation also remain pending.
 Do not treat schema fields or queued browser requests as working browser/cloud calling.
 
 Legacy published rows without publication timestamp are preserved. NOT VALID checks

@@ -26,6 +26,7 @@ build/
 # Node
 node_modules/
 apps/dashboard/dist/
+apps/dashboard/src/generated/
 apps/dashboard/vite.config.js
 apps/dashboard/vite.config.d.ts
 *.tsbuildinfo

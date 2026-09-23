@@ -19,21 +19,19 @@ class KnowledgeSource(Identity, Updated, Base):
     content: Mapped[str] = mapped_column(Text)
     source_path: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="pending")
-    build_id: Mapped[str | None] = mapped_column(String(36))
+    ingestion_token: Mapped[str | None] = mapped_column(String(36))
     error: Mapped[str | None] = mapped_column(Text)
 
 
 class KnowledgeChunk(Identity, Base):
     __tablename__ = "knowledge_chunks"
-    __table_args__ = (UniqueConstraint("source_id", "build_id", "ordinal"),)
-    source_id: Mapped[str] = mapped_column(
-        ForeignKey("knowledge_sources.id", ondelete="CASCADE"), index=True
-    )
+    __table_args__ = (UniqueConstraint("source_id", "ingestion_token", "ordinal"),)
+    source_id: Mapped[str] = mapped_column(ForeignKey("knowledge_sources.id", ondelete="CASCADE"))
     ordinal: Mapped[int]
     content: Mapped[str] = mapped_column(Text)
     embedding: Mapped[list[float]] = mapped_column(Vector(768))
     embedding_model: Mapped[str] = mapped_column(String(120))
-    build_id: Mapped[str] = mapped_column(String(36))
+    ingestion_token: Mapped[str] = mapped_column(String(36))
     metadata_json: Mapped[dict] = mapped_column(JSONB, default=dict)
 
 
@@ -41,5 +39,5 @@ class AgentVersionKnowledge(Base):
     __tablename__ = "agent_version_knowledge"
     agent_version_id: Mapped[str] = mapped_column(ForeignKey("agent_versions.id"), primary_key=True)
     knowledge_base_id: Mapped[str] = mapped_column(
-        ForeignKey("knowledge_bases.id"), primary_key=True
+        ForeignKey("knowledge_bases.id"), primary_key=True, index=True
     )

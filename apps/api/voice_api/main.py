@@ -12,11 +12,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_runtime.contracts import AgentConfig, ToolConfig, WorkspaceConfig
 
+from voice_api.analysis_routes import router as analysis_router
+from voice_api.artifact_routes import router as artifacts_router
 from voice_api.auth import require_operator
+from voice_api.call_requests import queue_call
+from voice_api.callbacks import router as callbacks_router
+from voice_api.contact_contracts import ContactBody
 from voice_api.db import get_session
 from voice_api.evidence_ingestion import router as ingestion_router
 from voice_api.evidence_read import related_evidence
 from voice_api.evidence_routes import router as evidence_router
+from voice_api.execution_routes import router as execution_router
 from voice_api.integrations.routes import router as integrations_router
 from voice_api.knowledge.routes import router as knowledge_router
 from voice_api.models import (
@@ -37,6 +43,7 @@ from voice_api.models import (
 from voice_api.models.common import new_id
 from voice_api.publication import ExpectedRevision, sync_bindings
 from voice_api.publication import router as publication_router
+from voice_api.reconciliation import router as reconciliation_router
 from voice_api.run_requests import router as run_requests_router
 
 app = FastAPI(title="Voice AI API", version="0.2.0")
@@ -46,6 +53,11 @@ app.include_router(publication_router)
 app.include_router(run_requests_router)
 app.include_router(evidence_router)
 app.include_router(ingestion_router)
+app.include_router(callbacks_router)
+app.include_router(execution_router)
+app.include_router(analysis_router)
+app.include_router(artifacts_router)
+app.include_router(reconciliation_router)
 Session = Depends(get_session)
 Operator = Depends(require_operator)
 
@@ -76,19 +88,11 @@ class CreateBody(BaseModel):
     config: dict
 
 
-class ContactBody(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
-    phone_number: str = Field(min_length=6, max_length=40)
-    timezone: str | None = None
-    business: str | None = None
-    source: str | None = None
-    language: str | None = None
-
-
 class StartCallBody(BaseModel):
     contact_id: str
     agent_version_id: str
     endpoint_id: str | None = None
+    logging_override: bool | None = None
 
 
 class BindToolBody(BaseModel):
@@ -435,33 +439,9 @@ async def create_contact(
 async def start_call(
     body: StartCallBody, session: AsyncSession = Session, _: None = Operator
 ) -> dict:
-    contact, version = (
-        await session.get(Contact, body.contact_id),
-        await session.get(AgentVersion, body.agent_version_id),
+    run, call = await queue_call(
+        session, body.contact_id, body.agent_version_id, body.endpoint_id, body.logging_override
     )
-    if contact is None or version is None or version.status != "published":
-        raise HTTPException(422, "Call requires contact and published agent")
-    run = Run(
-        id=new_id(),
-        status="queued",
-        agent_version_id=version.id,
-        endpoint_id=body.endpoint_id,
-        contact_id=contact.id,
-        resolved_config=version.config,
-        contact_snapshot={"id": contact.id, "name": contact.name, "timezone": contact.timezone},
-    )
-    call = Call(
-        id=new_id(),
-        correlation_id=new_id(),
-        run_id=run.id,
-        contact_id=contact.id,
-        agent_version_id=version.id,
-        target_snapshot=contact.phone_number,
-        status="queued",
-    )
-    session.add(run)
-    await session.flush()
-    session.add(call)
     await session.commit()
     return {"run_id": run.id, "call_id": call.id, "status": "queued"}
 

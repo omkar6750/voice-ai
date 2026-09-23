@@ -47,6 +47,15 @@ Published versions and bindings are guarded in PostgreSQL.
 It persists a queued Run without a telephone Call. Runtime dispatch and browser media
 transport remain pending. `/api/calls` likewise persists requests, without dialing yet.
 
+Execution now supports endpoint registration, fenced claim/lease renewal, safe callback
+launch and explicit restart reconciliation. The executor is tested with fake call drivers;
+its configurable native Pipecat host is not connected yet. Do not expect queued API calls
+to dial automatically. `demo_call.py` remains the working hardware reference.
+
+Run analysis and artifact APIs preserve finalized evidence and expire registered call files.
+Knowledge ingestion settings are separate from retrieval controls; source rebuild is explicit
+after changing chunk settings. Existing chunks remain usable until replacement succeeds.
+
 `POST /api/runs/{id}/evidence` accepts versioned finalized evidence batches with safe
 replay. Separate flow-visit and tool-result endpoints preserve repeated visits and
 delayed result consumption. The timeline joins messages, operation timings, visits and
@@ -57,6 +66,9 @@ completion adds final output and optional metrics. Unknown metrics stay null.
 For opt-in database tests, point `VOICE_TEST_DATABASE_URL` to an isolated migrated pgvector
 database, then run `uv run pytest tests/integration`. Use `VOICE_DATABASE_URL` when applying
 `uv run alembic upgrade head`. Never point these checks at production.
+
+Check model/migration parity with `uv run alembic check`. Generate frontend contracts with
+`uv run python scripts/export_openapi.py`, then `npm run generate` inside `apps/dashboard`.
 
 ## Project shape
 

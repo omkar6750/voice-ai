@@ -1,6 +1,6 @@
 # Working state
 
-Phase: RFC-0003 schema review implementation, integrity and evidence slices.
+Phase: RFC-0003 schema review implementation, execution safety and persistence slices.
 
 Completed: typed runtime configs, versioned agents/tools, integration vault/media catalog, mutable
 pgvector knowledge, evidence models/spool, compact dashboard, and schema migration.
@@ -13,11 +13,24 @@ Migration 0004 adds span-linked flow visits, ordered immutable tool results and 
 provider metrics. Finalized evidence now travels through spool, HTTP and PostgreSQL;
 timeline includes results and visits. This path is not wired to the live call runner yet.
 Credential validation/redaction, environment-backed vault loading and account-scoped
-receipt matching are covered. Full suite: 37 passed, two upstream deprecation warnings.
+receipt matching are covered. Current full suite: 55 passed, two upstream deprecation warnings.
 
-Next: finish model/constraint parity and provider-neutral ownership, resolved snapshots,
-analysis/callback safety, mutable-KB contract unification and modular runtime dispatch.
-See PLAN-0003 for explicit remaining work. Do not edit `scripts/demo_call.py`.
+New: migrations 0005-0010 add endpoint claim fencing, callback attempts, analysis history,
+artifact metadata, operational ingestion-token naming and execution ownership guards.
+Resolved snapshots include exact tool definitions, KB identities/names, logging/retention,
+application/dependency identity and a canonical hash. Claimed snapshots are immutable.
+Analysis and artifact APIs, explicit no-redial reconciliation, contact validation and
+shared mutable-KB contracts are implemented. Runtime executor uses a call driver and
+spool delivery; fake-driver API/database integration is tested. No native pipeline host
+has been connected to that executor, so API queueing still does not place real calls.
+
+Next: native configurable Pipecat host and reviewed action adapters, provider OTel capture,
+live tool/flow evidence, classifier/summarizer cadence, recording registration at cleanup,
+automatic-callback polling, and ingestion job recovery. Keep legacy Call ownership columns
+until compatibility readers migrate; DB guards now prevent disagreement with Run.
+Validation: Alembic reports no schema drift; scoped Ruff, OpenAPI/TypeScript generation
+and dashboard build pass. See PLAN-0003 for explicit remaining work.
+Do not edit `scripts/demo_call.py`.
 
 Validated demo is user-tested reference. Existing DB at 55432 is plain PostgreSQL;
 isolated pgvector validation uses port 55433. Provider keys remain local-only.

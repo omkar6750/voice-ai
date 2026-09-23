@@ -26,7 +26,7 @@ class Agent(Identity, Created, Base):
     __tablename__ = "agents"
     name: Mapped[str] = mapped_column(String(120), unique=True)
     active_version_id: Mapped[str | None] = mapped_column(
-        ForeignKey("agent_versions.id", use_alter=True, name="fk_agent_active_version")
+        ForeignKey("agent_versions.id", use_alter=True, name="fk_agent_active_version"), index=True
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -39,12 +39,12 @@ class AgentVersion(Identity, Created, Base):
         CheckConstraint("status IN ('draft','published')"),
         CheckConstraint("status != 'published' OR published_at IS NOT NULL"),
     )
-    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), index=True)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"))
     version: Mapped[int]
     revision: Mapped[int] = mapped_column(default=1)
     status: Mapped[str] = mapped_column(String(20), default="draft")
     config: Mapped[dict] = mapped_column(JSONB)
-    parent_id: Mapped[str | None] = mapped_column(ForeignKey("agent_versions.id"))
+    parent_id: Mapped[str | None] = mapped_column(ForeignKey("agent_versions.id"), index=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     note: Mapped[str | None] = mapped_column(Text)
 
@@ -63,12 +63,12 @@ class ToolVersion(Identity, Created, Base):
         CheckConstraint("status IN ('draft','published')"),
         CheckConstraint("status != 'published' OR published_at IS NOT NULL"),
     )
-    tool_id: Mapped[str] = mapped_column(ForeignKey("tools.id"), index=True)
+    tool_id: Mapped[str] = mapped_column(ForeignKey("tools.id"))
     version: Mapped[int]
     revision: Mapped[int] = mapped_column(default=1)
     status: Mapped[str] = mapped_column(String(20), default="draft")
     config: Mapped[dict] = mapped_column(JSONB)
-    parent_id: Mapped[str | None] = mapped_column(ForeignKey("tool_versions.id"))
+    parent_id: Mapped[str | None] = mapped_column(ForeignKey("tool_versions.id"), index=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 

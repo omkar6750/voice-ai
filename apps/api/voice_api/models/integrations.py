@@ -17,7 +17,7 @@ class IntegrationConnection(Identity, Updated, Base):
 class IntegrationSecret(Identity, Base):
     __tablename__ = "integration_secrets"
     __table_args__ = (UniqueConstraint("connection_id", "name"),)
-    connection_id: Mapped[str] = mapped_column(ForeignKey("integration_connections.id"), index=True)
+    connection_id: Mapped[str] = mapped_column(ForeignKey("integration_connections.id"))
     name: Mapped[str] = mapped_column(String(80))
     ciphertext: Mapped[str] = mapped_column(Text)
     key_id: Mapped[str] = mapped_column(String(80))
@@ -27,7 +27,7 @@ class IntegrationSecret(Identity, Base):
 class IntegrationMedia(Identity, Base):
     __tablename__ = "integration_media"
     __table_args__ = (UniqueConstraint("connection_id", "provider_media_id"),)
-    connection_id: Mapped[str] = mapped_column(ForeignKey("integration_connections.id"), index=True)
+    connection_id: Mapped[str] = mapped_column(ForeignKey("integration_connections.id"))
     provider_media_id: Mapped[str] = mapped_column(String(120))
     filename: Mapped[str] = mapped_column(String(255))
     mime_type: Mapped[str] = mapped_column(String(100))

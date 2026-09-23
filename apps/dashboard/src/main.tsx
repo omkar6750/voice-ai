@@ -25,7 +25,7 @@ const defaultWorkspace = JSON.stringify(
 );
 
 function App() {
-  const [token, setToken] = useState(sessionStorage.getItem("voice-operator-token") ?? "");
+  const [token, setToken] = useState("");
   const [tab, setTab] = useState<"runtime" | "knowledge" | "traces">("runtime");
   const [providers, setProviders] = useState<Provider[]>([]);
   const [workspace, setWorkspace] = useState(defaultWorkspace);
@@ -58,12 +58,13 @@ function App() {
   }
 
   useEffect(() => {
+    sessionStorage.removeItem("voice-operator-token");
     if (token) void loadRuntime();
   }, []);
 
   function saveToken(event: FormEvent) {
     event.preventDefault();
-    sessionStorage.setItem("voice-operator-token", token);
+    sessionStorage.removeItem("voice-operator-token");
     void loadRuntime();
   }
 

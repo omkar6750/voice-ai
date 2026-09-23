@@ -45,7 +45,9 @@ def clean_text(content: str) -> str:
     return content
 
 
-def chunk_markdown(content: str, size: int = 1600, overlap: int = 200) -> list[Chunk]:
+def chunk_markdown(
+    content: str, size: int = 1600, overlap: int = 200, *, markdown_aware: bool = True
+) -> list[Chunk]:
     if size <= 0 or not 0 <= overlap < size:
         raise ValueError("Require size > overlap >= 0")
     content = clean_text(content)
@@ -63,7 +65,7 @@ def chunk_markdown(content: str, size: int = 1600, overlap: int = 200) -> list[C
             elif token[0] == fence[0] and len(token) >= len(fence):
                 fence = None
         heading = re.match(r"^(#{1,6})\s+(.+?)\s*#*\s*$", line)
-        if heading and fence is None:
+        if markdown_aware and heading and fence is None:
             level = len(heading[1])
             headings = [*headings[: level - 1], heading[2]]
             if offset == 0:
