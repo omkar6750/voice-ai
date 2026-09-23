@@ -1,6 +1,10 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_ENV_FILES = (str(_REPO_ROOT / ".env"), ".env")
 
 
 class Settings(BaseSettings):
@@ -16,7 +20,11 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     integration_media_dir: str = "data/integration-media"
 
-    model_config = SettingsConfigDict(env_prefix="VOICE_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="VOICE_",
+        env_file=_ENV_FILES,
+        extra="ignore",
+    )
 
 
 @lru_cache
