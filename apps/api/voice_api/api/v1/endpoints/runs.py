@@ -63,7 +63,45 @@ async def request_browser_run(
     )
     session.add(run)
     await session.commit()
-    return {"run_id": run.id, "call_id": None, "status": run.status}
+@router.get("/runs")
+async def list_runs(session: AsyncSession = Session, _: None = Operator) -> dict:
+    rows = (await session.scalars(select(Run).order_by(Run.created_at.desc()))).all()
+    return {
+        "runs": [
+            {
+                "id": r.id,
+                "channel": r.channel,
+                "agent_version_id": r.agent_version_id,
+                "contact_id": r.contact_id,
+                "endpoint_id": r.endpoint_id,
+                "status": r.status,
+                "created_at": r.created_at,
+                "call_limits": r.resolved_config.get("call_limits") if r.resolved_config else None,
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.get("/runs/{run_id}")
+async def get_run(run_id: str, session: AsyncSession = Session, _: None = Operator) -> dict:
+    run = await session.get(Run, run_id)
+    if run is None:
+        raise HTTPException(404, "Run not found")
+    call = await session.scalar(select(Call).where(Call.run_id == run_id))
+    return {
+        "id": run.id,
+        "channel": run.channel,
+        "agent_version_id": run.agent_version_id,
+        "contact_id": run.contact_id,
+        "endpoint_id": run.endpoint_id,
+        "status": run.status,
+        "config_hash": run.config_hash,
+        "contact_snapshot": run.contact_snapshot,
+        "resolved_config": run.resolved_config,
+        "call_id": call.id if call else None,
+        "created_at": run.created_at,
+    }
 
 
 @router.get("/runs/{run_id}/timeline")

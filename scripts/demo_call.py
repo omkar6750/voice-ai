@@ -10,7 +10,6 @@ Features:
 import argparse
 import asyncio
 import json
-import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -67,7 +66,7 @@ BAUDRATE = 115200
 SAMPLE_RATE = 16000
 CHANNELS = 1
 FRAME_MS = 20
-MAX_CALL_SECONDS = int(os.getenv("VOICE_MAX_CALL_SECONDS", "300"))
+DEFAULT_MAX_CALL_SECONDS = 600
 AT_COMMAND_TIMEOUT = 5.0
 
 VAD_STOP_SECS = 0.8
@@ -1006,8 +1005,12 @@ def build_pipeline(transport: BaseTransport, stt, llm, tts, probe=False):
 
 
 async def run_call(
-    number: str, env_file: str = ".env", check: bool = False, probe: bool = False
-) -> None:
+    number: str,
+    env_file: str = ".env",
+    check: bool = False,
+    probe: bool = False,
+    max_duration_secs: int | None = None,
+) -> Path:
     settings = DemoProviderSettings(_env_file=env_file)
     secrets = [
         s
@@ -1092,10 +1095,14 @@ async def run_call(
 
     tools_list = _make_tools(settings, context, number, worker=worker, sales_state=sales_state)
 
+    effective_limit = (
+        max_duration_secs if max_duration_secs is not None else DEFAULT_MAX_CALL_SECONDS
+    )
+
     async def watch_call():
         started = asyncio.get_running_loop().time()
         try:
-            while asyncio.get_running_loop().time() - started < MAX_CALL_SECONDS:
+            while asyncio.get_running_loop().time() - started < effective_limit:
                 await asyncio.sleep(1)
                 try:
                     state = await modem.state()
@@ -1106,7 +1113,7 @@ async def run_call(
                     logger.info("CALL ended by remote")
                     break
             else:
-                logger.info("CALL reached {} second limit", MAX_CALL_SECONDS)
+                logger.info("CALL reached {} second limit", effective_limit)
         finally:
             await worker.cancel()
 
@@ -1147,7 +1154,7 @@ async def run_call(
         if check:
             await flow.initialize(build_node("greeting", tools_list))
             logger.info("CHECK passed: SDR persona, Jev engine, tools suite, flow initialization")
-            return
+            return directory
         await runner.add_workers(worker)
         await runner.run()
     finally:
@@ -1167,6 +1174,7 @@ async def run_call(
             logger.remove(sink)
     if failures:
         raise RuntimeError("Call test failed; see pipeline.log")
+    return directory
 
 
 def main() -> None:

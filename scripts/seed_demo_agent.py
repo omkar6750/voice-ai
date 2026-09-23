@@ -25,6 +25,7 @@ from voice_api.services.publication_service import sync_bindings
 from voice_api.services.vault_service import CredentialVault
 from voice_runtime.contracts import (
     AgentConfig,
+    CallLimits,
     FlowConfig,
     FlowNodeConfig,
     KnowledgeConfig,
@@ -409,6 +410,7 @@ async def seed() -> None:
             ),
             tts=TTSConfig(provider="sarvam", model="bulbul:v3", voice="ritu", language="en-IN"),
             vad=VADConfig(stop_secs=0.8, start_secs=0.1, confidence=0.5),
+            call_limits=CallLimits(max_duration_secs=600, idle_timeout_secs=60),
         )
 
         agent = await session.scalar(
@@ -420,32 +422,34 @@ async def seed() -> None:
             await session.flush()
 
         agent_ver = await session.scalar(
-            select(AgentVersion).where(
-                AgentVersion.agent_id == agent.id, AgentVersion.status == "published"
-            )
+            select(AgentVersion)
+            .where(AgentVersion.agent_id == agent.id, AgentVersion.status == "published")
+            .order_by(AgentVersion.version.desc())
         )
-        if agent_ver is None:
-            agent_ver = AgentVersion(
+        if agent_ver is None or agent_ver.config.get("call_limits", {}).get("max_duration_secs") != 600:
+            next_version = 1 if agent_ver is None else agent_ver.version + 1
+            new_ver = AgentVersion(
                 id=new_id(),
                 agent_id=agent.id,
-                version=1,
+                version=next_version,
                 revision=1,
                 status="draft",
                 config=agent_config.model_dump(mode="json"),
             )
-            session.add(agent_ver)
+            session.add(new_ver)
             await session.flush()
-            await sync_bindings(session, agent_ver)
-            agent_ver.status = "published"
-            agent_ver.published_at = datetime.now(UTC)
+            await sync_bindings(session, new_ver)
+            new_ver.status = "published"
+            new_ver.published_at = datetime.now(UTC)
             await session.flush()
-            agent.active_version_id = agent_ver.id
+            agent.active_version_id = new_ver.id
             await session.flush()
+            agent_ver = new_ver
         else:
             agent.active_version_id = agent_ver.id
             await session.flush()
 
-        print(f"  [+] Agent Published & Activated: {agent.id} (Version ID: {agent_ver.id})")
+        print(f"  [+] Agent Published & Activated: {agent.id} (Version {agent_ver.version} ID: {agent_ver.id})")
 
         # 6. Create RuntimeEndpoint for SIM7600 Hardware
         endpoint = await session.scalar(
@@ -470,13 +474,13 @@ async def seed() -> None:
 
         # 7. Create/Update Contact
         contact = await session.scalar(
-            select(Contact).where(Contact.phone_number == "+919876543210")
+            select(Contact).where(Contact.phone_number == "+917304058886")
         )
         if contact is None:
             contact = Contact(
                 id=new_id(),
                 name="Omkar",
-                phone_number="+919876543210",
+                phone_number="+917304058886",
                 business="AI & Voice Systems",
                 source="Inbound Web",
                 language="en-IN",
