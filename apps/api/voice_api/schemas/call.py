@@ -6,3 +6,5 @@ class StartCallBody(BaseModel):
     agent_version_id: str
     endpoint_id: str | None = None
     logging_override: bool | None = None
+    dispatch: bool = False
+
