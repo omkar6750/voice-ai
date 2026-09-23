@@ -130,7 +130,13 @@ class DurableSpool:
         if not records:
             return 0
         await ingestor.ingest(records)
-        await asyncio.to_thread(self._ack, offset)
+        # Cancellation must not leave a cursor-write thread racing the final drain.
+        acknowledgement = asyncio.create_task(asyncio.to_thread(self._ack, offset))
+        try:
+            await asyncio.shield(acknowledgement)
+        except asyncio.CancelledError:
+            await acknowledgement
+            raise
         return len(records)
 
     async def close(self):

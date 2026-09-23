@@ -13,7 +13,7 @@ Migration 0004 adds span-linked flow visits, ordered immutable tool results and 
 provider metrics. Finalized evidence now travels through spool, HTTP and PostgreSQL;
 timeline includes results and visits. This path is not wired to the live call runner yet.
 Credential validation/redaction, environment-backed vault loading and account-scoped
-receipt matching are covered. Current full suite: 55 passed, two upstream deprecation warnings.
+receipt matching are covered. Current full suite: 67 passed, two upstream deprecation warnings.
 
 New: migrations 0005-0010 add endpoint claim fencing, callback attempts, analysis history,
 artifact metadata, operational ingestion-token naming and execution ownership guards.
@@ -23,6 +23,12 @@ Analysis and artifact APIs, explicit no-redial reconciliation, contact validatio
 shared mutable-KB contracts are implemented. Runtime executor uses a call driver and
 spool delivery; fake-driver API/database integration is tested. No native pipeline host
 has been connected to that executor, so API queueing still does not place real calls.
+
+New: executor streams durable evidence during calls, separately monitors writer health,
+and stops execution on permanent ingestion/storage failure. Transient idempotent evidence
+requests retry; external calls/actions never do. Cancellation waits for acknowledgement
+writes before final drain. Spool creation/close failures now still reach driver cleanup
+and incomplete terminal reporting when transport release is confirmed.
 
 Next: native configurable Pipecat host and reviewed action adapters, provider OTel capture,
 live tool/flow evidence, classifier/summarizer cadence, recording registration at cleanup,

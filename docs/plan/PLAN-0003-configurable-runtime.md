@@ -95,3 +95,25 @@ Do not treat schema fields or queued browser requests as working browser/cloud c
 
 Legacy published rows without publication timestamp are preserved. NOT VALID checks
 enforce new writes without inventing old timestamps; audit/validate old rows explicitly.
+
+## Live evidence delivery slice
+
+Implemented continuous background upload from the durable spool while the driver runs.
+Independent health checks detect writer/quota failures even during blocked HTTP requests.
+Only replay-safe evidence retries transport errors, HTTP 429 and server errors; permanent
+rejections stop execution, retain unacknowledged records and mark evidence incomplete.
+No call or action retry policy changed.
+
+Cleanup stops the uploader before final drain. Cancellation waits for a cursor write
+already in progress, preventing a late acknowledgement from racing that drain. Spool
+creation/close failures no longer bypass driver cleanup or terminal failure reporting
+when transport release is confirmed. Uncertain cleanup still reserves the endpoint.
+
+Validation: 67 tests pass against isolated PostgreSQL, scoped Ruff and diff checks pass,
+protected demo hash unchanged. Added 12 offline cases covering pre-hangup upload,
+cancellation, transient replay, permanent rejection, storage failures and cursor races.
+Older integration assertions now count only their own run's rows, allowing existing
+validation data without deleting it. Two upstream deprecation warnings remain.
+
+Native Pipecat host, actual provider/tool capture, recording registration and the other
+remaining items above are still pending. This slice does not place live calls.

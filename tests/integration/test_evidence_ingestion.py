@@ -93,8 +93,20 @@ async def test_spool_delivery_and_replay(client, database, tmp_path):
         assert await spool.deliver_once(ingestor) == 0
         # Simulate API commit followed by lost client acknowledgement.
         await ingestor.ingest(records)
-        assert await database.scalar(select(func.count()).select_from(ConversationMessage)) == 2
-        assert await database.scalar(select(func.count()).select_from(TraceSpan)) == 1
+        assert (
+            await database.scalar(
+                select(func.count())
+                .select_from(ConversationMessage)
+                .where(ConversationMessage.run_id == run_id)
+            )
+            == 2
+        )
+        assert (
+            await database.scalar(
+                select(func.count()).select_from(TraceSpan).where(TraceSpan.run_id == run_id)
+            )
+            == 1
+        )
         timeline = (await client.get(f"/api/runs/{run_id}/timeline")).json()
         assert timeline["messages"][0]["content"] == "Hello"
         assert timeline["messages"][0]["interrupted"] is True
@@ -127,6 +139,11 @@ async def test_batch_failure_rolls_back_and_does_not_ack(client, database, tmp_p
         with pytest.raises(RuntimeError, match="unacknowledged"):
             await spool.deliver_once(ApiEvidenceIngestor(client, run_id, "test-only"))
         assert not spool.cursor_path.exists()
-        assert await database.scalar(select(func.count()).select_from(Exchange)) == 0
+        assert (
+            await database.scalar(
+                select(func.count()).select_from(Exchange).where(Exchange.run_id == run_id)
+            )
+            == 0
+        )
     finally:
         await spool.close()

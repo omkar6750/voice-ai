@@ -5,6 +5,14 @@ import httpx
 from voice_runtime.contracts.evidence import EvidenceBatch
 
 
+class EvidenceDeliveryError(RuntimeError):
+    """Sanitized failure; only transient, replay-safe ingestion may retry."""
+
+    def __init__(self, *, retryable: bool):
+        super().__init__("Evidence delivery failed; spool remains unacknowledged")
+        self.retryable = retryable
+
+
 class ApiEvidenceIngestor:
     def __init__(self, client: httpx.AsyncClient, run_id: str, operator_token: str):
         self._client = client
@@ -26,5 +34,11 @@ class ApiEvidenceIngestor:
             response.raise_for_status()
             if response.json().get("accepted") != len(records):
                 raise ValueError("Incomplete acknowledgement")
+        except httpx.HTTPStatusError as exc:
+            raise EvidenceDeliveryError(
+                retryable=exc.response.status_code == 429 or exc.response.status_code >= 500
+            ) from None
+        except httpx.TransportError:
+            raise EvidenceDeliveryError(retryable=True) from None
         except (httpx.HTTPError, ValueError):
-            raise RuntimeError("Evidence delivery failed; spool remains unacknowledged") from None
+            raise EvidenceDeliveryError(retryable=False) from None

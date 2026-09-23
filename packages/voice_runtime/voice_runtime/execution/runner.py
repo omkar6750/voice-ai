@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import httpx
 
+from voice_runtime.execution.delivery import stream_evidence
 from voice_runtime.execution.evidence_client import ApiEvidenceIngestor
 from voice_runtime.execution.exchange import ExchangeTracker
 from voice_runtime.execution.spool import DurableSpool
@@ -52,11 +53,11 @@ async def execute_call(
         raise RuntimeError("Execution already started; refusing repeat dial")
     # Mark dispatch BEFORE external work. A lost response must never lead to redial.
     await post("progress", {"token": token, "status": "running"})
-    spool = DurableSpool(spool_path)
-    tracker = ExchangeTracker(run_id, spool, secrets=(*secrets, operator_token))
     outcome, final_state, error = "failed", None, None
     released, incomplete = False, False
-    call_task = heartbeat_task = None
+    call_task = heartbeat_task = delivery_task = None
+    spool = None
+    ingestor = ApiEvidenceIngestor(client, run_id, operator_token)
 
     async def heartbeat():
         while True:
@@ -71,16 +72,24 @@ async def execute_call(
 
     try:
         heartbeat_task = asyncio.create_task(heartbeat())
+        spool = DurableSpool(spool_path)
+        tracker = ExchangeTracker(run_id, spool, secrets=(*secrets, operator_token))
+        delivery_task = asyncio.create_task(stream_evidence(spool, ingestor))
         call_task = asyncio.create_task(work())
         done, _ = await asyncio.wait(
-            (call_task, heartbeat_task), return_when=asyncio.FIRST_COMPLETED
+            (call_task, heartbeat_task, delivery_task), return_when=asyncio.FIRST_COMPLETED
         )
         if heartbeat_task in done:
             await heartbeat_task
+        if delivery_task in done:
+            await delivery_task
         final_state = await call_task
         outcome = "completed"
     except Exception:
         error = "Call execution failed; inspect sanitized evidence"
+    except asyncio.CancelledError:
+        error = "Call execution cancelled"
+        raise
     finally:
         if call_task and not call_task.done():
             call_task.cancel()
@@ -92,18 +101,31 @@ async def execute_call(
             released = True
         except Exception:
             error = "Transport cleanup uncertain; endpoint remains reserved"
+        # Stop and await uploader before final drain: only one cursor owner at a time.
+        if delivery_task:
+            delivery_task.cancel()
+            delivery_result = await asyncio.gather(delivery_task, return_exceptions=True)
+            if isinstance(delivery_result[0], Exception):
+                incomplete = True
+                outcome, error = "failed", "Evidence delivery failed; durable spool requires review"
         try:
+            if spool is None:
+                raise RuntimeError("Evidence spool was not created")
             async with asyncio.timeout(15):
                 await spool.flush()
-                ingestor = ApiEvidenceIngestor(client, run_id, operator_token)
-                while await spool.deliver_once(ingestor):
-                    pass
+                if not incomplete:
+                    while await spool.deliver_once(ingestor):
+                        pass
         except Exception:
             incomplete = True
             outcome, error = "failed", "Evidence incomplete; durable spool requires replay"
         finally:
             try:
-                await spool.close()
+                if spool is not None:
+                    await spool.close()
+            except Exception:
+                incomplete = True
+                outcome, error = "failed", "Evidence storage failed; durable spool requires review"
             finally:
                 if heartbeat_task:
                     heartbeat_task.cancel()

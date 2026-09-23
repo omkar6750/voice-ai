@@ -161,7 +161,12 @@ async def test_revisited_node_and_interrupted_span(client, database, run_id):
     ).status_code == 409
     second = {**first, "id": new_id(), "span_id": new_id(), "sequence": 2}
     assert (await client.post(path, json=second)).status_code == 201
-    assert await database.scalar(select(func.count()).select_from(FlowNodeVisit)) == 2
+    assert (
+        await database.scalar(
+            select(func.count()).select_from(FlowNodeVisit).where(FlowNodeVisit.run_id == run_id)
+        )
+        == 2
+    )
     span = await database.get(TraceSpan, first["span_id"])
     assert span.status == "interrupted" and span.duration_ms == 999
     timeline = (await client.get(f"/api/runs/{run_id}/timeline")).json()
