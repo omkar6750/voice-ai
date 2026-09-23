@@ -7,4 +7,3 @@ class StartCallBody(BaseModel):
     endpoint_id: str | None = None
     logging_override: bool | None = None
     dispatch: bool = False
-

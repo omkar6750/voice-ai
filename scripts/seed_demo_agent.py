@@ -426,7 +426,10 @@ async def seed() -> None:
             .where(AgentVersion.agent_id == agent.id, AgentVersion.status == "published")
             .order_by(AgentVersion.version.desc())
         )
-        if agent_ver is None or agent_ver.config.get("call_limits", {}).get("max_duration_secs") != 600:
+        if (
+            agent_ver is None
+            or agent_ver.config.get("call_limits", {}).get("max_duration_secs") != 600
+        ):
             next_version = 1 if agent_ver is None else agent_ver.version + 1
             new_ver = AgentVersion(
                 id=new_id(),
@@ -449,7 +452,9 @@ async def seed() -> None:
             agent.active_version_id = agent_ver.id
             await session.flush()
 
-        print(f"  [+] Agent Published & Activated: {agent.id} (Version {agent_ver.version} ID: {agent_ver.id})")
+        print(
+            f"  [+] Agent Published & Activated: {agent.id} (Version {agent_ver.version} ID: {agent_ver.id})"
+        )
 
         # 6. Create RuntimeEndpoint for SIM7600 Hardware
         endpoint = await session.scalar(

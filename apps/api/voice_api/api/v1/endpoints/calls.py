@@ -23,20 +23,28 @@ async def _run_live_call_background(phone_number: str, run_id: str, call_id: str
 
     logger.info("Initiating live hardware call for {} to {}...", call_id, phone_number)
 
-    # 1. Fetch dynamic max_duration limit from the DB Run resolved_config
+    # 1. Fetch dynamic resolved_config and max_duration limit from the DB Run
     max_duration = 600
+    resolved_config = None
     try:
         async with SessionFactory() as session:
             run = await session.get(Run, run_id)
             if run and run.resolved_config:
-                max_duration = run.resolved_config.get("call_limits", {}).get("max_duration_secs", 600)
+                resolved_config = run.resolved_config
+                max_duration = resolved_config.get("call_limits", {}).get("max_duration_secs", 600)
     except Exception as exc:
-        logger.warning("Could not read call limit from run {}: {}", run_id, exc)
+        logger.warning("Could not read resolved config from run {}: {}", run_id, exc)
 
     recording_dir = None
     try:
-        recording_dir = await run_call(phone_number, max_duration_secs=max_duration)
-        logger.info("Live hardware call {} completed successfully (directory: {})", call_id, recording_dir)
+        recording_dir = await run_call(
+            phone_number,
+            max_duration_secs=max_duration,
+            agent_config=resolved_config,
+        )
+        logger.info(
+            "Live hardware call {} completed successfully (directory: {})", call_id, recording_dir
+        )
         status = "completed"
     except Exception as exc:
         logger.error("Live hardware call {} failed: {}", call_id, exc)
@@ -168,4 +176,3 @@ async def dispatch_queued_call(
         "status": "calling",
         "target": call.target_snapshot,
     }
-

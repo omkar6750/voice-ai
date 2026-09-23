@@ -63,6 +63,8 @@ async def request_browser_run(
     )
     session.add(run)
     await session.commit()
+
+
 @router.get("/runs")
 async def list_runs(session: AsyncSession = Session, _: None = Operator) -> dict:
     rows = (await session.scalars(select(Run).order_by(Run.created_at.desc()))).all()

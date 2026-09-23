@@ -425,14 +425,38 @@ def _make_tools(
     number: str,
     worker: PipelineWorker | None = None,
     sales_state: dict[str, Any] | None = None,
+    node_prompts: dict[str, str] | None = None,
+    node_tools_map: dict[str, list[str]] | None = None,
+    valid_nodes: tuple[str, ...] | list[str] | None = None,
 ) -> list[FlowsFunctionSchema]:
     """Build all interactive tools with closed-over state and dependencies."""
     if sales_state is None:
         sales_state = {}
 
+    active_prompts = node_prompts if node_prompts is not None else NODE_PROMPTS
+    active_valid_nodes = tuple(valid_nodes) if valid_nodes is not None else VALID_NODES
+    active_tools_map = node_tools_map if node_tools_map is not None else NODE_TOOLS_MAP
+
     wa_number = "".join(c for c in number if c.isdigit())
     _bg_tasks: set[asyncio.Task[Any]] = set()
     tools_list: list[FlowsFunctionSchema] = []
+
+    def _local_build_node(name: str) -> NodeConfig:
+        fallback_key = (
+            "greeting"
+            if "greeting" in active_prompts
+            else (active_valid_nodes[0] if active_valid_nodes else name)
+        )
+        prompt = active_prompts.get(name, active_prompts.get(fallback_key, ""))
+        allowed = active_tools_map.get(name, [t.name for t in tools_list])
+        functions = [t for t in tools_list if t.name in allowed]
+        return NodeConfig(
+            name=name,
+            role_message=prompt,
+            task_messages=[],
+            functions=functions,
+            respond_immediately=True,
+        )
 
     PRUNABLE_NODES = {"greeting"}
 
@@ -526,8 +550,8 @@ def _make_tools(
         flow_manager: FlowManager,
     ) -> tuple[dict, NodeConfig | None]:
         node = args.get("node")
-        if not isinstance(node, str) or node not in VALID_NODES:
-            return {"error": f"node must be one of {VALID_NODES}"}, None
+        if not isinstance(node, str) or node not in active_valid_nodes:
+            return {"error": f"node must be one of {active_valid_nodes}"}, None
         logger.info("FLOW transition {} -> {}", flow_manager.current_node, node)
 
         # Trigger Jev classification checkpoint out-of-band for CRM/metrics
@@ -556,7 +580,7 @@ def _make_tools(
         # Prune context messages to keep token usage low
         context.set_messages(prune_context_messages(context.get_messages(), target_node=node))
 
-        return {}, build_node(node, tools_list)
+        return {}, _local_build_node(node)
 
     # --------------------------------------------------------------------------
     # Tool: tool/classify-jev (TypeSafe AI Jev System One)
@@ -828,8 +852,8 @@ def _make_tools(
         [
             FlowsFunctionSchema(
                 name="change_node",
-                description="[tool/change-node] Switch to discovery, qualification, hot_pricing, warm_nurture, diplomatic_exit, callback_scheduling, or closing.",
-                properties={"node": {"type": "string", "enum": list(VALID_NODES)}},
+                description=f"[tool/change-node] Switch conversation stage to: {', '.join(active_valid_nodes)}.",
+                properties={"node": {"type": "string", "enum": list(active_valid_nodes)}},
                 required=["node"],
                 handler=handle_change_node,
             ),
@@ -1010,6 +1034,7 @@ async def run_call(
     check: bool = False,
     probe: bool = False,
     max_duration_secs: int | None = None,
+    agent_config: dict[str, Any] | None = None,
 ) -> Path:
     settings = DemoProviderSettings(_env_file=env_file)
     secrets = [
@@ -1070,6 +1095,30 @@ async def run_call(
         "jev_classification": None,
     }
 
+    active_prompts = dict(NODE_PROMPTS)
+    active_valid_nodes = list(VALID_NODES)
+    active_tools_map = dict(NODE_TOOLS_MAP)
+    initial_node = "greeting"
+
+    if agent_config:
+        flow_cfg = agent_config.get("flow") or {}
+        nodes = flow_cfg.get("nodes") or []
+        if nodes:
+            active_prompts = {n["id"]: n.get("prompt", "") for n in nodes if "id" in n}
+            active_valid_nodes = [n["id"] for n in nodes if "id" in n]
+            active_tools_map = {
+                n["id"]: n.get("tool_bindings", ["change_node", "end_call"])
+                for n in nodes
+                if "id" in n
+            }
+            initial_node = flow_cfg.get(
+                "initial_node", active_valid_nodes[0] if active_valid_nodes else "greeting"
+            )
+        if max_duration_secs is None:
+            max_duration_secs = agent_config.get("call_limits", {}).get("max_duration_secs")
+        if agent_config.get("system_prompt"):
+            context.messages = [{"role": "system", "content": agent_config["system_prompt"]}]
+
     worker = PipelineWorker(
         pipeline,
         observers=[capture],
@@ -1093,7 +1142,33 @@ async def run_call(
     call_attempted = False
     failures = []
 
-    tools_list = _make_tools(settings, context, number, worker=worker, sales_state=sales_state)
+    tools_list = _make_tools(
+        settings,
+        context,
+        number,
+        worker=worker,
+        sales_state=sales_state,
+        node_prompts=active_prompts,
+        node_tools_map=active_tools_map,
+        valid_nodes=active_valid_nodes,
+    )
+
+    def _initial_node_config() -> NodeConfig:
+        fallback_key = (
+            "greeting"
+            if "greeting" in active_prompts
+            else (active_valid_nodes[0] if active_valid_nodes else initial_node)
+        )
+        prompt = active_prompts.get(initial_node, active_prompts.get(fallback_key, ""))
+        allowed = active_tools_map.get(initial_node, [t.name for t in tools_list])
+        functions = [t for t in tools_list if t.name in allowed]
+        return NodeConfig(
+            name=initial_node,
+            role_message=prompt,
+            task_messages=[],
+            functions=functions,
+            respond_immediately=True,
+        )
 
     effective_limit = (
         max_duration_secs if max_duration_secs is not None else DEFAULT_MAX_CALL_SECONDS
@@ -1129,13 +1204,13 @@ async def run_call(
                     await worker.cancel()
 
                 monitor = asyncio.create_task(finish_probe())
-                await flow.initialize(build_node("greeting", tools_list))
+                await flow.initialize(_initial_node_config())
                 return
             call_attempted = True
             await modem.ensure_pcm_format(SAMPLE_RATE)
             await session.start_call(number)
-            logger.info("CALL active; starting greeting")
-            await flow.initialize(build_node("greeting", tools_list))
+            logger.info("CALL active; starting {}", initial_node)
+            await flow.initialize(_initial_node_config())
             monitor = asyncio.create_task(watch_call())
 
         except Exception as exc:
@@ -1150,9 +1225,9 @@ async def run_call(
         await worker.cancel()
 
     try:
-        build_node("greeting", tools_list)["functions"][0].to_function_schema()
+        _initial_node_config()["functions"][0].to_function_schema()
         if check:
-            await flow.initialize(build_node("greeting", tools_list))
+            await flow.initialize(_initial_node_config())
             logger.info("CHECK passed: SDR persona, Jev engine, tools suite, flow initialization")
             return directory
         await runner.add_workers(worker)
