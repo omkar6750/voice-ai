@@ -134,9 +134,9 @@ The agent was cutting off the caller mid-sentence when the caller paused to thin
 #### Solution
 - Reverted to standard, robust **Silero VAD Turn Management**:
   ```python
-  VAD_STOP_SECS = 0.8     # 800ms natural conversational pause buffer
-  VAD_START_SECS = 0.1    # 100ms voice onset detection
-  VAD_CONFIDENCE = 0.5    # Silero confidence threshold
+  VAD_STOP_SECS = 0.8  # 800ms natural conversational pause buffer
+  VAD_START_SECS = 0.1  # 100ms voice onset detection
+  VAD_CONFIDENCE = 0.5  # Silero confidence threshold
   ```
 - Removed custom `UserTurnStrategies` overrides to re-enable instant Silero VAD barge-in: when user voice energy is detected, bot playback halts within ~50ms.
 
