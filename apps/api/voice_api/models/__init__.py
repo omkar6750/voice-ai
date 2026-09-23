@@ -11,6 +11,7 @@ from .configuration import (
 from .evidence import Call, Callback, ConversationMessage, Exchange, Run, ToolInvocation, TraceSpan
 from .integrations import IntegrationConnection, IntegrationMedia, IntegrationSecret
 from .knowledge import AgentVersionKnowledge, KnowledgeBase, KnowledgeChunk, KnowledgeSource
+from .operations import FlowNodeVisit, ToolInvocationResult
 
 __all__ = [
     "Agent",
@@ -22,6 +23,7 @@ __all__ = [
     "Contact",
     "ConversationMessage",
     "Exchange",
+    "FlowNodeVisit",
     "IntegrationConnection",
     "IntegrationMedia",
     "IntegrationSecret",
@@ -32,6 +34,7 @@ __all__ = [
     "RuntimeEndpoint",
     "Tool",
     "ToolInvocation",
+    "ToolInvocationResult",
     "ToolVersion",
     "TraceSpan",
     "WorkspaceSettings",

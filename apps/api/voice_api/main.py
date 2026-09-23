@@ -4,14 +4,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_runtime.contracts import AgentConfig, ToolConfig, WorkspaceConfig
 
 from voice_api.auth import require_operator
 from voice_api.db import get_session
+from voice_api.evidence_ingestion import router as ingestion_router
+from voice_api.evidence_read import related_evidence
+from voice_api.evidence_routes import router as evidence_router
 from voice_api.integrations.routes import router as integrations_router
 from voice_api.knowledge.routes import router as knowledge_router
 from voice_api.models import (
@@ -30,12 +35,34 @@ from voice_api.models import (
     WorkspaceSettings,
 )
 from voice_api.models.common import new_id
+from voice_api.publication import ExpectedRevision, sync_bindings
+from voice_api.publication import router as publication_router
+from voice_api.run_requests import router as run_requests_router
 
 app = FastAPI(title="Voice AI API", version="0.2.0")
 app.include_router(integrations_router)
 app.include_router(knowledge_router)
+app.include_router(publication_router)
+app.include_router(run_requests_router)
+app.include_router(evidence_router)
+app.include_router(ingestion_router)
 Session = Depends(get_session)
 Operator = Depends(require_operator)
+
+
+@app.exception_handler(RequestValidationError)
+@app.exception_handler(ValidationError)
+async def validation_error(_request, error):
+    # Validation responses must not echo write-only credential inputs.
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": [
+                {"loc": list(item["loc"]), "type": item["type"], "msg": item["msg"]}
+                for item in error.errors()
+            ]
+        },
+    )
 
 
 class RevisionBody(BaseModel):
@@ -65,6 +92,7 @@ class StartCallBody(BaseModel):
 
 
 class BindToolBody(BaseModel):
+    revision: int = Field(gt=0)
     binding_key: str = Field(min_length=1, max_length=80, pattern="^[a-z][a-z0-9_]*$")
     tool_version_id: str
     config: dict = Field(default_factory=dict)
@@ -168,7 +196,11 @@ async def create_agent(
     config = AgentConfig.model_validate(body.config).model_dump(mode="json")
     agent = Agent(id=new_id(), name=body.name)
     version = AgentVersion(id=new_id(), agent_id=agent.id, version=1, config=config)
-    session.add_all([agent, version])
+    session.add(agent)
+    await session.flush()
+    session.add(version)
+    await session.flush()
+    await sync_bindings(session, version)
     await session.commit()
     return {"agent_id": agent.id, "version_id": version.id}
 
@@ -188,7 +220,9 @@ async def create_tool(
         raise HTTPException(422, "Tool name must match configuration name")
     tool = Tool(id=new_id(), name=body.name)
     version = ToolVersion(id=new_id(), tool_id=tool.id, version=1, config=config)
-    session.add_all([tool, version])
+    session.add(tool)
+    await session.flush()
+    session.add(version)
     await session.commit()
     return {"tool_id": tool.id, "version_id": version.id}
 
@@ -233,7 +267,7 @@ async def update_tool_version(
 
 @app.post("/api/tool-versions/{version_id}/publish")
 async def publish_tool(
-    version_id: str, session: AsyncSession = Session, _: None = Operator
+    version_id: str, body: ExpectedRevision, session: AsyncSession = Session, _: None = Operator
 ) -> dict:
     row = await session.get(ToolVersion, version_id, with_for_update=True)
     if row is None:
@@ -241,6 +275,8 @@ async def publish_tool(
     if row.status != "draft":
         raise HTTPException(409, "Version is already published")
     ToolConfig.model_validate(row.config)
+    if row.revision != body.revision:
+        raise HTTPException(409, "Draft changed; reload before publishing")
     row.status, row.published_at = "published", datetime.now(UTC)
     await session.commit()
     return {"id": row.id, "status": row.status}
@@ -256,6 +292,8 @@ async def bind_tool(
         raise HTTPException(422, "Binding requires draft agent and published tool version")
     if agent_version.status != "draft":
         raise HTTPException(409, "Published agent versions are immutable")
+    if agent_version.revision != body.revision:
+        raise HTTPException(409, "Draft changed; reload before binding")
     row = await session.get(AgentVersionTool, (version_id, body.binding_key))
     if row is None:
         row = AgentVersionTool(
@@ -275,7 +313,11 @@ async def bind_tool(
     agent_version.config = config
     agent_version.revision += 1
     await session.commit()
-    return {"binding_key": row.binding_key, "tool_version_id": row.tool_version_id}
+    return {
+        "binding_key": row.binding_key,
+        "tool_version_id": row.tool_version_id,
+        "revision": agent_version.revision,
+    }
 
 
 @app.get("/api/agents/{agent_id}/versions")
@@ -318,13 +360,14 @@ async def update_agent_version(
     row.config = AgentConfig.model_validate(body.config).model_dump(mode="json")
     row.note = body.note
     row.revision += 1
+    await sync_bindings(session, row)
     await session.commit()
     return {"id": row.id, "revision": row.revision, "config": row.config}
 
 
 @app.post("/api/agent-versions/{version_id}/publish")
 async def publish_agent(
-    version_id: str, session: AsyncSession = Session, _: None = Operator
+    version_id: str, body: ExpectedRevision, session: AsyncSession = Session, _: None = Operator
 ) -> dict:
     row = await session.get(AgentVersion, version_id, with_for_update=True)
     if row is None:
@@ -332,6 +375,8 @@ async def publish_agent(
     if row.status != "draft":
         raise HTTPException(409, "Version is already published")
     AgentConfig.model_validate(row.config)
+    if row.revision != body.revision:
+        raise HTTPException(409, "Draft changed; reload before publishing")
     await validate_agent_bindings(session, row)
     row.status = "published"
     row.published_at = datetime.now(UTC)
@@ -401,18 +446,22 @@ async def start_call(
         status="queued",
         agent_version_id=version.id,
         endpoint_id=body.endpoint_id,
+        contact_id=contact.id,
         resolved_config=version.config,
         contact_snapshot={"id": contact.id, "name": contact.name, "timezone": contact.timezone},
     )
     call = Call(
         id=new_id(),
+        correlation_id=new_id(),
         run_id=run.id,
         contact_id=contact.id,
         agent_version_id=version.id,
         target_snapshot=contact.phone_number,
         status="queued",
     )
-    session.add_all([run, call])
+    session.add(run)
+    await session.flush()
+    session.add(call)
     await session.commit()
     return {"run_id": run.id, "call_id": call.id, "status": "queued"}
 
@@ -425,9 +474,7 @@ async def timeline(run_id: str, session: AsyncSession = Session, _: None = Opera
     call = await session.scalar(select(Call).where(Call.run_id == run_id))
     exchanges = (
         await session.scalars(
-            select(Exchange).where(Exchange.call_id == call.id).order_by(Exchange.sequence)
-            if call
-            else select(Exchange).where(False)
+            select(Exchange).where(Exchange.run_id == run_id).order_by(Exchange.sequence)
         )
     ).all()
     ids = [x.id for x in exchanges]
@@ -453,6 +500,7 @@ async def timeline(run_id: str, session: AsyncSession = Session, _: None = Opera
         )
     ).all()
     return {
+        **await related_evidence(session, run_id),
         "run": {"id": run.id, "status": run.status},
         "call": None if call is None else {"id": call.id, "status": call.status},
         "exchanges": [
@@ -480,6 +528,20 @@ async def timeline(run_id: str, session: AsyncSession = Session, _: None = Opera
                 "started_at": x.started_at,
                 "ended_at": x.ended_at,
                 "attributes": x.attributes,
+                "provider": x.provider,
+                "model": x.model,
+                "otel_trace_id": x.otel_trace_id,
+                "otel_span_id": x.otel_span_id,
+                "duration_ms": x.duration_ms,
+                "ttfb_ms": x.ttfb_ms,
+                "ttfa_ms": x.ttfa_ms,
+                "ttfat_ms": x.ttfat_ms,
+                "prompt_tokens": x.prompt_tokens,
+                "completion_tokens": x.completion_tokens,
+                "reasoning_tokens": x.reasoning_tokens,
+                "audio_seconds": x.audio_seconds,
+                "input": x.input_payload,
+                "output": x.output_payload,
             }
             for x in spans
         ],

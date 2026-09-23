@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, ForeignKeyConstraint, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .common import JSONB, Base, Created, Identity, now
@@ -8,6 +8,8 @@ from .common import JSONB, Base, Created, Identity, now
 
 class Run(Identity, Created, Base):
     __tablename__ = "runs"
+    channel: Mapped[str] = mapped_column(String(20), default="phone", server_default="phone")
+    contact_id: Mapped[str | None] = mapped_column(ForeignKey("contacts.id"), index=True)
     status: Mapped[str] = mapped_column(String(30), default="queued", index=True)
     agent_version_id: Mapped[str] = mapped_column(ForeignKey("agent_versions.id"), index=True)
     endpoint_id: Mapped[str | None] = mapped_column(ForeignKey("runtime_endpoints.id"), index=True)
@@ -21,6 +23,10 @@ class Run(Identity, Created, Base):
 class Call(Identity, Created, Base):
     __tablename__ = "calls"
     __table_args__ = (UniqueConstraint("run_id"),)
+    provider: Mapped[str] = mapped_column(String(40), default="sim7600", server_default="sim7600")
+    provider_call_id: Mapped[str | None] = mapped_column(String(255))
+    correlation_id: Mapped[str | None] = mapped_column(String(36), unique=True)
+    provider_metadata: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
     run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.id"), index=True)
     contact_id: Mapped[str] = mapped_column(ForeignKey("contacts.id"), index=True)
     agent_version_id: Mapped[str] = mapped_column(ForeignKey("agent_versions.id"), index=True)
@@ -35,8 +41,16 @@ class Call(Identity, Created, Base):
 
 class Exchange(Identity, Created, Base):
     __tablename__ = "exchanges"
-    __table_args__ = (UniqueConstraint("call_id", "sequence"),)
-    call_id: Mapped[str] = mapped_column(ForeignKey("calls.id", ondelete="CASCADE"), index=True)
+    __table_args__ = (
+        UniqueConstraint("call_id", "sequence"),
+        UniqueConstraint("run_id", "sequence"),
+        UniqueConstraint("id", "run_id"),
+    )
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    # Legacy linkage is preserved; new evidence uses run_id (ADR-0007).
+    call_id: Mapped[str | None] = mapped_column(
+        ForeignKey("calls.id", ondelete="CASCADE"), index=True
+    )
     sequence: Mapped[int]
     origin: Mapped[str] = mapped_column(String(20))
     status: Mapped[str] = mapped_column(String(30), default="active")
@@ -45,7 +59,16 @@ class Exchange(Identity, Created, Base):
 
 class ConversationMessage(Identity, Created, Base):
     __tablename__ = "conversation_messages"
-    __table_args__ = (UniqueConstraint("exchange_id", "sequence"),)
+    __table_args__ = (
+        UniqueConstraint("exchange_id", "sequence"),
+        ForeignKeyConstraint(
+            ["exchange_id", "run_id"],
+            ["exchanges.id", "exchanges.run_id"],
+            ondelete="CASCADE",
+            name="fk_message_exchange_run",
+        ),
+    )
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
     exchange_id: Mapped[str] = mapped_column(
         ForeignKey("exchanges.id", ondelete="CASCADE"), index=True
     )
@@ -60,6 +83,20 @@ class ConversationMessage(Identity, Created, Base):
 
 class TraceSpan(Identity, Base):
     __tablename__ = "trace_spans"
+    __table_args__ = (UniqueConstraint("id", "run_id"),)
+    provider: Mapped[str | None] = mapped_column(String(60))
+    model: Mapped[str | None] = mapped_column(String(160))
+    otel_trace_id: Mapped[str | None] = mapped_column(String(32))
+    otel_span_id: Mapped[str | None] = mapped_column(String(16))
+    input_payload: Mapped[dict | list | None] = mapped_column(JSONB(none_as_null=True))
+    output_payload: Mapped[dict | list | None] = mapped_column(JSONB(none_as_null=True))
+    ttfb_ms: Mapped[float | None]
+    ttfa_ms: Mapped[float | None]
+    ttfat_ms: Mapped[float | None]
+    prompt_tokens: Mapped[int | None]
+    completion_tokens: Mapped[int | None]
+    reasoning_tokens: Mapped[int | None]
+    audio_seconds: Mapped[float | None]
     run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
     exchange_id: Mapped[str | None] = mapped_column(
         ForeignKey("exchanges.id", ondelete="SET NULL"), index=True
@@ -76,7 +113,17 @@ class TraceSpan(Identity, Base):
 
 class ToolInvocation(Identity, Base):
     __tablename__ = "tool_invocations"
-    __table_args__ = (UniqueConstraint("run_id", "idempotency_key"),)
+    __table_args__ = (
+        UniqueConstraint("run_id", "idempotency_key"),
+        UniqueConstraint("id", "run_id"),
+        ForeignKeyConstraint(
+            ["llm_operation_id", "run_id"],
+            ["trace_spans.id", "trace_spans.run_id"],
+            name="fk_tool_llm_run",
+        ),
+    )
+    function_call_id: Mapped[str | None] = mapped_column(String(255))
+    llm_operation_id: Mapped[str | None] = mapped_column(String(36))
     run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
     exchange_id: Mapped[str | None] = mapped_column(
         ForeignKey("exchanges.id", ondelete="SET NULL"), index=True
@@ -85,7 +132,10 @@ class ToolInvocation(Identity, Base):
     binding_key: Mapped[str] = mapped_column(String(80))
     status: Mapped[str] = mapped_column(String(30), default="pending")
     arguments: Mapped[dict] = mapped_column(JSONB, default=dict)
-    result: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # Legacy final payload remains readable; new results have ordered child rows.
+    result: Mapped[dict | list | str | int | float | bool | None] = mapped_column(
+        JSONB(none_as_null=True)
+    )
     connection_id: Mapped[str | None] = mapped_column(ForeignKey("integration_connections.id"))
     provider_message_id: Mapped[str | None] = mapped_column(String(255), index=True)
     receipts: Mapped[list] = mapped_column(JSONB, default=list)

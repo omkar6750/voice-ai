@@ -1,10 +1,11 @@
 """Authenticated, key-addressed credential encryption. No development fallback keys."""
 
 import json
-import os
 from dataclasses import dataclass
 
 from cryptography.fernet import Fernet, InvalidToken
+
+from voice_api.config import get_settings
 
 
 class VaultError(ValueError):
@@ -34,8 +35,9 @@ class CredentialVault:
     @classmethod
     def from_env(cls) -> "CredentialVault":
         try:
-            keys = json.loads(os.environ["VOICE_INTEGRATION_KEYS"])
-            active = os.environ["VOICE_INTEGRATION_ACTIVE_KEY"]
+            settings = get_settings()
+            keys = json.loads(settings.integration_keys or "{}")
+            active = settings.integration_active_key
             if not isinstance(keys, dict):
                 raise ValueError
         except (KeyError, ValueError):

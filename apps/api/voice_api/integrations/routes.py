@@ -2,9 +2,11 @@
 
 import hashlib
 from pathlib import Path
+from secrets import compare_digest
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
-from pydantic import BaseModel, Field
+from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,10 +29,18 @@ Session = Depends(get_session)
 Operator = Depends(require_operator)
 
 
+class WhatsAppConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    phone_number_id: str = Field(pattern=r"^[0-9]+$")
+    waba_id: str = Field(pattern=r"^[0-9]+$")
+    api_version: str = Field(pattern=r"^v[0-9]+\.0$")
+
+
 class ConnectionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     label: str = Field(min_length=1, max_length=120)
     provider: str = Field(pattern="^whatsapp$")
-    config: dict = Field(default_factory=dict)
+    config: WhatsAppConfig
     enabled: bool = False
 
 
@@ -272,19 +282,21 @@ async def verify_webhook(
     connection_id: str,
     request: Request,
     session: AsyncSession = Session,
-) -> str:
+) -> PlainTextResponse:
     await connection_or_404(session, connection_id)
     verify = await secret_value(session, connection_id, "verify_token")
-    if request.query_params.get("hub.verify_token") != verify:
+    if request.query_params.get("hub.mode") != "subscribe" or not compare_digest(
+        request.query_params.get("hub.verify_token", "").encode(), verify.encode()
+    ):
         raise HTTPException(403, "Webhook verification failed")
-    return request.query_params.get("hub.challenge", "")
+    return PlainTextResponse(request.query_params.get("hub.challenge", ""))
 
 
 @router.post("/whatsapp/{connection_id}/webhook", status_code=204)
 async def receive_webhook(
     connection_id: str, request: Request, session: AsyncSession = Session
 ) -> None:
-    await connection_or_404(session, connection_id)
+    connection = await connection_or_404(session, connection_id)
     body = await request.body()
     signature = request.headers.get("X-Hub-Signature-256")
     app_secret = await secret_value(session, connection_id, "app_secret")
@@ -292,8 +304,14 @@ async def receive_webhook(
         raise HTTPException(403, "Webhook signature failed")
     payload = await request.json()
     for entry in payload.get("entry", []):
+        if str(entry.get("id")) != str(connection.config.get("waba_id")):
+            continue
         for change in entry.get("changes", []):
             value = change.get("value", {})
+            if str(value.get("metadata", {}).get("phone_number_id")) != str(
+                connection.config.get("phone_number_id")
+            ):
+                continue
             for message in value.get("messages", []):
                 _inbound_window.observe(
                     connection_id, message.get("from"), message.get("timestamp")
@@ -303,10 +321,20 @@ async def receive_webhook(
                 if not isinstance(message_id, str):
                     continue
                 invocation = await session.scalar(
-                    select(ToolInvocation).where(ToolInvocation.provider_message_id == message_id)
+                    select(ToolInvocation)
+                    .where(
+                        ToolInvocation.provider_message_id == message_id,
+                        ToolInvocation.connection_id == connection_id,
+                    )
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
                 )
                 if invocation is not None:
                     receipt = {key: value for key, value in status.items() if key != "conversation"}
-                    if receipt not in invocation.receipts:
+                    identity = (receipt.get("id"), receipt.get("status"), receipt.get("timestamp"))
+                    if not any(
+                        (r.get("id"), r.get("status"), r.get("timestamp")) == identity
+                        for r in invocation.receipts
+                    ):
                         invocation.receipts = [*invocation.receipts, receipt]
     await session.commit()

@@ -7,3 +7,5 @@
 | [ADR-0003](docs/adr/ADR-0003-provider-adapters.md) | Keep OpenAI and telephony SDK imports behind adapters | Accepted |
 | [ADR-0004](docs/adr/ADR-0004-demo-provider-stack.md) | Use Sarvam STT, Groq Llama 3.1 8B Instant, and Cartesia TTS for the demo agent | Accepted |
 | [ADR-0005](docs/adr/ADR-0005-voice-test-runtime.md) | Native PCM test lifecycle and available Groq Qwen model; supersedes ADR-0004 | Accepted |
+| [ADR-0006](docs/adr/ADR-0006-versioned-configuration.md) | Published configuration, draft concurrency and mutable KB; revision 2 per user request | Accepted |
+| [ADR-0007](docs/adr/ADR-0007-exchanges-and-integration-secrets.md) | Run-owned evidence, provider-neutral calls and encrypted integrations; revision 2 per user request | Accepted |
