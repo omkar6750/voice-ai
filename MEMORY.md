@@ -7,6 +7,9 @@ unused modem compatibility exports. Protected demo remains the only live-call en
 its settings, capture and telephony dependencies remain. DB configuration lives in
 contracts/. PLAN-0003 now has an ordered remaining-work checklist and deletion inventory.
 
+Follow-up explicitly authorized demo edit: DemoProviderSettings moved unchanged into
+scripts/demo_call.py; now-unused providers package removed. Demo behavior is unchanged.
+
 Completed: typed runtime configs, versioned agents/tools, integration vault/media catalog, mutable
 pgvector knowledge, evidence models/spool, compact dashboard, and schema migration.
 

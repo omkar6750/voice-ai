@@ -44,9 +44,8 @@ async def test_malformed_node_argument_does_not_crash():
 async def test_tools_suite_initialization_and_handlers():
     module = demo()
     from pipecat.processors.aggregators.llm_context import LLMContext
-    from voice_runtime.providers.demo import DemoProviderSettings
 
-    settings = DemoProviderSettings(
+    settings = module.DemoProviderSettings(
         cartesia_api_key="fake",
         sarvam_api_key="fake",
         groq_api_key="fake",

@@ -35,12 +35,26 @@ from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.services.sarvam.tts import SarvamTTSService
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.workers.runner import WorkerRunner
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from voice_runtime.call_capture import CallCapture
-from voice_runtime.providers.demo import DemoProviderSettings
 from voice_runtime.telephony.base import CallState
 from voice_runtime.telephony.session import TelephonySession
 from voice_runtime.telephony.sim7600 import Sim7600Modem
 from voice_runtime.telephony.usb_audio import Sim7600UsbAudioBridge
+
+
+class DemoProviderSettings(BaseSettings):
+    cartesia_api_key: str = ""
+    sarvam_api_key: str
+    groq_api_key: str
+    whatsapp_access_token: str = ""
+    whatsapp_phone_number_id: str = ""
+    whatsapp_template_name: str = "dialtone_followup"
+    whatsapp_header_media_id: str = ""
+    jev_api_key: str = ""
+
+    model_config = SettingsConfigDict(env_prefix="VOICE_", env_file=".env", extra="ignore")
+
 
 # ==============================================================================
 # 1. HARDWARE & AUDIO CONFIGURATION

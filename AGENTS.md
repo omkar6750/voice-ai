@@ -27,7 +27,7 @@ matching `VOICE_DATABASE_URL` for migrations.
 - `apps/api/voice_api` owns HTTP, settings, database sessions, and relational models.
 - `packages/voice_runtime/voice_runtime` owns Pipecat pipeline construction and call execution.
 - `packages/voice_runtime/voice_runtime/telephony` owns modem protocols and adapters.
-- `packages/voice_runtime/voice_runtime/providers` owns provider SDK imports.
+- The standalone demo owns its provider settings and SDK setup. Configurable provider adapters remain pending; do not recreate an empty providers package.
 - `apps/dashboard` is a thin client. Generate API types from OpenAPI when API surface grows. Do not hand-maintain duplicate DTO contracts.
 - Dashboard sends `Authorization: Bearer $VOICE_OPERATOR_TOKEN` only from browser memory. It never receives provider keys or encrypted secrets.
 - STT, LLM, TTS and embedding credentials remain developer environment configuration. Dashboard action integrations use write-only Fernet-encrypted secrets.

@@ -144,6 +144,10 @@ unchanged. Existing upstream deprecation/schema-reflection warnings remain.
 
 ## Remaining work after cleanup
 
+Follow-up: at explicit user request, DemoProviderSettings moved unchanged into the demo
+script and the remaining providers package was deleted. Only class location/imports changed;
+the earlier protected-demo hash is historical, not the checksum for this authorized edit.
+
 1. **Demo parity and import:** map exact prompts, eight nodes, per-node tools, provider/VAD
    settings, composer/classifier settings into validated drafts. Do not silently omit
    unsupported settings or publish an agent whose handlers are missing. Preserve node-only
