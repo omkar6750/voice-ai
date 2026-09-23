@@ -117,3 +117,58 @@ validation data without deleting it. Two upstream deprecation warnings remain.
 
 Native Pipecat host, actual provider/tool capture, recording registration and the other
 remaining items above are still pending. This slice does not place live calls.
+
+## Dead-code cleanup
+
+Removed after checking repository imports:
+
+- voice_runtime/cli.py and voice-agent entrypoint: obsolete standalone launcher.
+- voice_runtime/config.py and tests/unit/test_config.py: old hardcoded config and its test.
+- voice_runtime/pipeline/build.py and pipeline/__init__.py: old, non-DB pipeline.
+- DemoServices/create_demo_services and unused defaults in providers/demo.py:
+  duplicate provider factory. Keep DemoProviderSettings, imported by the protected demo.
+- telephony/modem.py and Sim7600Transport alias: unused compatibility imports.
+- AudioBridge protocol: unused interface.
+- API model/voice/COM defaults and matching .env.example entries: no active readers;
+  agent versions and runtime endpoints own these settings.
+
+Kept the tested demo unchanged, its capture/telephony/settings dependencies, diagnostics,
+DB-backed APIs/contracts/executor and tests. Kept migration history and legacy database
+columns still needed by compatibility readers. No database rows, credentials, recordings,
+or parked dashboard were deleted. Removed source is recoverable from Git history.
+
+Cleanup validation: 66 tests pass (one obsolete config test removed), scoped Ruff passes,
+Alembic reports no schema changes, OpenAPI generation and dashboard build pass. Installed
+console scripts expose modem-status only; demo remains a script. Protected demo hash is
+unchanged. Existing upstream deprecation/schema-reflection warnings remain.
+
+## Remaining work after cleanup
+
+1. **Demo parity and import:** map exact prompts, eight nodes, per-node tools, provider/VAD
+   settings, composer/classifier settings into validated drafts. Do not silently omit
+   unsupported settings or publish an agent whose handlers are missing. Preserve node-only
+   prompt behavior. Demo callback scheduling is prompt-only; direct-message handlers are
+   unregistered and RAG is absent, so distinguish those from working demo features.
+2. **Native pipeline host and dispatch:** connect resolved snapshots to providers, flows,
+   USB PCM and the claimed-call executor. Open audio before dialing, greet after connection,
+   monitor remote hangup, enforce limits and close safely. Fix driver's IDLE versus
+   DISCONNECTED cleanup mismatch. Validate formats/model settings before dialing.
+3. **Tools and integrations:** reviewed transition/end-call/classification/WhatsApp/callback
+   handlers, exact version bindings, secret/media lookup, truthful outcomes, asynchronous
+   waiting and delayed-result consumption. Add HTTP destination/redirect protections and
+   concurrent account-scoped receipt tests. Never copy fabricated classifier fallbacks.
+4. **Live evidence and artifacts:** hook finalized transcripts, flow visits, tool results,
+   provider OTel operations and actual playback into the existing evidence path. Register
+   three WAVs and optional redacted logs; honor retention and one-call logging overrides.
+5. **Context and analysis:** identity-based pruning, single-flight classifier/summarizer
+   cadence, source boundaries, persisted verdicts/facts, safe summary application and
+   optional post-call analysis after modem cleanup.
+6. **RAG and scheduled work:** connect mutable hybrid retrieval to tools; implement durable
+   ingestion recovery and embedding compatibility checks. Wire optional callback polling
+   and artifact-expiry invocation. Automation remains off by default; no uncertain redial.
+7. **Modem diagnostics:** expose identity/firmware/failure-reason results already queried;
+   handle absent COM ports cleanly; complete capability versus availability reporting.
+8. **Final integration gate:** remove legacy Call ownership only after reader migration;
+   finish typed API response/generated-client use. Test real configured call only after
+   offline parity/lifecycle tests, then verify DB evidence and recordings. UI redesign,
+   browser/Twilio/Exotel adapters and tenancy remain deferred.

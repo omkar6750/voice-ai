@@ -43,7 +43,7 @@ uv run pipecat --help
 uv run pipecat --version
 uv run pipecat init --list-options
 uv run pipecat init . --dry-run
-uv run voice-agent --number +15551234567 --modem-port COM16 --audio-port COM17
+uv run python scripts/demo_call.py --number +15551234567
 ```
 
 `pipecat init` is useful for checking current scaffold options. Do not scaffold over this repository because its layout and SIM7600 boundary are deliberate. The local development server for this project is FastAPI on port 8000. Vite runs on port 5173. Pipecat's runner is not the public control plane.
@@ -68,6 +68,11 @@ uv run pipecat context-hub serve
 `status` reports index freshness. `search-*` finds current docs and source. `get-code-snippet` retrieves focused code. `check-deprecation` catches moved APIs. `refresh` updates the local index. `serve` starts the MCP server for an agent client. Context Hub data is stored outside this repository under the user profile. `pipecat context-hub install --client codex` can register the MCP server for a fresh agent setup, then restart the agent.
 
 ## Configurable runtime
+
+The old voice-agent launcher and duplicate runtime config/pipeline were removed.
+contracts/ owns DB-backed agent configuration. The protected demo remains the only
+working live-call entrypoint; it uses its own constants, not runtime_endpoints rows.
+See PLAN-0003's remaining-work checklist before connecting the configurable runner.
 
 Read RFC-0003, ADR-0006, ADR-0007 and PLAN-0003 before changing config, evidence,
 knowledge, or integrations. `scripts/demo_call.py` is tested reference material: do not edit it

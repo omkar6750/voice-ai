@@ -2,6 +2,11 @@
 
 Phase: RFC-0003 schema review implementation, execution safety and persistence slices.
 
+Cleanup: removed old voice-agent CLI, duplicate config/pipeline/provider factory and
+unused modem compatibility exports. Protected demo remains the only live-call entrypoint;
+its settings, capture and telephony dependencies remain. DB configuration lives in
+contracts/. PLAN-0003 now has an ordered remaining-work checklist and deletion inventory.
+
 Completed: typed runtime configs, versioned agents/tools, integration vault/media catalog, mutable
 pgvector knowledge, evidence models/spool, compact dashboard, and schema migration.
 
@@ -13,7 +18,8 @@ Migration 0004 adds span-linked flow visits, ordered immutable tool results and 
 provider metrics. Finalized evidence now travels through spool, HTTP and PostgreSQL;
 timeline includes results and visits. This path is not wired to the live call runner yet.
 Credential validation/redaction, environment-backed vault loading and account-scoped
-receipt matching are covered. Current full suite: 67 passed, two upstream deprecation warnings.
+receipt matching are covered. Current full suite: 66 passed, two upstream deprecation warnings.
+One old-default-config test was removed with the obsolete implementation.
 
 New: migrations 0005-0010 add endpoint claim fencing, callback attempts, analysis history,
 artifact metadata, operational ingestion-token naming and execution ownership guards.

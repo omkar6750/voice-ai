@@ -28,7 +28,6 @@ dev = [
 ]
 
 [project.scripts]
-voice-agent = "voice_runtime.cli:main"
 modem-status = "voice_runtime.diagnostics:main"
 
 [build-system]
