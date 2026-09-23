@@ -1,9 +1,12 @@
 # Working state
 
-Phase: initial foundation.
+Phase: configurable runtime control-plane slice.
 
-Completed: RFC extraction, toolchain check, minimal project structure, first database slice, Pipecat pipeline seam, SIM7600 AT adapter, docs, tests.
+Completed: typed runtime configs, versioned agents/tools, integration vault/media catalog, mutable
+pgvector knowledge, evidence models/spool, compact dashboard, and schema migration.
 
-Next slice: verify SIM7600 COM and USB audio devices on Windows, then add a real call lifecycle and recording writer.
+Next slice: connect queued calls and evidence spool to modular Pipecat runtime, then finish agent
+and knowledge form editors. Do not edit `scripts/demo_call.py`.
 
-Known blockers: `docs/assignment.md` is empty. SIM7600 audio device mapping and sample rate are not yet measured. Provider keys and database credentials are intentionally local-only.
+Known blockers: SIM7600 audio mapping remains hardware-dependent. Existing DB at 55432 is plain
+PostgreSQL and cannot run pgvector migration. Provider keys remain local-only.

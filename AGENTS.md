@@ -18,6 +18,10 @@ uv run uvicorn voice_api.main:app --reload --port 8000
 cd apps/dashboard; npm run dev
 ```
 
+`docker-compose.yml` uses pgvector PostgreSQL. Default host port is 55432. If another
+database owns it, set `VOICE_DB_PORT=55433` before `docker compose up -d db`, then set
+matching `VOICE_DATABASE_URL` for migrations.
+
 ## Boundaries
 
 - `apps/api/voice_api` owns HTTP, settings, database sessions, and relational models.
@@ -25,6 +29,8 @@ cd apps/dashboard; npm run dev
 - `packages/voice_runtime/voice_runtime/telephony` owns modem protocols and adapters.
 - `packages/voice_runtime/voice_runtime/providers` owns provider SDK imports.
 - `apps/dashboard` is a thin client. Generate API types from OpenAPI when API surface grows. Do not hand-maintain duplicate DTO contracts.
+- Dashboard sends `Authorization: Bearer $VOICE_OPERATOR_TOKEN` only from browser memory. It never receives provider keys or encrypted secrets.
+- STT, LLM, TTS and embedding credentials remain developer environment configuration. Dashboard action integrations use write-only Fernet-encrypted secrets.
 - Business code depends on local protocols, not vendor SDKs.
 - Keep units small. Add an ADR when a settled choice is not obvious from code.
 
@@ -60,6 +66,12 @@ uv run pipecat context-hub serve
 ```
 
 `status` reports index freshness. `search-*` finds current docs and source. `get-code-snippet` retrieves focused code. `check-deprecation` catches moved APIs. `refresh` updates the local index. `serve` starts the MCP server for an agent client. Context Hub data is stored outside this repository under the user profile. `pipecat context-hub install --client codex` can register the MCP server for a fresh agent setup, then restart the agent.
+
+## Configurable runtime
+
+Read RFC-0003, ADR-0006, ADR-0007 and PLAN-0003 before changing config, evidence,
+knowledge, or integrations. `scripts/demo_call.py` is tested reference material: do not edit it
+without explicit user instruction. Agent/tool drafts use revisions; published versions are immutable.
 
 ## Worktrees
 
