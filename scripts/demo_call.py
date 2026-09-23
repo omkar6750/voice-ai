@@ -10,6 +10,7 @@ Features:
 import argparse
 import asyncio
 import json
+import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -66,7 +67,7 @@ BAUDRATE = 115200
 SAMPLE_RATE = 16000
 CHANNELS = 1
 FRAME_MS = 20
-MAX_CALL_SECONDS = 300
+MAX_CALL_SECONDS = int(os.getenv("VOICE_MAX_CALL_SECONDS", "300"))
 AT_COMMAND_TIMEOUT = 5.0
 
 VAD_STOP_SECS = 0.8
