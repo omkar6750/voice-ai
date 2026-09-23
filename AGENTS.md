@@ -78,9 +78,22 @@ Read RFC-0003, ADR-0006, ADR-0007 and PLAN-0003 before changing config, evidence
 knowledge, or integrations. `scripts/demo_call.py` is tested reference material: do not edit it
 without explicit user instruction. Agent/tool drafts use revisions; published versions are immutable.
 
-## Worktrees
+## API Architecture
 
-One worktree per unit of work. Start from a clean committed branch, use lowercase hyphenated slugs, and stage files explicitly.
+`apps/api/voice_api` follows a layered structure:
+- `core/`: Application settings (`config.py`), security and credential sanitization (`security.py`).
+- `db/`: Declarative base (`base_class.py`), engine and session factory (`session.py`), and model aggregator for migrations (`base.py`).
+- `models/`: SQLAlchemy relational ORM models.
+- `schemas/`: Pydantic validation and serialization models.
+- `api/`: API dependency injection (`deps.py`), `v1/api.py` router aggregation, and `v1/endpoints/`.
+- `services/`: Business logic services (call orchestration, configuration resolution, publications, evidence, artifacts, knowledge, vault, integrations).
+
+## Git & Worktree Conventions
+
+- **Never rebase; always merge** to preserve clear and small commit histories.
+- Delete stale branches and worktrees promptly as soon as their work is merged.
+- Work directly on `main` when designated for root architecture refactorings.
+- When using worktrees: one worktree per unit of work, lowercase hyphenated slugs, stage files explicitly.
 
 ```powershell
 uv run python scripts/worktree.py start fix-sim7600-boundary
@@ -88,3 +101,4 @@ uv run python scripts/worktree.py list
 ```
 
 The helper keeps worktrees beside this repository and carries `.env` only when it exists. Never commit secrets, generated runtime audio, or local credentials.
+

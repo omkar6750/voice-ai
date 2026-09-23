@@ -1,0 +1,192 @@
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from voice_api.api.deps import get_session, require_operator
+from voice_api.models import Agent, AgentVersion, AgentVersionTool, ToolVersion
+from voice_api.models.common import new_id
+from voice_api.schemas.agent import (
+    ActivateAgentBody,
+    BindToolBody,
+    CreateBody,
+    ExpectedRevision,
+    RevisionBody,
+)
+from voice_api.services.publication_service import clone_version, sync_bindings
+from voice_runtime.contracts import AgentConfig
+
+router = APIRouter(tags=["agents"])
+Session = Depends(get_session)
+Operator = Depends(require_operator)
+
+
+async def validate_agent_bindings(session: AsyncSession, version: AgentVersion) -> None:
+    """Keep flow JSON references and relational pinned tool versions identical."""
+    config = AgentConfig.model_validate(version.config)
+    rows = (
+        await session.scalars(
+            select(AgentVersionTool).where(AgentVersionTool.agent_version_id == version.id)
+        )
+    ).all()
+    database = {row.binding_key: row.tool_version_id for row in rows}
+    configured = {key: value.tool_version_id for key, value in config.tool_bindings.items()}
+    if database != configured:
+        raise HTTPException(422, "Agent tool bindings do not match pinned tool versions")
+
+
+@router.get("/agents")
+async def agents(session: AsyncSession = Session, _: None = Operator) -> dict:
+    rows = (await session.scalars(select(Agent).order_by(Agent.name))).all()
+    return {
+        "agents": [
+            {"id": x.id, "name": x.name, "active_version_id": x.active_version_id} for x in rows
+        ]
+    }
+
+
+@router.post("/agents", status_code=201)
+async def create_agent(
+    body: CreateBody, session: AsyncSession = Session, _: None = Operator
+) -> dict:
+    config = AgentConfig.model_validate(body.config).model_dump(mode="json")
+    agent = Agent(id=new_id(), name=body.name)
+    version = AgentVersion(id=new_id(), agent_id=agent.id, version=1, config=config)
+    session.add(agent)
+    await session.flush()
+    session.add(version)
+    await session.flush()
+    await sync_bindings(session, version)
+    await session.commit()
+    return {"agent_id": agent.id, "version_id": version.id}
+
+
+@router.get("/agents/{agent_id}/versions")
+async def agent_versions(
+    agent_id: str, session: AsyncSession = Session, _: None = Operator
+) -> dict:
+    rows = (
+        await session.scalars(
+            select(AgentVersion)
+            .where(AgentVersion.agent_id == agent_id)
+            .order_by(AgentVersion.version)
+        )
+    ).all()
+    return {
+        "versions": [
+            {
+                "id": x.id,
+                "version": x.version,
+                "revision": x.revision,
+                "status": x.status,
+                "config": x.config,
+                "note": x.note,
+            }
+            for x in rows
+        ]
+    }
+
+
+@router.patch("/agent-versions/{version_id}")
+async def update_agent_version(
+    version_id: str, body: RevisionBody, session: AsyncSession = Session, _: None = Operator
+) -> dict:
+    row = await session.get(AgentVersion, version_id, with_for_update=True)
+    if row is None:
+        raise HTTPException(404, "Agent version not found")
+    if row.status != "draft":
+        raise HTTPException(409, "Published versions are immutable")
+    if row.revision != body.revision:
+        raise HTTPException(409, "Draft changed by another operator")
+    row.config = AgentConfig.model_validate(body.config).model_dump(mode="json")
+    row.note = body.note
+    row.revision += 1
+    await sync_bindings(session, row)
+    await session.commit()
+    return {"id": row.id, "revision": row.revision, "config": row.config}
+
+
+@router.post("/agent-versions/{version_id}/publish")
+async def publish_agent(
+    version_id: str, body: ExpectedRevision, session: AsyncSession = Session, _: None = Operator
+) -> dict:
+    row = await session.get(AgentVersion, version_id, with_for_update=True)
+    if row is None:
+        raise HTTPException(404, "Agent version not found")
+    if row.status != "draft":
+        raise HTTPException(409, "Version is already published")
+    AgentConfig.model_validate(row.config)
+    if row.revision != body.revision:
+        raise HTTPException(409, "Draft changed; reload before publishing")
+    await validate_agent_bindings(session, row)
+    row.status = "published"
+    row.published_at = datetime.now(UTC)
+    await session.commit()
+    return {"id": row.id, "status": row.status, "published_at": row.published_at}
+
+
+@router.post("/agent-versions/{version_id}/clone", status_code=201)
+async def clone_agent(
+    version_id: str, body: ExpectedRevision, session: AsyncSession = Session, _: None = Operator
+) -> dict:
+    return await clone_version(session, version_id, "agent", body.revision)
+
+
+@router.post("/agents/{agent_id}/activate")
+async def activate_agent(
+    agent_id: str,
+    body: ActivateAgentBody | dict,
+    session: AsyncSession = Session,
+    _: None = Operator,
+) -> dict:
+    version_id = body.version_id if isinstance(body, ActivateAgentBody) else body.get("version_id")
+    agent = await session.get(Agent, agent_id, with_for_update=True)
+    version = await session.get(AgentVersion, version_id)
+    if (
+        agent is None
+        or version is None
+        or version.agent_id != agent_id
+        or version.status != "published"
+    ):
+        raise HTTPException(422, "Select a published agent version")
+    agent.active_version_id = version.id
+    await session.commit()
+    return {"active_version_id": agent.active_version_id}
+
+
+@router.put("/agent-versions/{version_id}/tools")
+async def bind_tool(
+    version_id: str, body: BindToolBody, session: AsyncSession = Session, _: None = Operator
+) -> dict:
+    agent_version = await session.get(AgentVersion, version_id, with_for_update=True)
+    tool_version = await session.get(ToolVersion, body.tool_version_id)
+    if agent_version is None or tool_version is None or tool_version.status != "published":
+        raise HTTPException(422, "Binding requires draft agent and published tool version")
+    if agent_version.status != "draft":
+        raise HTTPException(409, "Published agent versions are immutable")
+    if agent_version.revision != body.revision:
+        raise HTTPException(409, "Draft changed; reload before binding")
+    row = await session.get(AgentVersionTool, (version_id, body.binding_key))
+    if row is None:
+        row = AgentVersionTool(
+            agent_version_id=version_id,
+            binding_key=body.binding_key,
+            tool_version_id=tool_version.id,
+            config=body.config,
+        )
+        session.add(row)
+    else:
+        row.tool_version_id, row.config = tool_version.id, body.config
+    config = AgentConfig.model_validate(agent_version.config).model_dump(mode="json")
+    config["tool_bindings"][body.binding_key] = {
+        "tool_id": tool_version.tool_id,
+        "tool_version_id": tool_version.id,
+    }
+    agent_version.config = config
+    agent_version.revision += 1
+    await session.commit()
+    return {
+        "binding_key": row.binding_key,
+        "tool_version_id": row.tool_version_id,
+        "revision": agent_version.revision,
+    }

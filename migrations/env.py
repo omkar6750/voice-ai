@@ -7,9 +7,8 @@ from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
-from voice_api import models as _models  # noqa: F401
-from voice_api.config import get_settings
-from voice_api.db import Base
+from voice_api.core.config import get_settings
+from voice_api.db.base import Base
 
 config = context.config
 config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
