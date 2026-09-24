@@ -10,6 +10,12 @@ related: [RFC-0001, RFC-0003]
 
 # RFC-0004 · Voice AI dashboard architecture, shell, and routing
 
+## Runs-first routing amendment, 2026-09-24
+
+- `src/pages/` owns page modules; `App.tsx` owns routes and a narrow shadcn Sidebar. Root redirects to Runs. Other menu routes are honest placeholders until their focused slices are rebuilt. Old agent/settings dashboard forms were retired; their API/domain behavior remains.
+- CLI-installed shadcn Sidebar, Breadcrumb, Sonner and semantic theme tokens are current. Do not import the removed `src/components/ui.tsx` wrapper. Token stays in memory. Sidebar collapse state is non-sensitive and may use shadcn's cookie.
+- `/runs/:runId?lens=waterfall|transcript` deep links remain reload-safe. `/agents/:agentId/versions/:versionId` opens a read-only version reference, not yet an editor.
+
 ## Implementation amendment, 2026-09-24
 
 - Implemented dashboard uses Tailwind CSS v4 through the Vite plugin and shadcn/ui Radix components installed through the CLI. Required semantic theme variables live in the Tailwind stylesheet; styling of views remains in utilities. This supersedes the earlier "directives only" wording below.

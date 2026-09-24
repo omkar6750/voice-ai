@@ -20,6 +20,19 @@ npm install
 npm run dev
 ```
 
+The dashboard currently builds Runs and a read-only pinned agent-version reference.
+Other menu routes show explicit placeholders. Runs needs the current API with
+`GET /api/v1/runs`, its timeline and artifact routes, plus a migrated PostgreSQL
+database. If an older API already owns port 8000, start the current API on another
+port and set `VOICE_API_ORIGIN` before `npm run dev`:
+
+```powershell
+$env:VOICE_API_ORIGIN = "http://127.0.0.1:8001"
+npm run dev
+```
+
+The dashboard stores the operator token only in memory. A reload requires reconnecting.
+
 Run Python checks:
 
 ```powershell

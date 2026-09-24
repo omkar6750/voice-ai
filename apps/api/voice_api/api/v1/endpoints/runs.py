@@ -75,9 +75,12 @@ async def list_runs(session: AsyncSession = Session, _: None = Operator) -> dict
                 "channel": r.channel,
                 "agent_version_id": r.agent_version_id,
                 "contact_id": r.contact_id,
+                "contact_name": r.contact_snapshot.get("name") if r.contact_snapshot else None,
                 "endpoint_id": r.endpoint_id,
                 "status": r.status,
                 "created_at": r.created_at,
+                "started_at": r.started_at,
+                "ended_at": r.ended_at,
                 "call_limits": r.resolved_config.get("call_limits") if r.resolved_config else None,
             }
             for r in rows
@@ -103,6 +106,9 @@ async def get_run(run_id: str, session: AsyncSession = Session, _: None = Operat
         "resolved_config": run.resolved_config,
         "call_id": call.id if call else None,
         "created_at": run.created_at,
+        "started_at": run.started_at,
+        "ended_at": run.ended_at,
+        "error": run.error,
     }
 
 
@@ -147,9 +153,25 @@ async def timeline(run_id: str, session: AsyncSession = Session, _: None = Opera
             "agent_id": (await session.get(AgentVersion, run.agent_version_id)).agent_id,
             "agent_version_id": run.agent_version_id,
         },
-        "call": None if call is None else {"id": call.id, "status": call.status},
+        "call": None
+        if call is None
+        else {
+            "id": call.id,
+            "status": call.status,
+            "provider": call.provider,
+            "provider_call_id": call.provider_call_id,
+            "answered_at": call.answered_at,
+            "ended_at": call.ended_at,
+        },
         "exchanges": [
-            {"id": x.id, "sequence": x.sequence, "origin": x.origin, "status": x.status}
+            {
+                "id": x.id,
+                "sequence": x.sequence,
+                "origin": x.origin,
+                "status": x.status,
+                "created_at": x.created_at,
+                "ended_at": x.ended_at,
+            }
             for x in exchanges
         ],
         "messages": [
@@ -157,9 +179,13 @@ async def timeline(run_id: str, session: AsyncSession = Session, _: None = Opera
                 "id": x.id,
                 "exchange_id": x.exchange_id,
                 "role": x.role,
+                "sequence": x.sequence,
                 "content": x.content,
                 "interrupted": x.interrupted,
                 "created_at": x.created_at,
+                "source_at": x.source_at,
+                "playback_started_at": x.playback_started_at,
+                "playback_ended_at": x.playback_ended_at,
             }
             for x in messages
         ],
@@ -167,6 +193,7 @@ async def timeline(run_id: str, session: AsyncSession = Session, _: None = Opera
             {
                 "id": x.id,
                 "exchange_id": x.exchange_id,
+                "parent_id": x.parent_id,
                 "name": x.name,
                 "category": x.category,
                 "status": x.status,
@@ -194,10 +221,15 @@ async def timeline(run_id: str, session: AsyncSession = Session, _: None = Opera
             {
                 "id": x.id,
                 "exchange_id": x.exchange_id,
+                "llm_operation_id": x.llm_operation_id,
+                "function_call_id": x.function_call_id,
                 "binding_key": x.binding_key,
                 "status": x.status,
                 "arguments": x.arguments,
                 "result": x.result,
+                "started_at": x.started_at,
+                "ended_at": x.ended_at,
+                "provider_message_id": x.provider_message_id,
             }
             for x in tools
         ],

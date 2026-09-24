@@ -10,6 +10,14 @@ related: [RFC-0001, RFC-0002, RFC-0003, RFC-0004]
 
 # RFC-0006 · Runs, conversation timeline, and turn waterfall trace inspection surface
 
+## Runs-first UI decision, 2026-09-24
+
+Current implementation uses shadcn Sidebar/Breadcrumb for navigation, Table/Input/NativeSelect/Badge for all stored runs, Collapsible per exchange, SVG timing bars for overlapping operations, and MessageScroller/Message/Bubble/Marker for saved dialogue and tool activity. A single inspector serves waterfall and transcript selections, docked on wide screens and shown in a Sheet on narrow screens. Empty, Skeleton, Spinner and Sonner handle absence, loading and feedback. Card is reserved for recording controls. All timings and provider IO come from stored evidence; missing values stay unknown. Exact message-to-tool and consumed-result-to-LLM operation links are not in the schema, so the UI labels exchange-level association and first-subsequent-LLM inference explicitly.
+
+Live runs poll finalized REST evidence every three seconds. MessageScroller can follow appended rows, but it does not create a live stream. RFC-0013 ticket, WebSocket, listen-only PCM and streamed text remain unimplemented. Full-call recordings load with an Authorization header into revocable browser blob URLs; no token appears in media URLs. The old first-slice agent/settings forms were removed while page routes remain placeholders.
+
+Future component choices, not installed or implemented merely for visual completeness: Attachment for WhatsApp template media in RFC-0009; Combobox, Command prompt `/` and `#` insertion, Switch, Slider, HoverCard, Tooltip and form library for the RFC-0005 editor when API capabilities are validated; date/time and country-code controls in RFC-0007 contacts; Chart only for measured aggregates in RFC-0012. Runs can move from client-filtered shadcn Table to TanStack Data Table when server pagination/sorting exists. No unbacked live indicators or charts.
+
 ## Implementation amendment, 2026-09-24
 
 - Run owns timeline; Call exists for telephony. Exchanges group greeting or caller input with later provider requests/tools/playback; messages remain speaker turns. Show overlapping spans and interruption, with background result origin and consumption links.

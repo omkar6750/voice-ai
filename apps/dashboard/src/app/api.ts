@@ -2,6 +2,11 @@ import { createContext, useContext } from "react";
 
 export type Api = <T>(path: string, init?: RequestInit) => Promise<T>;
 export const ApiContext = createContext<Api | null>(null);
+export const OperatorTokenContext = createContext("");
+
+export function useOperatorToken() {
+  return useContext(OperatorTokenContext);
+}
 
 export function useApi(): Api {
   const api = useContext(ApiContext);

@@ -10,6 +10,10 @@ related: [RFC-0001, RFC-0003, RFC-0004]
 
 # RFC-0009 · Action integrations, WhatsApp Cloud API, and secret vault surface
 
+## Media UI decision, 2026-09-24
+
+When this page is built, use shadcn Attachment for image/file upload state and selection in template dispatch, backed by the existing integration-media catalog and Meta IDs. Keep upload handles and send media IDs distinct. Do not retain provider secrets in browser state beyond the write-only form submission. This page remains a placeholder in the Runs-first dashboard slice.
+
 ## Implementation amendment, 2026-09-24
 
 - Secrets are write-only. Show configured/needs-rotation state, never reveal saved token. Transient input clears after submission.

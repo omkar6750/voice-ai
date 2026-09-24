@@ -1,245 +1,280 @@
-import { useCallback, useState, type FormEvent } from "react";
+import { lazy, Suspense, useCallback, useState, type FormEvent } from "react";
 import {
   Activity,
   AudioLines,
-  ChevronLeft,
-  ChevronRight,
-  CircleHelp,
-  LayoutDashboard,
-  LockKeyhole,
+  CalendarClock,
+  Database,
+  Headphones,
+  Link2,
+  ListTodo,
   LogOut,
+  Radio,
   Settings2,
+  Users,
 } from "lucide-react";
-import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
-import { ApiContext, request } from "./api";
-import { AgentEditor, AgentLanding, AgentsPage } from "../features/agents";
-import { OverviewPage } from "../features/overview";
-import { RunDetailPage, RunsPage } from "../features/runs";
-import { SettingsPage } from "../features/settings";
-import { Button, Input, Notice } from "../components/ui";
+import {
+  Link,
+  NavLink,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+} from "react-router-dom";
+import { toast } from "sonner";
+import { ApiContext, OperatorTokenContext, request } from "./api";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { Toaster } from "@/components/ui/sonner";
+import { Spinner } from "@/components/ui/spinner";
+import { Skeleton } from "@/components/ui/skeleton";
+import { PlaceholderPage } from "@/pages/placeholder";
+
+const RunsPage = lazy(() =>
+  import("@/pages/runs").then((module) => ({ default: module.RunsPage })),
+);
+const RunDetailPage = lazy(() =>
+  import("@/pages/runs/detail").then((module) => ({
+    default: module.RunDetailPage,
+  })),
+);
+const AgentVersionPage = lazy(() =>
+  import("@/pages/agent-version").then((module) => ({
+    default: module.AgentVersionPage,
+  })),
+);
 
 const navigation = [
-  { label: "Overview", path: "/", icon: LayoutDashboard },
-  { label: "Runs", path: "/runs", icon: Activity },
-  { label: "Agents", path: "/agents", icon: AudioLines },
-  { label: "Settings", path: "/settings", icon: Settings2 },
+  { title: "Runs", path: "/runs", icon: Activity },
+  { title: "Agents", path: "/agents", icon: AudioLines },
+  { title: "Contacts", path: "/contacts", icon: Users },
+  { title: "Knowledge", path: "/knowledge", icon: Database },
+  { title: "Tools", path: "/tools", icon: ListTodo },
+  { title: "Integrations", path: "/integrations", icon: Link2 },
+  { title: "Callbacks", path: "/callbacks", icon: CalendarClock },
+  { title: "Endpoints", path: "/endpoints", icon: Radio },
+  { title: "Settings", path: "/settings", icon: Settings2 },
 ] as const;
 
 function Connect({ onConnect }: { onConnect: (token: string) => void }) {
   const [candidate, setCandidate] = useState("");
-  const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
-    setError("");
     try {
       await request(candidate.trim(), "/providers");
       onConnect(candidate.trim());
       setCandidate("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not connect");
+      toast.success("Workspace connected");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not connect");
     } finally {
       setBusy(false);
     }
   }
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background px-4 py-12 text-foreground">
-      <div className="w-full max-w-md rounded-lg border border-border bg-card p-7 shadow-sm">
-        <div className="mb-8 flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-lg bg-primary text-white">
-            <AudioLines size={22} />
-          </div>
-          <div>
-            <p className="text-lg font-semibold tracking-tight">Voice AI</p>
-            <p className="text-sm text-muted-foreground">Operator dashboard</p>
-          </div>
-        </div>
-        <h1 className="text-xl font-semibold tracking-tight">
-          Connect to workspace
-        </h1>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          Enter operator token. It stays in this tab’s memory.
-        </p>
-        <form className="mt-6 grid gap-4" onSubmit={submit}>
-          <label className="grid gap-1.5 text-sm font-medium">
-            Operator token
-            <Input
-              autoComplete="off"
-              autoFocus
-              required
-              type="password"
-              value={candidate}
-              onChange={(event) => setCandidate(event.target.value)}
-            />
-          </label>
-          {error && <Notice text={error} error />}
-          <Button disabled={busy || !candidate.trim()} type="submit">
-            <LockKeyhole size={16} />
-            {busy ? "Connecting…" : "Connect"}
-          </Button>
-        </form>
-      </div>
+    <main className="grid min-h-svh place-items-center px-4">
+      <Card className="w-full max-w-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Headphones aria-hidden="true" /> Voice AI
+          </CardTitle>
+          <CardDescription>
+            Enter operator token to inspect runs. Token stays in this tab's
+            memory.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form className="flex flex-col gap-4" onSubmit={submit}>
+            <Field>
+              <FieldLabel htmlFor="operator-token">Operator token</FieldLabel>
+              <Input
+                id="operator-token"
+                type="password"
+                autoComplete="off"
+                autoFocus
+                required
+                value={candidate}
+                onChange={(event) => setCandidate(event.target.value)}
+              />
+            </Field>
+            <Button type="submit" disabled={busy || !candidate.trim()}>
+              {busy && <Spinner data-icon="inline-start" />}
+              {busy ? "Connecting…" : "Connect"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </main>
   );
 }
 
-function Layout({ logout }: { logout: () => void }) {
-  const [collapsed, setCollapsed] = useState(false);
+function AppSidebar({ logout }: { logout: () => void }) {
   const location = useLocation();
-  const page = location.pathname.startsWith("/agents/")
-    ? "Agent editor"
-    : location.pathname.startsWith("/runs/")
-      ? "Run details"
-      : (navigation.find((item) => item.path === location.pathname)?.label ??
-        "Dashboard");
   return (
-    <div className="min-h-screen bg-background font-sans text-foreground">
-      <div className="flex min-h-screen">
-        <aside
-          className={`sticky top-0 hidden h-screen shrink-0 flex-col border-r border-border bg-card md:flex ${collapsed ? "w-16" : "w-60"}`}
+    <Sidebar collapsible="icon">
+      <SidebarHeader>
+        <Link
+          to="/runs"
+          className="flex min-h-10 items-center gap-2 px-2 font-semibold"
         >
-          <Link
-            to="/"
-            className={`flex h-16 items-center gap-3 border-b border-border px-4 ${collapsed ? "justify-center" : ""}`}
-          >
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-white">
-              <AudioLines size={20} />
-            </span>
-            {!collapsed && (
-              <span className="min-w-0">
-                <span className="block text-sm font-semibold tracking-tight">
-                  Voice AI
-                </span>
-                <span className="block text-xs text-muted-foreground">
-                  Control plane
-                </span>
-              </span>
-            )}
-          </Link>
-          <div className="flex-1 px-2 py-5">
-            {!collapsed && (
-              <p className="px-3 pb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Workspace
-              </p>
-            )}
-            <nav aria-label="Main navigation" className="grid gap-1">
-              {navigation.map(({ label, path, icon: Icon }) => (
-                <NavLink
-                  key={path}
-                  to={path}
-                  end={path === "/"}
-                  title={collapsed ? label : undefined}
-                  className={({ isActive }) =>
-                    `flex min-h-10 items-center gap-3 rounded-md px-3 text-sm font-medium transition-colors ${isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground"} ${collapsed ? "justify-center" : ""}`
-                  }
-                >
-                  <Icon size={18} strokeWidth={1.8} />
-                  {!collapsed && label}
-                </NavLink>
+          <AudioLines aria-hidden="true" className="size-4" />
+          <span className="group-data-[collapsible=icon]:hidden">Voice AI</span>
+        </Link>
+      </SidebarHeader>
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupLabel>Workspace</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {navigation.map(({ title, path, icon: Icon }) => (
+                <SidebarMenuItem key={path}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={
+                      location.pathname === path ||
+                      location.pathname.startsWith(path + "/")
+                    }
+                    tooltip={title}
+                  >
+                    <NavLink to={path}>
+                      <Icon aria-hidden="true" />
+                      <span>{title}</span>
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
               ))}
-            </nav>
-          </div>
-          <div className="border-t border-border p-2">
-            <button
-              type="button"
-              className="flex min-h-10 w-full items-center gap-3 rounded-md px-3 text-sm text-muted-foreground hover:bg-secondary"
-              onClick={() => setCollapsed(!collapsed)}
-              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            >
-              {collapsed ? (
-                <ChevronRight size={18} />
-              ) : (
-                <ChevronLeft size={18} />
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+      <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={logout} tooltip="Disconnect">
+              <LogOut aria-hidden="true" />
+              <span>Disconnect</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
+    </Sidebar>
+  );
+}
+
+function Workspace({ logout }: { logout: () => void }) {
+  const location = useLocation();
+  const part = navigation.find(
+    (item) =>
+      location.pathname === item.path ||
+      location.pathname.startsWith(item.path + "/"),
+  );
+  const runId = location.pathname.startsWith("/runs/")
+    ? location.pathname.split("/")[2]
+    : null;
+  return (
+    <SidebarProvider>
+      <AppSidebar logout={logout} />
+      <SidebarInset className="min-w-0">
+        <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
+          <SidebarTrigger />
+          <Breadcrumb>
+            <BreadcrumbList>
+              <BreadcrumbItem>
+                <BreadcrumbLink asChild>
+                  <Link to="/runs">Voice AI</Link>
+                </BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                {runId ? (
+                  <BreadcrumbLink asChild>
+                    <Link to="/runs">Runs</Link>
+                  </BreadcrumbLink>
+                ) : (
+                  <BreadcrumbPage>{part?.title ?? "Page"}</BreadcrumbPage>
+                )}
+              </BreadcrumbItem>
+              {runId && (
+                <>
+                  <BreadcrumbSeparator />
+                  <BreadcrumbItem>
+                    <BreadcrumbPage className="max-w-40 truncate">
+                      {runId.slice(0, 8)}
+                    </BreadcrumbPage>
+                  </BreadcrumbItem>
+                </>
               )}
-              {!collapsed && "Collapse"}
-            </button>
-            <button
-              type="button"
-              className="flex min-h-10 w-full items-center gap-3 rounded-md px-3 text-sm text-muted-foreground hover:bg-secondary"
-              onClick={logout}
-              aria-label="Disconnect"
-            >
-              <LogOut size={18} />
-              {!collapsed && "Disconnect"}
-            </button>
-          </div>
-        </aside>
+            </BreadcrumbList>
+          </Breadcrumb>
+        </header>
         <div className="min-w-0 flex-1">
-          <header className="sticky top-0 z-20 flex h-16 items-center justify-between gap-4 border-b border-border bg-card/95 px-4 backdrop-blur-sm sm:px-6">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold">{page}</p>
-              <p className="hidden text-xs text-muted-foreground sm:block">
-                Single workspace
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="hidden items-center gap-2 text-xs text-muted-foreground sm:inline-flex">
-                <LockKeyhole size={14} />
-                Operator session
-              </span>
-              <button
-                type="button"
-                onClick={logout}
-                className="rounded-md p-2 text-muted-foreground hover:bg-secondary md:hidden"
-                aria-label="Disconnect"
-              >
-                <LogOut size={18} />
-              </button>
-            </div>
-          </header>
-          <nav
-            aria-label="Mobile navigation"
-            className="flex gap-1 overflow-x-auto border-b border-border bg-card px-3 py-2 md:hidden"
+          <Suspense
+            fallback={
+              <div className="flex flex-col gap-3 p-6">
+                <Skeleton className="h-8 w-40" />
+                <Skeleton className="h-64 w-full" />
+              </div>
+            }
           >
-            {navigation.map(({ label, path, icon: Icon }) => (
-              <NavLink
-                key={path}
-                to={path}
-                end={path === "/"}
-                className={({ isActive }) =>
-                  `flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-sm ${isActive ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`
-                }
-              >
-                <Icon size={16} />
-                {label}
-              </NavLink>
-            ))}
-          </nav>
-          <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
             <Routes>
-              <Route path="/" element={<OverviewPage />} />
-              <Route path="/agents" element={<AgentsPage />} />
-              <Route path="/agents/:agentId" element={<AgentLanding />} />
-              <Route
-                path="/agents/:agentId/versions/:versionId"
-                element={<AgentEditor />}
-              />
+              <Route path="/" element={<Navigate to="/runs" replace />} />
               <Route path="/runs" element={<RunsPage />} />
               <Route path="/runs/:runId" element={<RunDetailPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
+              <Route
+                path="/agents/:agentId/versions/:versionId"
+                element={<AgentVersionPage />}
+              />
+              {navigation
+                .filter((item) => item.path !== "/runs")
+                .map((item) => (
+                  <Route
+                    key={item.path}
+                    path={item.path}
+                    element={<PlaceholderPage title={item.title} />}
+                  />
+                ))}
               <Route
                 path="*"
-                element={
-                  <div className="grid min-h-72 place-items-center text-center">
-                    <div>
-                      <CircleHelp className="mx-auto mb-3 text-muted-foreground" />
-                      <h1 className="text-xl font-semibold">Page not found</h1>
-                      <Link
-                        className="mt-3 inline-block text-sm text-primary hover:underline"
-                        to="/"
-                      >
-                        Go to overview
-                      </Link>
-                    </div>
-                  </div>
-                }
+                element={<PlaceholderPage title="Page not found" />}
               />
             </Routes>
-          </div>
+          </Suspense>
         </div>
-      </div>
-    </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
 
@@ -249,10 +284,18 @@ export function App() {
     <T,>(path: string, init?: RequestInit) => request<T>(token, path, init),
     [token],
   );
-  if (!token) return <Connect onConnect={setToken} />;
   return (
-    <ApiContext.Provider value={api}>
-      <Layout logout={() => setToken("")} />
-    </ApiContext.Provider>
+    <TooltipProvider>
+      <OperatorTokenContext.Provider value={token}>
+        <ApiContext.Provider value={api}>
+          {token ? (
+            <Workspace logout={() => setToken("")} />
+          ) : (
+            <Connect onConnect={setToken} />
+          )}
+        </ApiContext.Provider>
+      </OperatorTokenContext.Provider>
+      <Toaster position="bottom-right" />
+    </TooltipProvider>
   );
 }

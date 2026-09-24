@@ -70,6 +70,12 @@ async def test_typed_operation_metrics_and_replay(client, database):
     assert "do-not-retain" not in str(span.output_payload)
     timeline = (await client.get(f"/api/runs/{run_id}/timeline")).json()
     assert timeline["spans"][0]["completion_tokens"] == 2
+    assert timeline["spans"][0]["input"] == record["input_payload"]
+    assert timeline["spans"][0]["provider"] == "groq"
+    assert "do-not-retain" not in str(timeline["spans"][0]["output"])
+    listed = (await client.get("/api/runs")).json()["runs"]
+    assert listed[0]["id"] == run_id
+    assert listed[0]["started_at"] is None
     invalid = {**completed, "prompt_tokens": -1}
     assert (await client.post(endpoint, json={"records": [invalid]})).status_code == 422
     conflict = {**completed, "completion_tokens": 3}
@@ -110,6 +116,8 @@ async def test_spool_delivery_and_replay(client, database, tmp_path):
         timeline = (await client.get(f"/api/runs/{run_id}/timeline")).json()
         assert timeline["messages"][0]["content"] == "Hello"
         assert timeline["messages"][0]["interrupted"] is True
+        assert timeline["messages"][0]["sequence"] == 1
+        assert "playback_started_at" in timeline["messages"][0]
         assert timeline["spans"][0]["duration_ms"] >= 0
     finally:
         await spool.close()
