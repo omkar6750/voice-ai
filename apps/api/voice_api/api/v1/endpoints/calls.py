@@ -1,89 +1,85 @@
-import asyncio
+"""Queue telephone requests and launch the fenced, evidence-producing runtime."""
 
+import asyncio
+from pathlib import Path
+from uuid import NAMESPACE_URL, uuid5
+
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_operator
-from voice_api.db.session import SessionFactory
-from voice_api.models import Call, Run, RunArtifact
-from voice_api.models.common import new_id
+from voice_api.core.config import get_settings
+from voice_api.models import Call, Run
 from voice_api.schemas.call import StartCallBody
 from voice_api.services.call_service import queue_call
+from voice_runtime.execution.native import NativePipelineHost
+from voice_runtime.execution.runner import execute_call
+from voice_runtime.telephony.driver import Sim7600CallDriver
 
 router = APIRouter(tags=["calls"])
 Session = Depends(get_session)
 Operator = Depends(require_operator)
-
 _background_call_tasks: set[asyncio.Task] = set()
 
 
-async def _run_live_call_background(phone_number: str, run_id: str, call_id: str) -> None:
-    from scripts.demo_call import run_call
+async def _run_live_call_background(run_id: str, endpoint_id: str) -> None:
+    from voice_api.main import app
 
-    logger.info("Initiating live hardware call for {} to {}...", call_id, phone_number)
+    settings = get_settings()
+    host = NativePipelineHost(run_id, Path(settings.recordings_dir), settings)
+    driver = Sim7600CallDriver(host)
+    headers = {"Authorization": f"Bearer {settings.operator_token}"}
 
-    # 1. Fetch dynamic resolved_config and max_duration limit from the DB Run
-    max_duration = 600
-    resolved_config = None
-    try:
-        async with SessionFactory() as session:
-            run = await session.get(Run, run_id)
-            if run and run.resolved_config:
-                resolved_config = run.resolved_config
-                max_duration = resolved_config.get("call_limits", {}).get("max_duration_secs", 600)
-    except Exception as exc:
-        logger.warning("Could not read resolved config from run {}: {}", run_id, exc)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://runtime.local"
+    ) as client:
 
-    recording_dir = None
-    try:
-        recording_dir = await run_call(
-            phone_number,
-            max_duration_secs=max_duration,
-            agent_config=resolved_config,
-        )
-        logger.info(
-            "Live hardware call {} completed successfully (directory: {})", call_id, recording_dir
-        )
-        status = "completed"
-    except Exception as exc:
-        logger.error("Live hardware call {} failed: {}", call_id, exc)
-        status = "failed"
+        async def register_artifacts() -> None:
+            if not host.directory.exists():
+                return
+            for kind in ("input", "output", "mixed", "pipeline_log"):
+                filename = "pipeline.log" if kind == "pipeline_log" else f"{kind}.wav"
+                if not (host.directory / filename).is_file():
+                    continue
+                response = await client.post(
+                    f"/api/runs/{run_id}/artifacts",
+                    headers=headers,
+                    json={
+                        "id": str(uuid5(NAMESPACE_URL, f"{run_id}/{kind}")),
+                        "kind": kind,
+                        "path": f"{run_id}/{filename}",
+                    },
+                )
+                response.raise_for_status()
 
-    # 2. Persist call outcome and register artifacts in DB
-    try:
-        async with SessionFactory() as session:
-            call = await session.get(Call, call_id)
-            run = await session.get(Run, run_id)
-            if call:
-                call.status = status
-                if recording_dir:
-                    call.recording_path = str(recording_dir)
-            if run:
-                run.status = status
-
-            if recording_dir and recording_dir.is_dir():
-                for item in recording_dir.iterdir():
-                    if item.is_file():
-                        kind = "audio" if item.suffix in (".wav", ".mp3", ".pcm") else "log"
-                        session.add(
-                            RunArtifact(
-                                id=new_id(),
-                                run_id=run_id,
-                                kind=kind,
-                                path=str(item.resolve()),
-                                size_bytes=item.stat().st_size,
-                                sample_rate=16000 if kind == "audio" else None,
-                                channels=1 if kind == "audio" else None,
-                            )
-                        )
-            await session.commit()
-    except Exception as exc:
-        logger.error("Failed to update call records in db: {}", exc)
+        try:
+            await execute_call(
+                client,
+                settings.operator_token,
+                run_id,
+                endpoint_id,
+                driver,
+                Path("data/evidence") / f"{run_id}.jsonl",
+                secrets=tuple(
+                    secret
+                    for secret in (
+                        settings.groq_api_key,
+                        settings.sarvam_api_key,
+                        settings.cartesia_api_key,
+                        settings.gemini_api_key,
+                    )
+                    if secret
+                ),
+                after_close=register_artifacts,
+            )
+        except Exception:
+            logger.error("Live call {} stopped; inspect claim and evidence status", run_id)
 
 
-def _spawn_call_task(phone_number: str, run_id: str, call_id: str) -> None:
-    task = asyncio.create_task(_run_live_call_background(phone_number, run_id, call_id))
+def _spawn_call_task(run_id: str, endpoint_id: str) -> None:
+    task = asyncio.create_task(_run_live_call_background(run_id, endpoint_id))
     _background_call_tasks.add(task)
     task.add_done_callback(_background_call_tasks.discard)
 
@@ -92,53 +88,29 @@ def _spawn_call_task(phone_number: str, run_id: str, call_id: str) -> None:
 async def start_call(
     body: StartCallBody, session: AsyncSession = Session, _: None = Operator
 ) -> dict:
+    if body.dispatch and (not body.endpoint_id or not get_settings().operator_token):
+        raise HTTPException(422, "Dispatch needs an endpoint and operator token")
     run, call = await queue_call(
         session, body.contact_id, body.agent_version_id, body.endpoint_id, body.logging_override
     )
-    if body.dispatch:
-        call.status = "running"
-        run.status = "running"
     await session.commit()
-
     if body.dispatch:
-        _spawn_call_task(call.target_snapshot, run.id, call.id)
-        return {
-            "run_id": run.id,
-            "call_id": call.id,
-            "status": "calling",
-            "target": call.target_snapshot,
-        }
-
-    return {"run_id": run.id, "call_id": call.id, "status": "queued"}
+        _spawn_call_task(run.id, body.endpoint_id)
+    return {
+        "run_id": run.id,
+        "call_id": call.id,
+        "status": "dispatching" if body.dispatch else "queued",
+        "target": call.target_snapshot,
+    }
 
 
 @router.get("/calls")
 async def list_calls(session: AsyncSession = Session, _: None = Operator) -> dict:
     rows = (await session.scalars(select(Call).order_by(Call.created_at.desc()))).all()
-    return {
-        "calls": [
-            {
-                "id": c.id,
-                "run_id": c.run_id,
-                "contact_id": c.contact_id,
-                "agent_version_id": c.agent_version_id,
-                "target_snapshot": c.target_snapshot,
-                "status": c.status,
-                "recording_path": c.recording_path,
-                "answered_at": c.answered_at,
-                "ended_at": c.ended_at,
-                "created_at": c.created_at,
-            }
-            for c in rows
-        ]
-    }
+    return {"calls": [_call_response(call) for call in rows]}
 
 
-@router.get("/calls/{call_id}")
-async def get_call(call_id: str, session: AsyncSession = Session, _: None = Operator) -> dict:
-    call = await session.get(Call, call_id)
-    if call is None:
-        raise HTTPException(404, "Call not found")
+def _call_response(call: Call) -> dict:
     return {
         "id": call.id,
         "run_id": call.run_id,
@@ -153,6 +125,14 @@ async def get_call(call_id: str, session: AsyncSession = Session, _: None = Oper
     }
 
 
+@router.get("/calls/{call_id}")
+async def get_call(call_id: str, session: AsyncSession = Session, _: None = Operator) -> dict:
+    call = await session.get(Call, call_id)
+    if call is None:
+        raise HTTPException(404, "Call not found")
+    return _call_response(call)
+
+
 @router.post("/calls/{call_id}/dispatch")
 async def dispatch_queued_call(
     call_id: str, session: AsyncSession = Session, _: None = Operator
@@ -160,19 +140,15 @@ async def dispatch_queued_call(
     call = await session.get(Call, call_id)
     if call is None:
         raise HTTPException(404, "Call not found")
-    if call.status not in ("queued", "failed"):
-        raise HTTPException(400, f"Call is already {call.status}")
-
+    if call.status != "queued":
+        raise HTTPException(409, "Only queued calls can be dispatched")
     run = await session.get(Run, call.run_id) if call.run_id else None
-    call.status = "running"
-    if run:
-        run.status = "running"
-    await session.commit()
-
-    _spawn_call_task(call.target_snapshot, call.run_id or "", call.id)
+    if run is None or not run.endpoint_id or not get_settings().operator_token:
+        raise HTTPException(422, "Dispatch needs an endpoint and operator token")
+    _spawn_call_task(run.id, run.endpoint_id)
     return {
-        "run_id": call.run_id,
+        "run_id": run.id,
         "call_id": call.id,
-        "status": "calling",
+        "status": "dispatching",
         "target": call.target_snapshot,
     }

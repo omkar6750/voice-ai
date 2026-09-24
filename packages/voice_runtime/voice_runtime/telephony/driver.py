@@ -13,7 +13,7 @@ class PipelineHost(Protocol):
         """Build/start pipeline and open USB PCM before dialing, without greeting yet."""
         ...
 
-    async def converse(self) -> dict:
+    async def converse(self, modem: Sim7600Modem) -> dict:
         """Trigger greeting after connection; return when conversation ends."""
         ...
 
@@ -44,13 +44,13 @@ class Sim7600CallDriver:
     async def call(self, destination: str) -> dict:
         self.dial_attempted = True
         await self.session.start_call(destination)
-        return await self.host.converse()
+        return await self.host.converse(self.modem)
 
     async def close(self) -> None:
         try:
             if self.session and self.dial_attempted:
                 await self.session.end_call()
-                if await self.modem.state() != CallState.DISCONNECTED:
+                if await self.modem.state() not in (CallState.IDLE, CallState.DISCONNECTED):
                     raise RuntimeError("Modem still reports an active call")
         finally:
             try:

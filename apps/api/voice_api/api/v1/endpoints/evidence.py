@@ -21,9 +21,16 @@ from voice_api.models import (
 )
 from voice_runtime.contracts.evidence import (
     EvidenceBatch,
+    ExchangeEnded,
     ExchangeRecord,
+    FlowVisitEnded,
+    FlowVisitStarted,
     MessageRecord,
     OperationEnded,
+    ToolEnded,
+    ToolResultConsumed,
+    ToolResultRecorded,
+    ToolStarted,
 )
 
 router = APIRouter(tags=["evidence"])
@@ -89,6 +96,184 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
             verify_same(row, fields)
         else:
             session.add(Exchange(id=record.exchange_id, **fields))
+        await session.flush()
+        return
+    if isinstance(record, ExchangeEnded):
+        row = await session.get(Exchange, record.exchange_id)
+        if row is None or row.run_id != run_id:
+            raise HTTPException(422, "Exchange must belong to run")
+        ended_at = at_ns(record.timestamp_ns)
+        if ended_at < row.created_at:
+            raise HTTPException(422, "Exchange end precedes start")
+        if row.ended_at is not None:
+            verify_same(row, {"ended_at": ended_at, "status": record.status})
+        else:
+            row.ended_at, row.status = ended_at, record.status
+        await session.flush()
+        return
+    if isinstance(record, FlowVisitStarted):
+        run = await session.get(Run, run_id)
+        nodes = run.resolved_config.get("flow", {}).get("nodes", [])
+        if record.node_key not in {node["id"] for node in nodes}:
+            raise HTTPException(422, "Node is absent from resolved flow")
+        if record.triggered_by_tool_id:
+            trigger = await session.get(ToolInvocation, record.triggered_by_tool_id)
+            if trigger is None or trigger.run_id != run_id:
+                raise HTTPException(422, "Flow trigger must belong to run")
+        started_at = at_ns(record.started_ns)
+        visit = await session.get(FlowNodeVisit, record.visit_id)
+        if visit is not None:
+            verify_same(
+                visit,
+                {
+                    "run_id": run_id,
+                    "span_id": record.span_id,
+                    "sequence": record.sequence,
+                    "node_key": record.node_key,
+                    "triggered_by_tool_id": record.triggered_by_tool_id,
+                },
+            )
+            verify_same(await session.get(TraceSpan, visit.span_id), {"started_at": started_at})
+        else:
+            session.add(
+                TraceSpan(
+                    id=record.span_id,
+                    run_id=run_id,
+                    name=record.node_key,
+                    category="flow_node",
+                    status="running",
+                    started_at=started_at,
+                )
+            )
+            await session.flush()
+            session.add(
+                FlowNodeVisit(
+                    id=record.visit_id,
+                    run_id=run_id,
+                    span_id=record.span_id,
+                    sequence=record.sequence,
+                    node_key=record.node_key,
+                    triggered_by_tool_id=record.triggered_by_tool_id,
+                )
+            )
+        await session.flush()
+        return
+    if isinstance(record, FlowVisitEnded):
+        visit = await session.get(FlowNodeVisit, record.visit_id)
+        if visit is None or visit.run_id != run_id:
+            raise HTTPException(422, "Flow visit must belong to run")
+        span = await session.get(TraceSpan, visit.span_id)
+        ended_at = at_ns(record.ended_ns)
+        if ended_at < span.started_at:
+            raise HTTPException(422, "Flow exit precedes entry")
+        fields = {
+            "ended_at": ended_at,
+            "duration_ms": record.duration_ms,
+            "status": record.status,
+        }
+        if span.ended_at is not None:
+            verify_same(span, fields)
+        else:
+            for key, value in fields.items():
+                setattr(span, key, value)
+        await session.flush()
+        return
+    if isinstance(record, ToolStarted):
+        if record.exchange_id is not None:
+            exchange = await session.get(Exchange, record.exchange_id)
+            if exchange is None or exchange.run_id != run_id:
+                raise HTTPException(422, "Tool exchange must belong to run")
+        run = await session.get(Run, run_id)
+        binding = run.resolved_config.get("_resolved", {}).get("tools", {}).get(record.binding_key)
+        if binding is None or binding.get("version_id") != record.tool_version_id:
+            raise HTTPException(422, "Tool binding is absent from run snapshot")
+        if record.llm_operation_id:
+            operation = await session.get(TraceSpan, record.llm_operation_id)
+            if operation is None or operation.run_id != run_id:
+                raise HTTPException(422, "Tool inference must belong to run")
+        fields = {
+            "run_id": run_id,
+            "exchange_id": record.exchange_id,
+            "tool_version_id": record.tool_version_id,
+            "binding_key": record.binding_key,
+            "function_call_id": record.function_call_id,
+            "llm_operation_id": record.llm_operation_id,
+            "arguments": record.arguments,
+            "started_at": at_ns(record.started_ns),
+        }
+        row = await session.get(ToolInvocation, record.invocation_id)
+        if row:
+            verify_same(row, fields)
+        else:
+            session.add(
+                ToolInvocation(
+                    id=record.invocation_id,
+                    idempotency_key=record.invocation_id,
+                    status="running",
+                    **fields,
+                )
+            )
+        await session.flush()
+        return
+    if isinstance(record, ToolEnded):
+        row = await session.get(ToolInvocation, record.invocation_id)
+        if row is None or row.run_id != run_id:
+            raise HTTPException(422, "Tool invocation must belong to run")
+        ended_at = at_ns(record.ended_ns)
+        if ended_at < row.started_at:
+            raise HTTPException(422, "Tool end precedes start")
+        fields = {
+            "ended_at": ended_at,
+            "status": record.status,
+            "result": record.result,
+            "connection_id": record.connection_id,
+            "provider_message_id": record.provider_message_id,
+        }
+        if row.ended_at is not None:
+            verify_same(row, fields)
+        else:
+            for key, value in fields.items():
+                setattr(row, key, value)
+        await session.flush()
+        return
+    if isinstance(record, ToolResultRecorded):
+        tool = await session.get(ToolInvocation, record.invocation_id)
+        if tool is None or tool.run_id != run_id:
+            raise HTTPException(422, "Tool result requires an invocation")
+        fields = {
+            "run_id": run_id,
+            "tool_invocation_id": record.invocation_id,
+            "sequence": record.sequence,
+            "payload": record.payload,
+            "is_final": record.is_final,
+            "occurred_at": at_ns(record.timestamp_ns),
+        }
+        row = await session.get(ToolInvocationResult, record.id)
+        if row:
+            verify_same(row, fields)
+        else:
+            session.add(ToolInvocationResult(id=record.id, **fields))
+        await session.flush()
+        return
+    if isinstance(record, ToolResultConsumed):
+        result = await session.get(ToolInvocationResult, record.result_id)
+        exchange = await session.get(Exchange, record.exchange_id)
+        if (
+            result is None
+            or result.run_id != run_id
+            or exchange is None
+            or exchange.run_id != run_id
+        ):
+            raise HTTPException(422, "Consumption must belong to run")
+        consumed_at = at_ns(record.timestamp_ns)
+        if consumed_at < result.occurred_at:
+            raise HTTPException(422, "Consumption precedes result")
+        fields = {"consumed_at": consumed_at, "consumed_exchange_id": record.exchange_id}
+        if result.consumed_at is not None:
+            verify_same(result, fields)
+        else:
+            for key, value in fields.items():
+                setattr(result, key, value)
         await session.flush()
         return
     if record.exchange_id is not None:

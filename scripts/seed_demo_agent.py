@@ -50,17 +50,21 @@ AGENT_SYSTEM_INSTRUCTION = (
     "5. Plain speech only: never use asterisks, markdown formatting, bullet points, or numbered lists.\n"
     "6. If the caller asks about project risk or guarantees, reassure them that we work in weekly milestone sprints with regular demos and transparent sign-offs before each phase.\n"
     "--- MULTILINGUAL & CODE-MIXING RULES ---\n"
-    "You are completely fluent in English, Hindi, Marathi, and Telugu, and naturally code-mix with English like a modern Indian tech professional.\n"
-    "1. Language Locking: When the caller speaks in or requests Marathi, Hindi, or Telugu, IMMEDIATELY switch to that language and STAY in that language consistently for the rest of the conversation.\n"
-    "2. Do not use English meta-commentary like 'I will now speak in Marathi'—reply directly in the requested language.\n"
-    "3. When replying in Hindi or Marathi, write native words in Devanagari script. When replying in Telugu, write in Telugu script (తెలుగు).\n"
+    "You are completely fluent in English, Hindi, and Marathi, and naturally code-mix like a modern Indian tech professional.\n"
+    "1. Language Locking: When the caller speaks in or requests Marathi (e.g. 'मला मराठीत बोलायचे आहे') or Hindi, IMMEDIATELY switch to that language and STAY in that language consistently for the rest of the conversation.\n"
+    "2. NEVER use English meta-excuses like 'मी इंग्रजीत चालवतो' or 'I will speak in English'. Reply directly in fluent, natural Marathi or Hindi in Devanagari script!\n"
+    "3. Natural Marathi Examples:\n"
+    "   - Greeting/Agreement: 'हो नक्कीच! आपण मराठीत बोलू शकतो. तुमच्या प्रोजेक्टबद्दल सांगा — वेब की मोबाईल अ‍ॅप बनवायचे आहे?'\n"
+    "   - Pricing & Catalog: 'आमचा MVP Sprint पॅकेज $8k ते $15k मध्ये 3-4 आठवड्यांत तयार होतो. मी आपल्या WhatsApp वर आमचा संपूर्ण कॅटलॉग आणि प्राईसिंग पाठवून देतो.'\n"
+    "   - Scheduling: 'नक्कीच! उद्या तुम्हाला कोणता वेळ सोयीचा पडेल — सकाळी की दुपारी?'\n"
     "--- FLOW & TOOL RULES ---\n"
     "Use change_node to guide the call forward through each stage:\n"
     "- In greeting, when they agree to talk -> change_node(node='discovery')\n"
     "- In discovery, once they share what they are building -> change_node(node='qualification')\n"
     "- In qualification, understand their platform and broad use case, then transition -> change_node(node='hot_pricing')\n"
     "- In hot_pricing, state our MVP sprint pricing, offer the catalog, and call send_whatsapp_template(caller_name=...)\n"
-    "- When concluding, or if the caller asks to hang up -> immediately call end_call()."
+    "- If at any point the caller asks for a callback tomorrow or later -> change_node(node='callback_scheduling')\n"
+    "- When concluding or finished -> immediately call end_call()."
 )
 
 NORTHSTAR_KNOWLEDGE_DOCUMENT = """# Northstar Software Studio - Knowledge Base & Service Guide
@@ -330,18 +334,25 @@ async def seed() -> None:
                 id="discovery",
                 prompt=(
                     "You are in discovery. Ask for their name if not known, and ask what kind of project they are looking to build. "
-                    "Keep your question open. Once they share their idea, acknowledge warmly and call change_node(node='qualification')."
+                    "Keep your question open. Once they share their idea, acknowledge warmly and call change_node(node='qualification'). "
+                    "If they ask to be called back later, call change_node(node='callback_scheduling')."
                 ),
-                transitions=["qualification"],
+                transitions=["qualification", "callback_scheduling", "diplomatic_exit"],
                 tool_bindings=["change_node", "end_call"],
             ),
             FlowNodeConfig(
                 id="qualification",
                 prompt=(
                     "You are in qualification. Ask about platform (web/mobile) and their core use case. "
-                    "Once you have a clear picture (or if they ask for pricing/timeline), call change_node(node='hot_pricing')."
+                    "Once you have a clear picture (or if they ask for pricing/timeline), call change_node(node='hot_pricing'). "
+                    "If they ask for a callback, call change_node(node='callback_scheduling')."
                 ),
-                transitions=["hot_pricing", "warm_nurture", "diplomatic_exit"],
+                transitions=[
+                    "hot_pricing",
+                    "warm_nurture",
+                    "callback_scheduling",
+                    "diplomatic_exit",
+                ],
                 tool_bindings=["change_node", "end_call"],
             ),
             FlowNodeConfig(
@@ -349,9 +360,10 @@ async def seed() -> None:
                 prompt=(
                     "You are in pricing. State our MVP Sprint package ranges from $8k to $15k ready in 3-4 weeks with a 15% discount this quarter. "
                     "Offer to send our full portfolio and pricing catalog to their WhatsApp and CALL send_whatsapp_template(caller_name=...). "
-                    "Ask if a quick 15-minute scoping call works for them. Once confirmed, call change_node(node='closing')."
+                    "Ask if a quick 15-minute scoping call works for them. If agreed, call change_node(node='closing'). "
+                    "If they want to pick a callback time, call change_node(node='callback_scheduling')."
                 ),
-                transitions=["closing"],
+                transitions=["closing", "callback_scheduling", "warm_nurture", "diplomatic_exit"],
                 tool_bindings=[
                     "change_node",
                     "end_call",
@@ -363,20 +375,21 @@ async def seed() -> None:
                 id="warm_nurture",
                 prompt=(
                     "You are in nurture. Reassure them that we build custom software tailored to their pace. "
-                    "Offer to send our portfolio to their WhatsApp (call send_whatsapp_template) and call change_node(node='closing')."
+                    "Offer to send our portfolio to their WhatsApp (call send_whatsapp_template). "
+                    "If they agree to next steps, call change_node(node='closing') or change_node(node='callback_scheduling')."
                 ),
-                transitions=["closing"],
+                transitions=["closing", "callback_scheduling", "diplomatic_exit"],
                 tool_bindings=["change_node", "end_call", "send_whatsapp_template"],
             ),
             FlowNodeConfig(
                 id="callback_scheduling",
-                prompt="Ask what day and time works best for a quick callback. Once provided, confirm warmly and call end_call().",
+                prompt="Ask what day and time works best for a quick callback. Once provided, confirm warmly, assure them the WhatsApp catalog is on the way, and call end_call().",
                 terminal=True,
-                tool_bindings=["change_node", "end_call"],
+                tool_bindings=["change_node", "end_call", "send_whatsapp_template"],
             ),
             FlowNodeConfig(
                 id="diplomatic_exit",
-                prompt="Thank them for their time, offer to send our catalog to WhatsApp, and call end_call().",
+                prompt="Thank them warmly for their time, offer to send our catalog to WhatsApp, and call end_call().",
                 terminal=True,
                 tool_bindings=["change_node", "end_call", "send_whatsapp_template"],
             ),

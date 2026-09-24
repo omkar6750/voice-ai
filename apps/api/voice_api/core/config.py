@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     operator_token: str | None = None
     gemini_api_key: str | None = None
     integration_media_dir: str = "data/integration-media"
+    whatsapp_access_token: str | None = None
+    whatsapp_phone_number_id: str | None = None
+    whatsapp_template_name: str | None = "dialtone_followup"
+    whatsapp_header_media_id: str | None = None
 
     model_config = SettingsConfigDict(
         env_prefix="VOICE_",

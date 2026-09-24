@@ -7,13 +7,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { clock, consumingLlm, duration, resultsFor, stamp } from "./model";
 import type { RunDetail, Selection, Timeline } from "./types";
 
@@ -408,40 +401,20 @@ export function Inspector({
   timeline,
   run,
   onSelect,
-  mobileOpen,
-  onMobileOpenChange,
 }: {
   selection: Selection;
   timeline: Timeline;
   run: RunDetail;
   onSelect: (selection: Selection) => void;
-  mobileOpen: boolean;
-  onMobileOpenChange: (open: boolean) => void;
 }) {
-  const body = (
-    <Evidence
-      selection={selection}
-      timeline={timeline}
-      run={run}
-      onSelect={onSelect}
-    />
-  );
   return (
-    <>
-      <Card className="hidden h-fit min-w-0 xl:sticky xl:top-4 xl:block">
-        {body}
-      </Card>
-      <Sheet open={mobileOpen} onOpenChange={onMobileOpenChange}>
-        <SheetContent className="overflow-y-auto xl:hidden">
-          <SheetHeader>
-            <SheetTitle>Evidence details</SheetTitle>
-            <SheetDescription>
-              Run, prompt, message, provider, and tool data.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="min-w-0">{body}</div>
-        </SheetContent>
-      </Sheet>
-    </>
+    <Card className="h-fit min-w-0 xl:sticky xl:top-4">
+      <Evidence
+        selection={selection}
+        timeline={timeline}
+        run={run}
+        onSelect={onSelect}
+      />
+    </Card>
   );
 }

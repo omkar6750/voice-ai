@@ -63,6 +63,7 @@ async def claim(run_id: str, body: Claim, session: AsyncSession = Session) -> di
         snapshot["_resolved"] = {
             **snapshot.get("_resolved", {}),
             "endpoint": config.model_dump(mode="json"),
+            "contact": run.contact_snapshot,
         }
         run.resolved_config, run.config_hash = snapshot, fingerprint(snapshot)
     else:

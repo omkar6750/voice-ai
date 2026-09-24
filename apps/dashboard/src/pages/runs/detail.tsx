@@ -107,7 +107,6 @@ export function RunDetailPage() {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [selection, setSelection] = useState<Selection>({ kind: "run" });
-  const [mobileInspector, setMobileInspector] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const currentRun = useRef(runId);
@@ -115,7 +114,6 @@ export function RunDetailPage() {
   currentRun.current = runId;
   const select = (value: Selection) => {
     setSelection(value);
-    setMobileInspector(true);
   };
   const load = useCallback(
     async (notify = false) => {
@@ -362,8 +360,6 @@ export function RunDetailPage() {
                 timeline={timeline}
                 run={run}
                 onSelect={select}
-                mobileOpen={mobileInspector}
-                onMobileOpenChange={setMobileInspector}
               />
             </div>
           </>

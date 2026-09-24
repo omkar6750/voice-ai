@@ -1,6 +1,7 @@
 """One claimed call: fence before effects, renew ownership, always release transport first."""
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Protocol
 from uuid import uuid4
@@ -29,6 +30,7 @@ async def execute_call(
     *,
     heartbeat_seconds: float = 20,
     secrets: tuple[str, ...] = (),
+    after_close: Callable[[], Awaitable[None]] | None = None,
 ) -> str:
     if not 0 < heartbeat_seconds <= 20:
         raise ValueError("Heartbeat interval must be within 20 seconds")
@@ -101,6 +103,12 @@ async def execute_call(
             released = True
         except Exception:
             error = "Transport cleanup uncertain; endpoint remains reserved"
+        if released and after_close is not None:
+            try:
+                await after_close()
+            except Exception:
+                incomplete = True
+                outcome, error = "failed", "Call artifacts incomplete; inspect runtime files"
         # Stop and await uploader before final drain: only one cursor owner at a time.
         if delivery_task:
             delivery_task.cancel()
