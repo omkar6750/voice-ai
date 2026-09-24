@@ -69,11 +69,59 @@ const RunDetailPage = lazy(() =>
     default: module.RunDetailPage,
   })),
 );
+const AgentsPage = lazy(() =>
+  import("@/pages/agents").then((module) => ({ default: module.AgentsPage })),
+);
+const AgentDetailPage = lazy(() =>
+  import("@/pages/agents/detail").then((module) => ({
+    default: module.AgentDetailPage,
+  })),
+);
 const AgentVersionPage = lazy(() =>
   import("@/pages/agent-version").then((module) => ({
     default: module.AgentVersionPage,
   })),
 );
+const ContactsPage = lazy(() =>
+  import("@/pages/contacts").then((module) => ({
+    default: module.ContactsPage,
+  })),
+);
+const KnowledgePage = lazy(() =>
+  import("@/pages/knowledge").then((module) => ({
+    default: module.KnowledgePage,
+  })),
+);
+const KnowledgeDetailPage = lazy(() =>
+  import("@/pages/knowledge/detail").then((module) => ({
+    default: module.KnowledgeDetailPage,
+  })),
+);
+const ToolsPage = lazy(() =>
+  import("@/pages/tools").then((module) => ({ default: module.ToolsPage })),
+);
+const IntegrationsPage = lazy(() =>
+  import("@/pages/integrations").then((module) => ({
+    default: module.IntegrationsPage,
+  })),
+);
+const CallbacksPage = lazy(() =>
+  import("@/pages/callbacks").then((module) => ({
+    default: module.CallbacksPage,
+  })),
+);
+const EndpointsPage = lazy(() =>
+  import("@/pages/endpoints").then((module) => ({
+    default: module.EndpointsPage,
+  })),
+);
+const SettingsPage = lazy(() =>
+  import("@/pages/settings").then((module) => ({
+    default: module.SettingsPage,
+  })),
+);
+
+import { QuickDialer } from "@/components/quick-dialer";
 
 const navigation = [
   { title: "Runs", path: "/runs", icon: Activity },
@@ -150,7 +198,7 @@ function AppSidebar({ logout }: { logout: () => void }) {
           to="/runs"
           className="flex min-h-10 items-center gap-2 px-2 font-semibold"
         >
-          <AudioLines aria-hidden="true" className="size-4" />
+          <AudioLines aria-hidden="true" className="size-4 text-emerald-600" />
           <span className="group-data-[collapsible=icon]:hidden">Voice AI</span>
         </Link>
       </SidebarHeader>
@@ -208,37 +256,43 @@ function Workspace({ logout }: { logout: () => void }) {
     <SidebarProvider>
       <AppSidebar logout={logout} />
       <SidebarInset className="min-w-0">
-        <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
-          <SidebarTrigger />
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem>
-                <BreadcrumbLink asChild>
-                  <Link to="/runs">Voice AI</Link>
-                </BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
-                {runId ? (
+        <header className="flex h-12 shrink-0 items-center justify-between border-b px-4">
+          <div className="flex items-center gap-3">
+            <SidebarTrigger />
+            <Breadcrumb>
+              <BreadcrumbList>
+                <BreadcrumbItem>
                   <BreadcrumbLink asChild>
-                    <Link to="/runs">Runs</Link>
+                    <Link to="/runs">Voice AI</Link>
                   </BreadcrumbLink>
-                ) : (
-                  <BreadcrumbPage>{part?.title ?? "Page"}</BreadcrumbPage>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  {runId ? (
+                    <BreadcrumbLink asChild>
+                      <Link to="/runs">Runs</Link>
+                    </BreadcrumbLink>
+                  ) : (
+                    <BreadcrumbPage>{part?.title ?? "Page"}</BreadcrumbPage>
+                  )}
+                </BreadcrumbItem>
+                {runId && (
+                  <>
+                    <BreadcrumbSeparator />
+                    <BreadcrumbItem>
+                      <BreadcrumbPage className="max-w-40 truncate">
+                        {runId.slice(0, 8)}
+                      </BreadcrumbPage>
+                    </BreadcrumbItem>
+                  </>
                 )}
-              </BreadcrumbItem>
-              {runId && (
-                <>
-                  <BreadcrumbSeparator />
-                  <BreadcrumbItem>
-                    <BreadcrumbPage className="max-w-40 truncate">
-                      {runId.slice(0, 8)}
-                    </BreadcrumbPage>
-                  </BreadcrumbItem>
-                </>
-              )}
-            </BreadcrumbList>
-          </Breadcrumb>
+              </BreadcrumbList>
+            </Breadcrumb>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <QuickDialer />
+          </div>
         </header>
         <div className="min-w-0 flex-1">
           <Suspense
@@ -253,19 +307,25 @@ function Workspace({ logout }: { logout: () => void }) {
               <Route path="/" element={<Navigate to="/runs" replace />} />
               <Route path="/runs" element={<RunsPage />} />
               <Route path="/runs/:runId" element={<RunDetailPage />} />
+
+              <Route path="/agents" element={<AgentsPage />} />
+              <Route path="/agents/:agentId" element={<AgentDetailPage />} />
               <Route
                 path="/agents/:agentId/versions/:versionId"
                 element={<AgentVersionPage />}
               />
-              {navigation
-                .filter((item) => item.path !== "/runs")
-                .map((item) => (
-                  <Route
-                    key={item.path}
-                    path={item.path}
-                    element={<PlaceholderPage title={item.title} />}
-                  />
-                ))}
+
+              <Route path="/contacts" element={<ContactsPage />} />
+
+              <Route path="/knowledge" element={<KnowledgePage />} />
+              <Route path="/knowledge/:kbId" element={<KnowledgeDetailPage />} />
+
+              <Route path="/tools" element={<ToolsPage />} />
+              <Route path="/integrations" element={<IntegrationsPage />} />
+              <Route path="/callbacks" element={<CallbacksPage />} />
+              <Route path="/endpoints" element={<EndpointsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+
               <Route
                 path="*"
                 element={<PlaceholderPage title="Page not found" />}

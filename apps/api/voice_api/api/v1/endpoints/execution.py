@@ -17,6 +17,22 @@ ACTIVE = ("claimed", "running", "uncertain")
 Session = Depends(get_session)
 
 
+@router.get("/runtime-endpoints")
+async def list_endpoints(session: AsyncSession = Session) -> dict:
+    rows = (await session.scalars(select(RuntimeEndpoint).order_by(RuntimeEndpoint.name))).all()
+    return {
+        "endpoints": [
+            {
+                "id": ep.id,
+                "name": ep.name,
+                "config": ep.config,
+                "created_at": ep.created_at,
+            }
+            for ep in rows
+        ]
+    }
+
+
 @router.post("/runtime-endpoints", status_code=201)
 async def register(body: EndpointBody, session: AsyncSession = Session) -> dict:
     if body.config.at_port == body.config.audio_port:

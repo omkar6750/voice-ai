@@ -70,11 +70,13 @@ uv run pipecat context-hub serve
 ## Configurable runtime
 
 The old voice-agent launcher and duplicate runtime config/pipeline were removed.
-contracts/ owns DB-backed agent configuration. API call dispatch now invokes the
-protected demo runner and passes a resolved snapshot. Flow prompts, node bindings,
-initial node, duration and system prompt are applied; providers, audio, VAD and other
-runtime settings still use tested script constants. API dispatch does not yet use the
-fenced executor or durable live evidence path. See PLAN-0003 and PLAN-0004.
+contracts/ owns DB-backed agent configuration. API call dispatch uses the fenced
+SIM7600 executor and the native Pipecat host, not the protected demo script.
+The resolved snapshot drives prompts, provider models, audio, VAD and node bindings.
+Finalized transcript, operation/tool/flow evidence and recordings are delivered
+under the run ID. Other demo actions and background jobs are not yet connected to
+the live runner; unsupported action tools return explicit errors. See PLAN-0003
+and PLAN-0004.
 
 Read RFC-0003, ADR-0006, ADR-0007 and PLAN-0003 before changing config, evidence,
 knowledge, or integrations. `scripts/demo_call.py` is tested reference material: do not edit it
@@ -106,3 +108,6 @@ uv run python scripts/worktree.py list
 
 The helper keeps worktrees beside this repository and carries `.env` only when it exists. Never commit secrets, generated runtime audio, or local credentials.
 
+# Agent Rules <!-- tessl-managed -->
+
+@.tessl/RULES.md follow the [instructions](.tessl/RULES.md)

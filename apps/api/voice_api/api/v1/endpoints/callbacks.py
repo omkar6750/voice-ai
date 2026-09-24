@@ -67,6 +67,28 @@ async def schedule(body: ScheduleCallback, session: AsyncSession = Session) -> d
     return {"id": callback.id, "status": callback.status}
 
 
+@router.get("/callbacks")
+async def list_callbacks(session: AsyncSession = Session) -> dict:
+    rows = (await session.scalars(select(Callback).order_by(Callback.due_at.asc()))).all()
+    return {
+        "callbacks": [
+            {
+                "id": c.id,
+                "request_key": c.request_key,
+                "contact_id": c.contact_id,
+                "agent_version_id": c.agent_version_id,
+                "due_at": c.due_at,
+                "timezone": c.timezone,
+                "original_phrase": c.original_phrase,
+                "status": c.status,
+                "call_id": c.call_id,
+                "automatic_attempts": c.automatic_attempts,
+            }
+            for c in rows
+        ]
+    }
+
+
 @router.post("/callbacks/{callback_id}/launch")
 async def launch(callback_id: str, body: LaunchCallback, session: AsyncSession = Session) -> dict:
     callback = await session.get(
