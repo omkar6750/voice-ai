@@ -70,15 +70,19 @@ uv run pipecat context-hub serve
 ## Configurable runtime
 
 The old voice-agent launcher and duplicate runtime config/pipeline were removed.
-contracts/ owns DB-backed agent configuration. The protected demo remains the only
-working live-call entrypoint; it uses its own constants, not runtime_endpoints rows.
-See PLAN-0003's remaining-work checklist before connecting the configurable runner.
+contracts/ owns DB-backed agent configuration. API call dispatch now invokes the
+protected demo runner and passes a resolved snapshot. Flow prompts, node bindings,
+initial node, duration and system prompt are applied; providers, audio, VAD and other
+runtime settings still use tested script constants. API dispatch does not yet use the
+fenced executor or durable live evidence path. See PLAN-0003 and PLAN-0004.
 
 Read RFC-0003, ADR-0006, ADR-0007 and PLAN-0003 before changing config, evidence,
 knowledge, or integrations. `scripts/demo_call.py` is tested reference material: do not edit it
 without explicit user instruction. Agent/tool drafts use revisions; published versions are immutable.
 
 ## API Architecture
+
+Dashboard work follows RFC-0004 through RFC-0013 and docs/design.md. Use Tailwind utilities and shared semantic shadcn tokens; do not add handwritten component CSS, inline style attributes, or CSS modules. The only dashboard stylesheet contains Tailwind directives. Keep operator token in browser memory, generate typed API contracts as response models become available, and mark controls pending when the live runner does not apply their settings. Do not use browser automation for this dashboard task unless the user changes that instruction.
 
 `apps/api/voice_api` follows a layered structure:
 - `core/`: Application settings (`config.py`), security and credential sanitization (`security.py`).

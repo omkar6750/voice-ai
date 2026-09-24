@@ -86,7 +86,7 @@ The voice runtime pipeline is orchestrated using Pipecat with custom audio trans
 | **Main LLM** | Groq Cloud | `qwen/qwen3.8-27b` (`temperature=0.4`, `max_tokens=180`) | Ultra-low TTFB (~200–350ms); supports complex multi-tool schemas and code-mixed Indian languages. |
 | **Text-to-Speech (TTS)** | Sarvam AI / Cartesia | Sarvam `bulbul:v3` (speaker `"ritu"`, `pace=1.0`) / Cartesia (`71a7ad...`) | Native phoneme rendering for Devanagari (Marathi/Hindi) and Telugu script mixed with Latin technical terms. Cartesia preserved for pure English. |
 | **Lead Classification** | TypeSafe AI & Groq | Jev System One (`jev-latest`) & Groq `qwen3.8-27b` | Jev delivers structured, calibrated multi-choice probability distributions (`hot`, `warm`, `cold`) and tone assessment. |
-| **Omnichannel Messaging** | Meta WhatsApp Cloud API | Graph API v22.0 (`dialtone_followup` template) | Automatic AI summary generation and real-time WhatsApp template delivery during active calls. |
+| **Omnichannel Messaging** | Meta WhatsApp Cloud API | Graph API v22.0 (configured approved template) | Automatic AI summary generation and real-time WhatsApp template delivery during active calls. |
 
 ---
 

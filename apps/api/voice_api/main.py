@@ -7,6 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from voice_api.api.v1.api import api_router
 from voice_api.api.v1.endpoints.agents import update_agent_version
@@ -20,6 +21,25 @@ from voice_api.schemas.agent import (
 from voice_api.schemas.call import StartCallBody
 
 app = FastAPI(title="Voice AI API", version="0.2.0")
+
+
+class DashboardFiles(StaticFiles):
+    """Serve the client router on reload without turning missing API/assets into HTML."""
+
+    async def get_response(self, path, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as error:
+            route = path.replace("\\", "/").lstrip("/")
+            if (
+                error.status_code != 404
+                or scope["method"] not in ("GET", "HEAD")
+                or route.startswith(("api/", "assets/"))
+                or route in {"api", "health"}
+                or "." in Path(route).name
+            ):
+                raise
+            return await super().get_response("index.html", scope)
 
 
 @app.exception_handler(RequestValidationError)
@@ -48,7 +68,7 @@ app.include_router(api_router, prefix="/api")
 
 dashboard_dist = Path(__file__).resolve().parents[2] / "dashboard" / "dist"
 if dashboard_dist.is_dir():
-    app.mount("/", StaticFiles(directory=dashboard_dist, html=True), name="dashboard")
+    app.mount("/", DashboardFiles(directory=dashboard_dist, html=True), name="dashboard")
 
 __all__ = [
     "ActivateAgentBody",

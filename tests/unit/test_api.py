@@ -1,7 +1,8 @@
 import httpx
 import pytest
+from fastapi import FastAPI
 from voice_api.core.config import Settings
-from voice_api.main import app
+from voice_api.main import DashboardFiles, app
 
 
 @pytest.mark.asyncio
@@ -12,6 +13,22 @@ async def test_health() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "service": "voice-api"}
+
+
+@pytest.mark.asyncio
+async def test_dashboard_deep_links_do_not_hide_missing_api_or_assets(tmp_path) -> None:
+    (tmp_path / "index.html").write_text("<html>dashboard</html>", encoding="utf-8")
+    site = FastAPI()
+    site.mount("/", DashboardFiles(directory=tmp_path, html=True))
+    transport = httpx.ASGITransport(app=site)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        for path in ("/agents/example/versions/example", "/runs/example"):
+            response = await client.get(path)
+            assert response.status_code == 200
+            assert response.text == "<html>dashboard</html>"
+        for path in ("/api/v1/missing", "/assets/missing.js"):
+            response = await client.get(path)
+            assert response.status_code == 404
 
 
 @pytest.mark.asyncio

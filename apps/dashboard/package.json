@@ -7,17 +7,24 @@
     "generate": "openapi-typescript ../../data/openapi.json -o src/generated/api.d.ts && node scripts/generate-schema.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "format": "prettier --write src",
     "preview": "vite preview"
   },
   "dependencies": {
+    "lucide-react": "^1.47.0",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "react-router-dom": "^7.18.4"
   },
   "devDependencies": {
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "@vitejs/plugin-react": "^5.0.4",
+    "autoprefixer": "^10.6.1",
     "openapi-typescript": "^7.13.0",
+    "postcss": "^8.5.28",
+    "prettier": "^3.9.9",
+    "tailwindcss": "^3.4.19",
     "typescript": "^5.9.2",
     "vite": "^7.1.5"
   }
