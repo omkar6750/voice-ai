@@ -58,7 +58,7 @@ export function IntegrationsPage() {
     try {
       await api(`/integrations/${connectionId}/secrets/${encodeURIComponent(target.name.trim())}`, {
         method: "PUT",
-        body: JSON.stringify({ secret: target.value.trim() }),
+        body: JSON.stringify({ value: target.value.trim() }),
       });
       toast.success(`Secret '${target.name}' encrypted and saved in vault`);
       setSecretInputs((prev) => ({ ...prev, [connectionId]: { name: "", value: "" } }));
