@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState, type FormEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { BookOpen, ChevronRight, Database, Plus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
@@ -11,9 +11,20 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Spinner } from "@/components/ui/spinner";
 
 interface KBItem {
   id: string;
@@ -28,9 +39,17 @@ interface KBItem {
 
 export function KnowledgePage() {
   const api = useApi();
+  const navigate = useNavigate();
   const [bases, setBases] = useState<KBItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  // Create knowledge base sheet state
+  const [openAddSheet, setOpenAddSheet] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [kbName, setKbName] = useState("");
+  const [chunkSize, setChunkSize] = useState(400);
+  const [chunkOverlap, setChunkOverlap] = useState(50);
 
   async function load() {
     setLoading(true);
@@ -51,6 +70,38 @@ export function KnowledgePage() {
     void load();
   }, []);
 
+  async function handleCreateKB(e: FormEvent) {
+    e.preventDefault();
+    if (!kbName.trim()) {
+      toast.error("Please enter a name for the knowledge base");
+      return;
+    }
+    setCreating(true);
+    try {
+      const res = await api<{ id: string; name: string }>("/knowledge-bases", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: kbName.trim(),
+          config: {
+            chunk_size: Number(chunkSize) || 400,
+            chunk_overlap: Number(chunkOverlap) || 50,
+            markdown_aware: true,
+            supported_sources: ["text", "markdown", "pdf"],
+          },
+        }),
+      });
+      toast.success(`Knowledge base '${kbName}' created`);
+      setOpenAddSheet(false);
+      setKbName("");
+      navigate(`/knowledge/${res.id}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create knowledge base");
+    } finally {
+      setCreating(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-5 p-6 max-w-6xl mx-auto">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -64,6 +115,80 @@ export function KnowledgePage() {
           <Button variant="outline" size="sm" onClick={() => void load()}>
             <RefreshCw className="size-3.5 mr-1.5" /> Refresh
           </Button>
+          <Sheet open={openAddSheet} onOpenChange={setOpenAddSheet}>
+            <SheetTrigger asChild>
+              <Button size="sm" className="gap-1.5 bg-primary text-primary-foreground">
+                <Plus className="size-3.5" /> Create Knowledge Base
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right" className="flex flex-col p-6 w-full sm:max-w-md">
+              <SheetHeader className="p-0 mb-4">
+                <SheetTitle className="flex items-center gap-2 text-lg">
+                  <Database className="size-5 text-primary" />
+                  New Knowledge Base
+                </SheetTitle>
+                <SheetDescription>
+                  Create an isolated pgvector collection for indexing project documents and guidelines.
+                </SheetDescription>
+              </SheetHeader>
+
+              <form onSubmit={handleCreateKB} className="flex flex-col gap-4 flex-1 justify-between">
+                <div className="flex flex-col gap-4">
+                  <Field>
+                    <FieldLabel htmlFor="kb-name">Collection Name</FieldLabel>
+                    <Input
+                      id="kb-name"
+                      placeholder="e.g. Sales FAQ & Pricing"
+                      required
+                      value={kbName}
+                      onChange={(e) => setKbName(e.target.value)}
+                    />
+                  </Field>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field>
+                      <FieldLabel htmlFor="kb-chunk">Chunk Size (chars)</FieldLabel>
+                      <Input
+                        id="kb-chunk"
+                        type="number"
+                        min={100}
+                        max={4000}
+                        value={chunkSize}
+                        onChange={(e) => setChunkSize(Number(e.target.value))}
+                      />
+                    </Field>
+
+                    <Field>
+                      <FieldLabel htmlFor="kb-overlap">Overlap (chars)</FieldLabel>
+                      <Input
+                        id="kb-overlap"
+                        type="number"
+                        min={0}
+                        max={500}
+                        value={chunkOverlap}
+                        onChange={(e) => setChunkOverlap(Number(e.target.value))}
+                      />
+                    </Field>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-4 border-t">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setOpenAddSheet(false)}
+                    disabled={creating}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={creating || !kbName.trim()}>
+                    {creating ? <Spinner className="size-4 mr-1.5" /> : null}
+                    Create Collection
+                  </Button>
+                </div>
+              </form>
+            </SheetContent>
+          </Sheet>
         </div>
       </div>
 

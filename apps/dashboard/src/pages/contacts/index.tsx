@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { Globe, Phone, Plus, RefreshCw, Search, User, Users } from "lucide-react";
+import { Globe, Phone, Plus, RefreshCw, Search, Trash2, User, Users } from "lucide-react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Spinner } from "@/components/ui/spinner";
+import { NativeSelect } from "@/components/ui/native-select";
 
 interface ContactItem {
   id: string;
@@ -40,6 +51,17 @@ export function ContactsPage() {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // New contact sheet state
+  const [openAddSheet, setOpenAddSheet] = useState(false);
+  const [addingContact, setAddingContact] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [newBusiness, setNewBusiness] = useState("");
+  const [newLanguage, setNewLanguage] = useState("en");
+  const [newTimezone, setNewTimezone] = useState("Asia/Kolkata");
+  const [newSource, setNewSource] = useState("manual");
 
   async function load() {
     setLoading(true);
@@ -59,6 +81,53 @@ export function ContactsPage() {
   useEffect(() => {
     void load();
   }, []);
+
+  async function handleDelete(contactId: string, name: string) {
+    if (!confirm(`Are you sure you want to delete contact '${name}'?`)) return;
+    setDeletingId(contactId);
+    try {
+      await api(`/contacts/${contactId}`, { method: "DELETE" });
+      toast.success(`Deleted contact ${name}`);
+      setContacts((prev) => prev.filter((c) => c.id !== contactId));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete contact");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  async function handleCreateContact(e: FormEvent) {
+    e.preventDefault();
+    if (!newName.trim() || !newPhone.trim()) {
+      toast.error("Please enter a name and valid phone number");
+      return;
+    }
+    setAddingContact(true);
+    try {
+      await api("/contacts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newName.trim(),
+          phone_number: newPhone.trim(),
+          timezone: newTimezone,
+          business: newBusiness.trim() || undefined,
+          source: newSource.trim() || undefined,
+          language: newLanguage,
+        }),
+      });
+      toast.success(`Contact ${newName} created`);
+      setOpenAddSheet(false);
+      setNewName("");
+      setNewPhone("");
+      setNewBusiness("");
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create contact");
+    } finally {
+      setAddingContact(false);
+    }
+  }
 
   const filtered = contacts.filter((c) => {
     const q = query.toLowerCase();
@@ -82,6 +151,101 @@ export function ContactsPage() {
           <Button variant="outline" size="sm" onClick={() => void load()}>
             <RefreshCw className="size-3.5 mr-1.5" /> Refresh
           </Button>
+          <Sheet open={openAddSheet} onOpenChange={setOpenAddSheet}>
+            <SheetTrigger asChild>
+              <Button size="sm" className="gap-1.5 bg-primary text-primary-foreground">
+                <Plus className="size-3.5" /> Add Contact
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right" className="flex flex-col p-6 w-full sm:max-w-md">
+              <SheetHeader className="p-0 mb-4">
+                <SheetTitle className="flex items-center gap-2 text-lg">
+                  <User className="size-5 text-primary" />
+                  Add New Contact
+                </SheetTitle>
+                <SheetDescription>
+                  Register a new verified customer or lead with international E.164 phone formatting.
+                </SheetDescription>
+              </SheetHeader>
+
+              <form onSubmit={handleCreateContact} className="flex flex-col gap-4 flex-1 justify-between">
+                <div className="flex flex-col gap-4">
+                  <Field>
+                    <FieldLabel htmlFor="c-name">Full Name</FieldLabel>
+                    <Input
+                      id="c-name"
+                      placeholder="Jane Doe"
+                      required
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                    />
+                  </Field>
+
+                  <Field>
+                    <FieldLabel htmlFor="c-phone">Phone Number (E.164 with country code)</FieldLabel>
+                    <Input
+                      id="c-phone"
+                      placeholder="+919876543210"
+                      required
+                      value={newPhone}
+                      onChange={(e) => setNewPhone(e.target.value)}
+                    />
+                  </Field>
+
+                  <Field>
+                    <FieldLabel htmlFor="c-biz">Company / Business (Optional)</FieldLabel>
+                    <Input
+                      id="c-biz"
+                      placeholder="Acme Real Estate"
+                      value={newBusiness}
+                      onChange={(e) => setNewBusiness(e.target.value)}
+                    />
+                  </Field>
+
+                  <Field>
+                    <FieldLabel htmlFor="c-lang">Preferred Language</FieldLabel>
+                    <NativeSelect
+                      id="c-lang"
+                      value={newLanguage}
+                      onChange={(e) => setNewLanguage(e.target.value)}
+                    >
+                      <option value="en">English (en)</option>
+                      <option value="mr">Marathi (mr)</option>
+                      <option value="hi">Hindi (hi)</option>
+                    </NativeSelect>
+                  </Field>
+
+                  <Field>
+                    <FieldLabel htmlFor="c-tz">Timezone</FieldLabel>
+                    <NativeSelect
+                      id="c-tz"
+                      value={newTimezone}
+                      onChange={(e) => setNewTimezone(e.target.value)}
+                    >
+                      <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
+                      <option value="America/New_York">America/New_York (EST)</option>
+                      <option value="Europe/London">Europe/London (GMT)</option>
+                    </NativeSelect>
+                  </Field>
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-4 border-t">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setOpenAddSheet(false)}
+                    disabled={addingContact}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={addingContact || !newName.trim() || !newPhone.trim()}>
+                    {addingContact ? <Spinner className="size-4 mr-1.5" /> : null}
+                    Save Contact
+                  </Button>
+                </div>
+              </form>
+            </SheetContent>
+          </Sheet>
         </div>
       </div>
 
@@ -132,6 +296,7 @@ export function ContactsPage() {
                   <TableHead className="text-xs">Business / Domain</TableHead>
                   <TableHead className="text-xs">Language & Timezone</TableHead>
                   <TableHead className="text-xs">Source</TableHead>
+                  <TableHead className="text-xs text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -161,6 +326,17 @@ export function ContactsPage() {
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {c.source || "inbound"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        className="text-muted-foreground hover:text-destructive"
+                        disabled={deletingId === c.id}
+                        onClick={() => void handleDelete(c.id, c.name)}
+                      >
+                        {deletingId === c.id ? <Spinner className="size-3" /> : <Trash2 className="size-3.5" />}
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}

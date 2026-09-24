@@ -76,11 +76,13 @@ export function AgentDetailPage() {
     void load();
   }, [agentId]);
 
-  async function cloneVersion(versionId: string) {
+  async function cloneVersion(versionId: string, revision: number) {
     setBusyAction(versionId);
     try {
-      const res = await api<{ version_id: string }>(`/agent-versions/${versionId}/clone`, {
+      await api<{ version_id: string }>(`/agent-versions/${versionId}/clone`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision }),
       });
       toast.success("Created new draft version");
       await load();
@@ -223,7 +225,7 @@ export function AgentDetailPage() {
                               size="sm"
                               className="text-xs h-7 px-2"
                               disabled={busyAction === ver.id}
-                              onClick={() => void cloneVersion(ver.id)}
+                              onClick={() => void cloneVersion(ver.id, ver.revision)}
                             >
                               <Copy className="size-3 mr-1" /> Clone Draft
                             </Button>

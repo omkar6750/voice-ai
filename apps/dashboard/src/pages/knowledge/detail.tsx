@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -7,8 +7,10 @@ import {
   Layers,
   Plus,
   RefreshCw,
+  RotateCw,
   Search,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
@@ -21,6 +23,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +35,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { NativeSelect } from "@/components/ui/native-select";
+import { Spinner } from "@/components/ui/spinner";
 
 interface SourceItem {
   id: string;
@@ -39,15 +53,15 @@ interface SourceItem {
   kind: string;
   status: "building" | "ready" | "failed";
   error: string | null;
-  created_at: string;
 }
 
 interface SearchResult {
   chunk_id: string;
   source_id: string;
   title: string;
+  source_path?: string;
   content: string;
-  similarity: number;
+  score: number;
 }
 
 export function KnowledgeDetailPage() {
@@ -59,6 +73,14 @@ export function KnowledgeDetailPage() {
   const [testQuery, setTestQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
+  const [busySourceId, setBusySourceId] = useState<string | null>(null);
+
+  // Add source state
+  const [openAddSheet, setOpenAddSheet] = useState(false);
+  const [addingSource, setAddingSource] = useState(false);
+  const [sourceTitle, setSourceTitle] = useState("");
+  const [sourceKind, setSourceKind] = useState<"paste" | "md" | "txt">("paste");
+  const [sourceContent, setSourceContent] = useState("");
 
   async function load() {
     if (!kbId) return;
@@ -82,24 +104,83 @@ export function KnowledgeDetailPage() {
     void load();
   }, [kbId]);
 
-  async function executeTestSearch(e: React.FormEvent) {
+  async function executeTestSearch(e: FormEvent) {
     e.preventDefault();
     if (!kbId || !testQuery.trim()) return;
     setSearching(true);
     try {
-      const data = await api<{ matches: SearchResult[] }>(`/knowledge-bases/${kbId}/search`, {
+      const data = await api<{ hits: SearchResult[] }>(`/knowledge-bases/${kbId}/search`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: testQuery.trim(),
-          limit: 3,
-          min_similarity: 0.2,
+          retrieval: {
+            top_k: 4,
+          },
         }),
       });
-      setSearchResults(data.matches);
+      setSearchResults(data.hits);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Search query failed");
     } finally {
       setSearching(false);
+    }
+  }
+
+  async function handleAddSource(e: FormEvent) {
+    e.preventDefault();
+    if (!kbId || !sourceTitle.trim() || !sourceContent.trim()) {
+      toast.error("Please enter a title and document content");
+      return;
+    }
+    setAddingSource(true);
+    try {
+      await api(`/knowledge-bases/${kbId}/sources`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: sourceTitle.trim(),
+          kind: sourceKind,
+          content: sourceContent.trim(),
+        }),
+      });
+      toast.success("Document source queued for vector embedding build");
+      setOpenAddSheet(false);
+      setSourceTitle("");
+      setSourceContent("");
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to add document source");
+    } finally {
+      setAddingSource(false);
+    }
+  }
+
+  async function handleDeleteSource(sourceId: string, title: string) {
+    if (!kbId || !confirm(`Delete source '${title}' and its vector embeddings?`)) return;
+    setBusySourceId(sourceId);
+    try {
+      await api(`/knowledge-bases/${kbId}/sources/${sourceId}`, { method: "DELETE" });
+      toast.success(`Deleted source ${title}`);
+      setSources((prev) => prev.filter((s) => s.id !== sourceId));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete source");
+    } finally {
+      setBusySourceId(null);
+    }
+  }
+
+  async function handleRebuildSource(sourceId: string) {
+    if (!kbId) return;
+    setBusySourceId(sourceId);
+    try {
+      await api(`/knowledge-bases/${kbId}/sources/${sourceId}/rebuild`, { method: "POST" });
+      toast.success("Embedding rebuild triggered");
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to trigger rebuild");
+    } finally {
+      setBusySourceId(null);
     }
   }
 
@@ -123,6 +204,80 @@ export function KnowledgeDetailPage() {
             <Button variant="outline" size="sm" onClick={() => void load()}>
               <RefreshCw className="size-3.5 mr-1.5" /> Refresh
             </Button>
+            <Sheet open={openAddSheet} onOpenChange={setOpenAddSheet}>
+              <SheetTrigger asChild>
+                <Button size="sm" className="gap-1.5 bg-primary text-primary-foreground">
+                  <Plus className="size-3.5" /> Add Document Source
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="right" className="flex flex-col p-6 w-full sm:max-w-lg">
+                <SheetHeader className="p-0 mb-4">
+                  <SheetTitle className="flex items-center gap-2 text-lg">
+                    <FileText className="size-5 text-primary" />
+                    Add Knowledge Source
+                  </SheetTitle>
+                  <SheetDescription>
+                    Ingest raw text or markdown to chunk and index into pgvector embeddings.
+                  </SheetDescription>
+                </SheetHeader>
+
+                <form onSubmit={handleAddSource} className="flex flex-col gap-4 flex-1 justify-between">
+                  <div className="flex flex-col gap-3.5 overflow-y-auto pr-1">
+                    <Field>
+                      <FieldLabel htmlFor="src-title">Document Title</FieldLabel>
+                      <Input
+                        id="src-title"
+                        placeholder="Pricing & Amenities Guide"
+                        required
+                        value={sourceTitle}
+                        onChange={(e) => setSourceTitle(e.target.value)}
+                      />
+                    </Field>
+
+                    <Field>
+                      <FieldLabel htmlFor="src-kind">Source Format</FieldLabel>
+                      <NativeSelect
+                        id="src-kind"
+                        value={sourceKind}
+                        onChange={(e) => setSourceKind(e.target.value as any)}
+                      >
+                        <option value="paste">Plaintext / Paste</option>
+                        <option value="md">Markdown (.md)</option>
+                        <option value="txt">Text (.txt)</option>
+                      </NativeSelect>
+                    </Field>
+
+                    <Field>
+                      <FieldLabel htmlFor="src-content">Content</FieldLabel>
+                      <Textarea
+                        id="src-content"
+                        rows={10}
+                        placeholder="# Project Brief&#10;&#10;Key details about project pricing, floor plans, and amenities..."
+                        required
+                        className="font-mono text-xs"
+                        value={sourceContent}
+                        onChange={(e) => setSourceContent(e.target.value)}
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-3 pt-4 border-t">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setOpenAddSheet(false)}
+                      disabled={addingSource}
+                    >
+                      Cancel
+                    </Button>
+                    <Button type="submit" disabled={addingSource || !sourceTitle.trim() || !sourceContent.trim()}>
+                      {addingSource ? <Spinner className="size-4 mr-1.5" /> : null}
+                      Ingest & Index
+                    </Button>
+                  </div>
+                </form>
+              </SheetContent>
+            </Sheet>
           </div>
         </div>
       </div>
@@ -139,13 +294,13 @@ export function KnowledgeDetailPage() {
             </CardHeader>
             <CardContent className="p-0">
               {loading ? (
-                <div className="p-4">
-                  <Skeleton className="h-5 w-40 mb-2" />
-                  <Skeleton className="h-16 w-full" />
+                <div className="p-4 flex flex-col gap-2">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-full" />
                 </div>
               ) : sources.length === 0 ? (
                 <div className="p-6 text-center text-xs text-muted-foreground">
-                  No document sources ingested yet.
+                  No documents in this knowledge base yet.
                 </div>
               ) : (
                 <Table>
@@ -153,34 +308,58 @@ export function KnowledgeDetailPage() {
                     <TableRow>
                       <TableHead className="text-xs">Document Title</TableHead>
                       <TableHead className="text-xs">Type</TableHead>
-                      <TableHead className="text-xs text-right">Status</TableHead>
+                      <TableHead className="text-xs">Status</TableHead>
+                      <TableHead className="text-xs text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {sources.map((s) => (
-                      <TableRow key={s.id}>
+                    {sources.map((src) => (
+                      <TableRow key={src.id}>
                         <TableCell className="font-medium text-xs">
                           <div className="flex items-center gap-2">
                             <FileText className="size-3.5 text-muted-foreground" />
-                            <span>{s.title}</span>
+                            <span>{src.title}</span>
                           </div>
                         </TableCell>
-                        <TableCell className="font-mono text-xs uppercase text-muted-foreground">
-                          {s.kind}
+                        <TableCell className="font-mono text-[11px] uppercase text-muted-foreground">
+                          {src.kind}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell>
                           <Badge
                             variant="outline"
                             className={
-                              s.status === "ready"
+                              src.status === "ready"
                                 ? "bg-emerald-50 text-emerald-700 text-[10px] border-emerald-200"
-                                : s.status === "building"
-                                  ? "bg-blue-50 text-blue-700 text-[10px] border-blue-200"
-                                  : "bg-red-50 text-red-700 text-[10px] border-red-200"
+                                : src.status === "building"
+                                ? "bg-amber-50 text-amber-700 text-[10px] border-amber-200"
+                                : "bg-destructive/10 text-destructive text-[10px]"
                             }
                           >
-                            {s.status}
+                            {src.status}
                           </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              title="Rebuild Embeddings"
+                              disabled={busySourceId === src.id}
+                              onClick={() => void handleRebuildSource(src.id)}
+                            >
+                              <RotateCw className="size-3 text-muted-foreground hover:text-foreground" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              title="Delete Source"
+                              className="text-muted-foreground hover:text-destructive"
+                              disabled={busySourceId === src.id}
+                              onClick={() => void handleDeleteSource(src.id, src.title)}
+                            >
+                              <Trash2 className="size-3" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -191,50 +370,52 @@ export function KnowledgeDetailPage() {
           </Card>
         </div>
 
-        {/* Right: Interactive RAG Vector Search Tester */}
+        {/* Right: Live Vector Similarity Tester */}
         <div className="flex flex-col gap-3">
           <Card className="shadow-none">
             <CardHeader className="pb-3">
-              <div className="flex items-center gap-1.5">
+              <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
                 <Sparkles className="size-4 text-primary" />
-                <CardTitle className="text-sm font-semibold">Semantic Search Tester</CardTitle>
-              </div>
+                Semantic Search Tester
+              </CardTitle>
               <CardDescription className="text-xs">
                 Test embedding similarity queries to verify what context the LLM retrieves during a call.
               </CardDescription>
             </CardHeader>
-            <CardContent className="flex flex-col gap-3">
+            <CardContent className="flex flex-col gap-4">
               <form onSubmit={executeTestSearch} className="flex gap-2">
                 <Input
-                  placeholder="e.g. What is the pricing for MVP sprint?"
+                  placeholder="e.g. what is the pricing of 2bhk units?"
+                  className="text-xs h-8"
                   value={testQuery}
                   onChange={(e) => setTestQuery(e.target.value)}
-                  className="text-xs h-8"
                 />
-                <Button type="submit" size="sm" className="text-xs h-8" disabled={searching}>
-                  <Search className="size-3.5 mr-1" />
-                  {searching ? "Searching…" : "Search"}
+                <Button type="submit" size="sm" className="h-8 text-xs" disabled={searching || !testQuery.trim()}>
+                  {searching ? <Spinner className="size-3 mr-1" /> : <Search className="size-3 mr-1" />}
+                  Search
                 </Button>
               </form>
 
               {searchResults !== null && (
-                <div className="flex flex-col gap-2 mt-2">
+                <div className="flex flex-col gap-2.5">
                   <span className="text-[11px] font-medium text-muted-foreground">
                     Matches ({searchResults.length}):
                   </span>
                   {searchResults.length === 0 ? (
-                    <p className="text-xs text-muted-foreground italic">No chunks met the similarity threshold.</p>
+                    <div className="rounded-md border p-4 text-center text-xs text-muted-foreground">
+                      No matching semantic chunks found for this query.
+                    </div>
                   ) : (
-                    searchResults.map((m) => (
-                      <div key={m.chunk_id} className="rounded-md border p-2.5 bg-muted/40 text-xs flex flex-col gap-1">
-                        <div className="flex items-center justify-between text-[11px] font-mono">
-                          <span className="font-semibold text-foreground">{m.title}</span>
-                          <span className="text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-200">
-                            {(m.similarity * 100).toFixed(1)}% match
-                          </span>
+                    searchResults.map((hit) => (
+                      <div key={hit.chunk_id} className="flex flex-col gap-1 rounded-md border p-3 bg-muted/20">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold">{hit.title}</span>
+                          <Badge variant="outline" className="font-mono text-[10px]">
+                            score: {hit.score.toFixed(3)}
+                          </Badge>
                         </div>
-                        <p className="text-muted-foreground text-[11px] whitespace-pre-wrap font-sans mt-0.5">
-                          {m.content}
+                        <p className="text-xs text-muted-foreground line-clamp-4 font-sans whitespace-pre-line">
+                          {hit.content}
                         </p>
                       </div>
                     ))
