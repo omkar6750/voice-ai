@@ -4,6 +4,7 @@ export type RunSummary = {
   agent_version_id: string;
   contact_id: string | null;
   contact_name?: string | null;
+  contact_phone?: string | null;
   status: string;
   created_at: string;
   started_at: string | null;

@@ -212,6 +212,7 @@ export function ContactsPage() {
                       <option value="en">English (en)</option>
                       <option value="mr">Marathi (mr)</option>
                       <option value="hi">Hindi (hi)</option>
+                      <option value="te">Telugu (te)</option>
                     </NativeSelect>
                   </Field>
 

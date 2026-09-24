@@ -181,7 +181,16 @@ export function RunsPage() {
                     </Link>
                   </TableCell>
                   <TableCell>
-                    {run.contact_name ?? "No contact snapshot"}
+                    <div className="flex flex-col">
+                      <span className="font-medium text-xs">
+                        {run.contact_name ?? "No contact snapshot"}
+                      </span>
+                      {run.contact_phone && (
+                        <span className="font-mono text-[11px] text-muted-foreground">
+                          {run.contact_phone}
+                        </span>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell className="capitalize">{run.channel}</TableCell>
                   <TableCell className="whitespace-nowrap text-muted-foreground">

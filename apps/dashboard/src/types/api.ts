@@ -1,7 +1,7 @@
 /**
  * Strongly typed client DTOs mirroring backend Pydantic models and voice-runtime contracts.
  * Matches:
- * - voice_runtime.contracts (AgentConfig, FlowConfig, Providers, Tools, Knowledge)
+ * - voice_runtime.contracts (AgentConfig, FlowConfig, Providers, Tools, Knowledge, Cadence)
  * - voice_api.schemas (agent, contact, knowledge, integrations, execution, callbacks)
  */
 
@@ -14,25 +14,28 @@ export interface LLMConfig {
   model: string;
   temperature?: number;
   max_tokens?: number;
-  top_p?: number;
+  top_p?: number | null;
+  reasoning_effort?: string;
 }
 
 export interface STTConfig {
-  provider: "deepgram";
+  provider: "sarvam" | "deepgram";
   model: string;
-  language: string;
+  language?: string;
 }
 
 export interface TTSConfig {
-  provider: "cartesia";
+  provider: "sarvam" | "cartesia";
   voice: string;
   model?: string;
+  language?: string;
+  pace?: number;
   speed?: number;
   emotion?: string[];
 }
 
 export interface VADConfig {
-  provider: "silero";
+  provider?: "silero";
   confidence?: number;
   start_secs?: number;
   stop_secs?: number;
@@ -42,17 +45,67 @@ export interface VADConfig {
 export interface AudioConfig {
   sample_rate?: number;
   channels?: number;
+  encoding?: string;
+  frame_ms?: number;
   frame_size_ms?: number;
 }
 
 export interface CallLimits {
+  max_duration_secs?: number;
   max_duration_seconds?: number;
+  idle_timeout_secs?: number;
   silence_timeout_seconds?: number;
   max_user_interruptions?: number;
+  interruptions_enabled?: boolean;
 }
 
 // ==========================================
-// 2. Flow & Agent Graph Contracts
+// 2. Cadence & Context
+// ==========================================
+
+export interface ClassifierConfig {
+  enabled?: boolean;
+  node_exits?: string[];
+  model?: LLMConfig;
+  prompt?: string;
+  confidence_threshold?: number;
+  consecutive_verdicts?: number;
+  answer_signals?: string[];
+  topic_signals?: string[];
+  keywords?: string[];
+}
+
+export interface SummarizerConfig {
+  enabled?: boolean;
+  model?: LLMConfig;
+  prompt?: string;
+  unsummarized_messages?: number;
+  unsummarized_exchanges?: number | null;
+  token_threshold?: number | null;
+  context_window_tokens?: number;
+  compaction_threshold?: number;
+  hard_ceiling?: number;
+  target_ratio?: number;
+  output_budget_tokens?: number;
+  preserve_opening_messages?: number;
+  preserve_recent_messages?: number;
+}
+
+export interface ContextConfig {
+  prune_node_ids?: string[];
+  remove_transition_tool_pairs?: boolean;
+  summarizer?: SummarizerConfig;
+}
+
+export interface LanguageConfig {
+  default_language: string;
+  supported_languages: string[];
+  follow_caller_language?: boolean;
+  persist_requested_language?: boolean;
+}
+
+// ==========================================
+// 3. Flow & Agent Graph Contracts
 // ==========================================
 
 export interface FlowNodeConfig {
@@ -73,15 +126,26 @@ export interface FlowConfig {
 }
 
 export interface AgentConfig {
+  name?: string;
+  persona?: string;
   system_prompt: string;
+  greeting?: string;
+  contact_variables?: string[];
+  language?: LanguageConfig;
   flow: FlowConfig;
-  llm?: LLMConfig;
+  tool_bindings?: Record<string, unknown>;
+  background_hooks?: string[];
+  knowledge_base_ids?: string[];
+  retrieval?: RetrievalConfig;
   stt?: STTConfig;
+  llm?: LLMConfig;
   tts?: TTSConfig;
   vad?: VADConfig;
   audio?: AudioConfig;
   call_limits?: CallLimits;
-  tool_bindings?: Record<string, { tool_version_id: string; config?: Record<string, unknown> }>;
+  context?: ContextConfig;
+  classifier?: ClassifierConfig;
+  pipeline_logs?: "inherit" | "enabled" | "disabled";
 }
 
 export interface AgentSummary {
@@ -120,7 +184,7 @@ export interface ActivateAgentBody {
 }
 
 // ==========================================
-// 3. Contacts
+// 4. Contacts
 // ==========================================
 
 export interface ContactItem {
@@ -143,7 +207,7 @@ export interface ContactBody {
 }
 
 // ==========================================
-// 4. Integrations & WhatsApp
+// 5. Integrations & WhatsApp
 // ==========================================
 
 export interface WhatsAppConfig {
@@ -186,7 +250,7 @@ export interface WhatsAppTemplateItem {
 }
 
 // ==========================================
-// 5. Knowledge Bases & RAG
+// 6. Knowledge Bases & RAG
 // ==========================================
 
 export interface KnowledgeConfig {
@@ -244,7 +308,7 @@ export interface SearchHit {
 }
 
 // ==========================================
-// 6. Tools & Runtime Registry
+// 7. Tools & Runtime Registry
 // ==========================================
 
 export interface ToolItem {
@@ -263,7 +327,7 @@ export interface ToolVersionItem {
 }
 
 // ==========================================
-// 7. Callbacks & Telephony Endpoints
+// 8. Callbacks & Telephony Endpoints
 // ==========================================
 
 export interface CallbackItem {
@@ -302,7 +366,7 @@ export interface EndpointCreateBody {
 }
 
 // ==========================================
-// 8. Settings
+// 9. Settings
 // ==========================================
 
 export interface WorkspaceSettingsConfig {
