@@ -18,7 +18,8 @@ Content plan: route orientation, current records, focused configuration form, th
 - Reload-safe routes for overview, agents, agent version editor, runs, run detail and workspace settings.
 - Agent draft form for prompts, flow nodes, providers, audio/VAD, analysis, knowledge selection and logging. Revision-checked save, publish, clone and activate. Published versions are read-only.
 - Workspace settings form and run transcript/operation inspection against current API responses.
-- Shared Tailwind design tokens and controls; stylesheet has Tailwind directives only.
+- Vite/React Router with Tailwind CSS v4 and CLI-installed shadcn/ui Radix components. The stylesheet contains theme tokens and Tailwind directives, not component CSS.
+- Direct routes for agent, agent version, run, and URL-backed agent editor tabs. Run details link to the pinned agent version.
 
 ## Next implementation slices
 

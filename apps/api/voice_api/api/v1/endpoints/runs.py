@@ -141,7 +141,12 @@ async def timeline(run_id: str, session: AsyncSession = Session, _: None = Opera
     ).all()
     return {
         **await related_evidence(session, run_id),
-        "run": {"id": run.id, "status": run.status},
+        "run": {
+            "id": run.id,
+            "status": run.status,
+            "agent_id": (await session.get(AgentVersion, run.agent_version_id)).agent_id,
+            "agent_version_id": run.agent_version_id,
+        },
         "call": None if call is None else {"id": call.id, "status": call.status},
         "exchanges": [
             {"id": x.id, "sequence": x.sequence, "origin": x.origin, "status": x.status}

@@ -12,6 +12,9 @@ related: [RFC-0001, RFC-0003]
 
 ## Implementation amendment, 2026-09-24
 
+- Implemented dashboard uses Tailwind CSS v4 through the Vite plugin and shadcn/ui Radix components installed through the CLI. Required semantic theme variables live in the Tailwind stylesheet; styling of views remains in utilities. This supersedes the earlier "directives only" wording below.
+- React Router includes `/agents/:agentId`, `/agents/:agentId/versions/:versionId?tab=...`, and `/runs/:runId`. Run detail links to its pinned agent version.
+
 - Use light reference palette and semantic shadcn tokens from docs/design.md. Components use Tailwind utilities, no handwritten CSS or inline styles. Preserve visual character; improve form hierarchy.
 - Routes survive reload and back/forward. Bearer token stays in memory, so reload requires re-entry. No token in URL or browser storage.
 - Overview metrics, endpoint/callback lists and global search need backend routes. Do not show fabricated counts. Quick dial requires server-side endpoint claiming.

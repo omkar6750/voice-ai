@@ -43,7 +43,7 @@ type Tool = {
   result: unknown;
 };
 type Timeline = {
-  run: { id: string; status: string };
+  run: { id: string; status: string; agent_id: string; agent_version_id: string };
   call: { id: string; status: string } | null;
   exchanges: { id: string; sequence: number; origin: string; status: string }[];
   messages: Message[];
@@ -180,6 +180,12 @@ export function RunDetailPage() {
               </h1>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <Status value={timeline.run.status} />
+                <Link
+                  className="text-sm font-medium text-primary hover:underline"
+                  to={`/agents/${timeline.run.agent_id}/versions/${timeline.run.agent_version_id}`}
+                >
+                  Agent configuration
+                </Link>
                 {timeline.call && (
                   <span className="text-sm text-muted-foreground">
                     Call {timeline.call.id.slice(0, 8)} · {timeline.call.status}

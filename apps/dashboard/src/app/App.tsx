@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { ApiContext, request } from "./api";
-import { AgentEditor, AgentsPage } from "../features/agents";
+import { AgentEditor, AgentLanding, AgentsPage } from "../features/agents";
 import { OverviewPage } from "../features/overview";
 import { RunDetailPage, RunsPage } from "../features/runs";
 import { SettingsPage } from "../features/settings";
@@ -210,6 +210,7 @@ function Layout({ logout }: { logout: () => void }) {
             <Routes>
               <Route path="/" element={<OverviewPage />} />
               <Route path="/agents" element={<AgentsPage />} />
+              <Route path="/agents/:agentId" element={<AgentLanding />} />
               <Route
                 path="/agents/:agentId/versions/:versionId"
                 element={<AgentEditor />}

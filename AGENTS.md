@@ -82,7 +82,7 @@ without explicit user instruction. Agent/tool drafts use revisions; published ve
 
 ## API Architecture
 
-Dashboard work follows RFC-0004 through RFC-0013 and docs/design.md. Use Tailwind utilities and shared semantic shadcn tokens; do not add handwritten component CSS, inline style attributes, or CSS modules. The only dashboard stylesheet contains Tailwind directives. Keep operator token in browser memory, generate typed API contracts as response models become available, and mark controls pending when the live runner does not apply their settings. Do not use browser automation for this dashboard task unless the user changes that instruction.
+Dashboard work follows RFC-0004 through RFC-0013 and docs/design.md. Use Tailwind v4 utilities and CLI-installed shadcn/ui components. `apps/dashboard/src/styles.css` holds the required shadcn theme tokens and Tailwind directives only; do not add handwritten component CSS, inline style attributes, or CSS modules. Run `npx shadcn@latest add <component>` from `apps/dashboard` for new primitives. Keep operator token in browser memory, generate typed API contracts as response models become available, and mark controls pending when the live runner does not apply their settings. Do not use browser automation for this dashboard task unless the user changes that instruction.
 
 `apps/api/voice_api` follows a layered structure:
 - `core/`: Application settings (`config.py`), security and credential sanitization (`security.py`).

@@ -7,7 +7,7 @@ import {
   Save,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useApi } from "../app/api";
 import {
   Button,
@@ -277,6 +277,24 @@ export function AgentsPage() {
   );
 }
 
+export function AgentLanding() {
+  const { agentId } = useParams();
+  const api = useApi();
+  const navigate = useNavigate();
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (!agentId) return;
+    api<{ versions: Version[] }>(`/agents/${agentId}/versions`)
+      .then(({ versions }) => {
+        const target = versions.find((item) => item.status === "draft") ?? versions.at(-1);
+        if (target) navigate(`/agents/${agentId}/versions/${target.id}`, { replace: true });
+        else setError("This agent has no versions.");
+      })
+      .catch((cause) => setError(cause instanceof Error ? cause.message : "Could not load agent"));
+  }, [agentId, api, navigate]);
+  return error ? <Notice text={error} error /> : <p className="text-sm text-muted-foreground">Opening agent…</p>;
+}
+
 export function AgentEditor() {
   const { agentId, versionId } = useParams();
   const api = useApi();
@@ -285,7 +303,9 @@ export function AgentEditor() {
   const [versions, setVersions] = useState<Version[]>([]);
   const [base, setBase] = useState<Version | null>(null);
   const [draft, setDraft] = useState<Config | null>(null);
-  const [tab, setTab] = useState<Tab>("Prompts");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const tab: Tab = tabs.find((item) => item === requestedTab) ?? "Prompts";
   const [nodeId, setNodeId] = useState("");
   const [knowledge, setKnowledge] = useState<KnowledgeBase[]>([]);
   const [notice, setNotice] = useState("");
@@ -563,7 +583,7 @@ export function AgentEditor() {
           <button
             key={item}
             type="button"
-            onClick={() => setTab(item)}
+            onClick={() => setSearchParams({ tab: item })}
             className={`shrink-0 rounded-md px-3 py-2 text-sm font-medium transition-colors ${tab === item ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground"}`}
           >
             {item}
