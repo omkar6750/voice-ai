@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .base import ConfigModel
 
@@ -27,12 +27,20 @@ class STTConfig(ConfigModel):
 
 
 class LLMConfig(ConfigModel):
-    provider: Literal["groq"] = "groq"
+    provider: Literal["groq", "gemini"] = "groq"
     model: str = Field(default="qwen/qwen3.8-27b", min_length=1)
     temperature: float = Field(default=0.4, ge=0, le=2)
     max_tokens: int = Field(default=180, gt=0)
     top_p: float | None = Field(default=None, gt=0, le=1)
-    reasoning_effort: Literal["none"] = "none"
+    reasoning_effort: Literal["none", "provider_default"] = "none"
+
+    @model_validator(mode="after")
+    def validate_reasoning(self):
+        if self.provider == "gemini" and self.reasoning_effort != "provider_default":
+            raise ValueError("Gemini reasoning uses the provider default")
+        if self.provider == "groq" and self.reasoning_effort != "none":
+            raise ValueError("Groq reasoning is disabled in this runtime")
+        return self
 
 
 class TTSConfig(ConfigModel):

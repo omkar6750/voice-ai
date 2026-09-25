@@ -16,6 +16,7 @@ from voice_api.api.v1.endpoints import (
     tools_router,
     workspace_router,
 )
+from voice_api.api.v1.endpoints.dial_catalog import router as dial_catalog_router
 
 api_router = APIRouter()
 
@@ -25,6 +26,7 @@ api_router.include_router(agents_router)
 api_router.include_router(tools_router)
 api_router.include_router(contacts_router)
 api_router.include_router(calls_router)
+api_router.include_router(dial_catalog_router)
 api_router.include_router(runs_router)
 api_router.include_router(execution_router)
 api_router.include_router(evidence_router)

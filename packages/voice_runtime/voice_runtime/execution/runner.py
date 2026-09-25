@@ -7,6 +7,7 @@ from typing import Protocol
 from uuid import uuid4
 
 import httpx
+from loguru import logger
 
 from voice_runtime.execution.delivery import stream_evidence
 from voice_runtime.execution.evidence_client import ApiEvidenceIngestor
@@ -87,8 +88,9 @@ async def execute_call(
             await delivery_task
         final_state = await call_task
         outcome = "completed"
-    except Exception:
-        error = "Call execution failed; inspect sanitized evidence"
+    except Exception as exc:
+        logger.exception("Call task raised exception during run {}: {}", run_id, exc)
+        error = f"Call execution failed: {exc}"
     except asyncio.CancelledError:
         error = "Call execution cancelled"
         raise

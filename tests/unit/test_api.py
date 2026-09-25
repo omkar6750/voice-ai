@@ -58,3 +58,121 @@ async def test_providers_and_config_schema_routes(monkeypatch) -> None:
         assert res_schema1.status_code == 200
         assert res_schema2.status_code == 200
         assert "agent" in res_schema1.json()
+
+        # Test tool handlers catalog
+        res_handlers = await client.get("/api/v1/tools/handlers", headers=headers)
+        assert res_handlers.status_code == 200
+        handlers_data = res_handlers.json()
+        assert "handlers" in handlers_data
+        assert "http_policy" in handlers_data
+        handler_names = {h["name"] for h in handlers_data["handlers"]}
+        assert "change_node" in handler_names
+        assert "end_call" in handler_names
+        assert "send_whatsapp_template" in handler_names
+        assert "send_whatsapp_message" in handler_names
+        assert "check_whatsapp_window" in handler_names
+        assert "classify_jev" in handler_names
+        assert "classify_llm" in handler_names
+        assert handlers_data["http_policy"]["follow_redirects"] is False
+
+
+def test_contact_and_integration_patch_schemas() -> None:
+    from voice_api.schemas.contact import ContactPatchBody
+    from voice_api.schemas.integrations import UpdateConnectionBody, WhatsAppConfig
+
+    # Valid contact patch
+    patch = ContactPatchBody(name="Alice", phone_number="+15551234567", timezone="America/New_York")
+    assert patch.phone_number == "+15551234567"
+    assert patch.timezone == "America/New_York"
+
+    # Invalid contact phone
+    with pytest.raises(ValueError, match="international phone number"):
+        ContactPatchBody(phone_number="12345")
+
+    # Invalid contact timezone
+    with pytest.raises(ValueError, match="valid IANA timezone"):
+        ContactPatchBody(timezone="Invalid/Zone_Name")
+
+    # Valid connection update
+    conn_update = UpdateConnectionBody(
+        label="Main WhatsApp",
+        enabled=True,
+        config=WhatsAppConfig(
+            phone_number_id="123456789",
+            waba_id="987654321",
+            api_version="v23.0",
+        ),
+    )
+    assert conn_update.label == "Main WhatsApp"
+    assert conn_update.config.phone_number_id == "123456789"
+
+    from voice_api.schemas.integrations import GenerateTemplateToolBody
+
+    gen_body = GenerateTemplateToolBody(
+        template_name="order_confirmation",
+        language="en_US",
+        tool_name="whatsapp_template_order_confirmation",
+    )
+    assert gen_body.template_name == "order_confirmation"
+    assert gen_body.tool_name == "whatsapp_template_order_confirmation"
+
+
+@pytest.mark.asyncio
+async def test_config_schema():
+    from voice_api.api.v1.endpoints.providers import config_schema
+
+    schema = await config_schema()
+    assert "agent" in schema
+    assert "tool" in schema
+    assert "workspace" in schema
+    assert "runtime_application" in schema
+    assert schema["runtime_application"]["flow"] == "applied"
+    assert schema["runtime_application"]["classifier"] == "pending_runner"
+
+
+def test_classifier_contracts_and_trimmer():
+    from voice_runtime.contracts.cadence import ClassifierConfig, JevClassifierConfig, JevQuestion
+    from voice_runtime.execution.native import trim_classifier_result
+
+    # Test default LLM classifier
+    cfg_llm = ClassifierConfig(classifier_type="llm", prompt="Test prompt")
+    assert cfg_llm.classifier_type == "llm"
+    assert cfg_llm.prompt == "Test prompt"
+    assert "lead_temperature" in cfg_llm.jev.questions
+
+    # Test Jev classifier
+    cfg_jev = ClassifierConfig(
+        classifier_type="jev",
+        jev=JevClassifierConfig(
+            model="jev-v2",
+            questions={
+                "custom_q": JevQuestion(
+                    instructions="Custom question instructions",
+                    criteria={"yes": "Customer said yes", "no": "Customer said no"},
+                )
+            },
+        ),
+    )
+    assert cfg_jev.classifier_type == "jev"
+    assert cfg_jev.jev.model == "jev-v2"
+    assert "custom_q" in cfg_jev.jev.questions
+    assert cfg_jev.jev.questions["custom_q"].criteria["yes"] == "Customer said yes"
+
+    # Test compact trimmer
+    raw_res = {
+        "lead_temperature": {
+            "choice": "hot",
+            "probabilities": {"hot": 0.85, "warm": 0.12, "cold": 0.03},
+            "confidence": 0.85,
+        },
+        "service_fit": {"choice": "strong_fit", "confidence": 0.9},
+        "notes": "Fast caller",
+    }
+    trimmed = trim_classifier_result(raw_res)
+    assert trimmed["lead_temperature"] == "hot"
+    assert trimmed["lead_temperature_hot"] == 0.85
+    assert trimmed["lead_temperature_warm"] == 0.12
+    # Cold is 0.03 (< 0.1), so excluded from compact output
+    assert "lead_temperature_cold" not in trimmed
+    assert trimmed["service_fit"] == "strong_fit"
+    assert trimmed["notes"] == "Fast caller"

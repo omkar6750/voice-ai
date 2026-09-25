@@ -21,6 +21,185 @@ async def tools(session: AsyncSession = Session, _: None = Operator) -> dict:
     return {"tools": [{"id": row.id, "name": row.name} for row in rows]}
 
 
+@router.get("/tools/handlers")
+async def tool_handlers(_: None = Operator) -> dict:
+    return {
+        "handlers": [
+            {
+                "name": "change_node",
+                "description": "Transfer conversation flow to another connected node in the agent flow graph.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "node": {
+                            "type": "string",
+                            "description": "Identifier key of the destination node",
+                        }
+                    },
+                    "required": ["node"],
+                },
+                "runtime_supported": True,
+                "category": "flow",
+            },
+            {
+                "name": "end_call",
+                "description": "Terminate and hang up the current phone call.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "reason": {
+                            "type": "string",
+                            "description": "Optional closing explanation or reason",
+                        }
+                    },
+                },
+                "runtime_supported": True,
+                "category": "telephony",
+            },
+            {
+                "name": "send_whatsapp_template",
+                "description": "Send an approved WhatsApp template with dynamic body parameters to the contact.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "caller_name": {
+                            "type": "string",
+                            "description": "Recipient name for template personalization",
+                        },
+                        "message": {
+                            "type": "string",
+                            "description": "Dynamic summary or body text for the template",
+                        },
+                    },
+                },
+                "runtime_supported": True,
+                "category": "messaging",
+            },
+            {
+                "name": "send_followup",
+                "description": "Send a customized follow-up WhatsApp message/template to the contact.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "caller_name": {
+                            "type": "string",
+                            "description": "Recipient name",
+                        },
+                        "message": {
+                            "type": "string",
+                            "description": "Follow-up message content",
+                        },
+                    },
+                },
+                "runtime_supported": True,
+                "category": "messaging",
+            },
+            {
+                "name": "check_whatsapp_window",
+                "description": "Verify whether an active 24-hour customer service window exists for direct freeform messaging.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "to": {
+                            "type": "string",
+                            "description": "E.164 phone number of the contact",
+                        }
+                    },
+                    "required": ["to"],
+                },
+                "runtime_supported": True,
+                "category": "messaging",
+            },
+            {
+                "name": "send_whatsapp_message",
+                "description": "Send a direct freeform WhatsApp text within the active 24-hour customer service window.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "to": {
+                            "type": "string",
+                            "description": "E.164 phone number of the contact",
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": "Message text to send",
+                        },
+                    },
+                    "required": ["to", "text"],
+                },
+                "runtime_supported": True,
+                "category": "messaging",
+            },
+            {
+                "name": "classify_jev",
+                "description": "Execute TypeSafe AI Jev System One multi-choice classification against configured question criteria on the live call state.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                },
+                "runtime_supported": True,
+                "category": "classification",
+            },
+            {
+                "name": "classify_llm",
+                "description": "Execute fast LLM multi-choice categorization or custom prompt analysis on the live call state.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                },
+                "runtime_supported": True,
+                "category": "classification",
+            },
+            {
+                "name": "classify_lead",
+                "description": "Alias for classify_jev multi-choice lead classification.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                },
+                "runtime_supported": True,
+                "category": "classification",
+            },
+            {
+                "name": "schedule_callback",
+                "description": "Schedule an automated or operator callback based on caller request or spoken phrases like 'call me back tomorrow'.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "time": {
+                            "type": "string",
+                            "description": "Requested callback date and time mentioned by caller (e.g. 'tomorrow at 10 AM', 'Monday 2 PM', 'in 2 hours')",
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Brief context or topic for the callback",
+                        },
+                    },
+                    "required": ["time"],
+                },
+                "runtime_supported": True,
+                "category": "cadence",
+            },
+        ],
+        "http_policy": {
+            "allowed_methods": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+            "allowed_schemes": ["https"],
+            "credentials_policy": "URL credentials (user:pass) are forbidden; use a secret reference",
+            "retry_policy": {
+                "max_attempts": 5,
+                "backoff_secs_min": 0,
+                "write_idempotency_required": True,
+            },
+            "timeout_secs": {
+                "min": 1,
+                "max": 120,
+                "default": 10,
+            },
+            "follow_redirects": False,
+        },
+    }
+
+
 @router.post("/tools", status_code=201)
 async def create_tool(
     body: CreateBody, session: AsyncSession = Session, _: None = Operator

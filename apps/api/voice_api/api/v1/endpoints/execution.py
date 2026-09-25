@@ -20,17 +20,93 @@ Session = Depends(get_session)
 @router.get("/runtime-endpoints")
 async def list_endpoints(session: AsyncSession = Session) -> dict:
     rows = (await session.scalars(select(RuntimeEndpoint).order_by(RuntimeEndpoint.name))).all()
+    active_runs = (await session.scalars(select(Run).where(Run.status.in_(ACTIVE)))).all()
+    active_by_endpoint = {run.endpoint_id: run.id for run in active_runs if run.endpoint_id}
+    now = datetime.now(UTC)
+
     return {
         "endpoints": [
             {
-                "id": ep.id,
-                "name": ep.name,
-                "config": ep.config,
-                "created_at": ep.created_at,
+                "id": row.id,
+                "name": row.name,
+                "config": row.config,
+                "created_at": row.created_at,
+                "active_run_id": active_by_endpoint.get(row.id),
+                "status": row.status
+                if row.status
+                else {
+                    "checked_at": row.last_seen_at.isoformat() if row.last_seen_at else None,
+                    "alive": bool(
+                        row.last_seen_at and (now - row.last_seen_at).total_seconds() < 120
+                    ),
+                    "sim_ready": None,
+                    "can_make_call": None,
+                    "radio_access": "unknown",
+                    "rssi": None,
+                    "usb_audio_active": None,
+                    "last_error": None,
+                },
+                "last_seen_at": row.last_seen_at.isoformat() if row.last_seen_at else None,
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
             }
-            for ep in rows
+            for row in rows
         ]
     }
+
+
+@router.get("/runtime-endpoints/{endpoint_id}")
+async def get_endpoint(endpoint_id: str, session: AsyncSession = Session) -> dict:
+    endpoint = await session.get(RuntimeEndpoint, endpoint_id)
+    if endpoint is None:
+        raise HTTPException(404, "Runtime endpoint not found")
+    active = await session.scalar(
+        select(Run.id).where(Run.endpoint_id == endpoint.id, Run.status.in_(ACTIVE))
+    )
+    now = datetime.now(UTC)
+    return {
+        "id": endpoint.id,
+        "name": endpoint.name,
+        "config": endpoint.config,
+        "active_run_id": active,
+        "status": endpoint.status
+        or {
+            "checked_at": endpoint.last_seen_at.isoformat() if endpoint.last_seen_at else None,
+            "alive": bool(
+                endpoint.last_seen_at and (now - endpoint.last_seen_at).total_seconds() < 120
+            ),
+            "sim_ready": None,
+            "can_make_call": None,
+            "radio_access": "unknown",
+            "rssi": None,
+            "usb_audio_active": None,
+            "last_error": None,
+        },
+        "last_seen_at": endpoint.last_seen_at.isoformat() if endpoint.last_seen_at else None,
+        "updated_at": endpoint.updated_at.isoformat() if endpoint.updated_at else None,
+    }
+
+
+@router.post("/runtime-endpoints/{endpoint_id}/status")
+async def update_endpoint_status(
+    endpoint_id: str, body: dict, session: AsyncSession = Session
+) -> dict:
+    endpoint = await session.get(RuntimeEndpoint, endpoint_id, with_for_update=True)
+    if endpoint is None:
+        raise HTTPException(404, "Runtime endpoint not found")
+    now = datetime.now(UTC)
+    endpoint.status = {
+        "checked_at": now.isoformat(),
+        "alive": bool(body.get("alive", True)),
+        "sim_ready": body.get("sim_ready"),
+        "can_make_call": body.get("can_make_call"),
+        "radio_access": body.get("radio_access", "unknown"),
+        "rssi": body.get("rssi"),
+        "usb_audio_active": body.get("usb_audio_active"),
+        "last_error": body.get("last_error"),
+    }
+    endpoint.last_seen_at = now
+    await session.commit()
+    return {"id": endpoint.id, "status": endpoint.status}
 
 
 @router.post("/runtime-endpoints", status_code=201)
@@ -129,6 +205,9 @@ async def progress(run_id: str, body: Progress, session: AsyncSession = Session)
     call = await session.scalar(select(Call).where(Call.run_id == run.id))
     if call:
         call.status = body.status
+        if body.status == "running":
+            call.started_at = call.started_at or now
+            call.answered_at = call.answered_at or now
     if body.status != "running":
         run.ended_at, run.final_state, run.error = (
             now,

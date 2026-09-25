@@ -1,26 +1,30 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
-import {
-  CalendarClock,
-  CheckCircle,
-  Clock,
-  PhoneCall,
-  Play,
-  RefreshCw,
-} from "lucide-react";
+import { CalendarClock, PhoneCall, Play } from "lucide-react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import {
+  LoadState,
+  PageBody,
+  PageHeader,
+  StatusBadge,
+} from "@/components/record-page";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@/components/ui/field";
+import { NativeSelect } from "@/components/ui/native-select";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import {
   Table,
   TableBody,
@@ -29,199 +33,300 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useResource } from "@/lib/resources";
 
-interface CallbackItem {
+type CallbackRecord = {
   id: string;
-  request_key: string;
   contact_id: string;
+  contact_name: string | null;
+  contact_phone: string | null;
   agent_version_id: string;
-  due_at: string;
+  agent_version_number: number | null;
+  due_at: string | null;
   timezone: string;
   original_phrase: string;
-  status: "scheduled" | "queued" | "completed" | "cancelled";
-  call_id: string | null;
+  status: string;
   automatic_attempts: number;
-}
+  call_id: string | null;
+  run_id: string | null;
+  last_error: string | null;
+  claimed_at: string | null;
+  completed_at: string | null;
+  created_at: string | null;
+};
 
-interface ContactItem {
-  id: string;
-  name: string;
-  phone_number: string;
-}
+type CallbacksResponse = {
+  callbacks: CallbackRecord[];
+  total: number;
+  automatic_callbacks_enabled: boolean;
+  callback_due_window_minutes: number;
+};
+
+type DialOptions = {
+  endpoints: Array<{
+    id: string;
+    name: string;
+    active_run_id?: string | null;
+  }>;
+};
 
 export function CallbacksPage() {
   const api = useApi();
-  const [callbacks, setCallbacks] = useState<CallbackItem[]>([]);
-  const [contacts, setContacts] = useState<Record<string, ContactItem>>({});
-  const [endpoints, setEndpoints] = useState<Array<{ id: string; name: string }>>([]);
-  const [loading, setLoading] = useState(true);
-  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [filter, setFilter] = useState<string>("all");
+  const url = filter === "all" ? "/callbacks" : `/callbacks?status=${filter}`;
+  const { data, loading, error, reload } = useResource<CallbacksResponse>(url);
+  const dialOptions = useResource<DialOptions>("/dial-options");
 
-  async function load() {
-    setLoading(true);
+  const [selectedCallback, setSelectedCallback] =
+    useState<CallbackRecord | null>(null);
+  const [selectedEndpoint, setSelectedEndpoint] = useState<string>("");
+  const [launchBusy, setLaunchBusy] = useState(false);
+
+  const availableEndpoints =
+    dialOptions.data?.endpoints.filter((ep) => !ep.active_run_id) ?? [];
+
+  async function launchCallback() {
+    if (!selectedCallback || !selectedEndpoint) return;
+    setLaunchBusy(true);
     try {
-      const [cbData, contactsData, epData] = await Promise.all([
-        api<{ callbacks: CallbackItem[] }>("/callbacks"),
-        api<{ contacts: ContactItem[] }>("/contacts").catch(() => ({ contacts: [] })),
-        api<{ endpoints: Array<{ id: string; name: string }> }>("/runtime-endpoints").catch(() => ({
-          endpoints: [],
-        })),
-      ]);
-      const map: Record<string, ContactItem> = {};
-      for (const c of contactsData.contacts) {
-        map[c.id] = c;
+      const res = await api<{ run_id: string; call_id: string }>(
+        `/callbacks/${selectedCallback.id}/launch`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            endpoint_id: selectedEndpoint,
+            mode: "manual",
+          }),
+        },
+      );
+      toast.success("Callback launched");
+      setSelectedCallback(null);
+      setSelectedEndpoint("");
+      await reload();
+      if (res.run_id) {
+        window.location.href = `/runs/${res.run_id}`;
       }
-      setContacts(map);
-      setCallbacks(cbData.callbacks);
-      setEndpoints(epData.endpoints);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load callbacks");
+    } catch (cause) {
+      toast.error(
+        cause instanceof Error ? cause.message : "Failed to launch callback",
+      );
     } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void load();
-  }, []);
-
-  async function triggerLaunch(callbackId: string) {
-    if (!endpoints.length) {
-      toast.error("No runtime endpoint available to place callback");
-      return;
-    }
-    const defaultEndpoint = endpoints[0].id;
-    setBusyAction(callbackId);
-    try {
-      await api(`/callbacks/${callbackId}/launch`, {
-        method: "POST",
-        body: JSON.stringify({
-          endpoint_id: defaultEndpoint,
-          mode: "manual",
-        }),
-      });
-      toast.success("Callback dispatched to call queue");
-      await load();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not launch callback");
-    } finally {
-      setBusyAction(null);
+      setLaunchBusy(false);
     }
   }
 
   return (
-    <div className="flex flex-col gap-5 p-6 max-w-6xl mx-auto">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Callback Schedule</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Confirmed caller callback appointments, timezone commitments, and automatic re-engagement.
-          </p>
+    <PageBody>
+      <PageHeader
+        title="Callbacks"
+        description="Scheduled return calls requested by callers. Pinned to explicit contact, agent version, and due time."
+      />
+
+      {data && (
+        <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border bg-card p-4 text-card-foreground">
+          <div className="flex items-center gap-3">
+            <CalendarClock className="size-5 text-muted-foreground" />
+            <div>
+              <p className="text-sm font-medium">Automatic Dispatch Engine</p>
+              <p className="text-xs text-muted-foreground">
+                {data.automatic_callbacks_enabled
+                  ? `Active · Automatic due window: ±${data.callback_due_window_minutes} min`
+                  : "Disabled in Workspace Settings · Manual launch only"}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Badge
+              variant={
+                data.automatic_callbacks_enabled ? "default" : "secondary"
+              }
+            >
+              {data.automatic_callbacks_enabled ? "Automation On" : "Manual Only"}
+            </Badge>
+            <span className="text-xs text-muted-foreground">
+              Total: {data.total}
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => void load()}>
-            <RefreshCw className="size-3.5 mr-1.5" /> Refresh
-          </Button>
-        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2 border-b pb-2">
+        {["all", "scheduled", "queued", "completed", "uncertain"].map(
+          (status) => (
+            <Button
+              key={status}
+              type="button"
+              size="sm"
+              variant={filter === status ? "secondary" : "ghost"}
+              onClick={() => setFilter(status)}
+              className="capitalize"
+            >
+              {status}
+            </Button>
+          ),
+        )}
       </div>
 
-      {loading ? (
-        <Card className="p-6">
-          <Skeleton className="h-6 w-48 mb-4" />
-          <Skeleton className="h-28 w-full" />
-        </Card>
-      ) : callbacks.length === 0 ? (
-        <Empty>
-          <EmptyHeader>
-            <EmptyTitle>No callbacks scheduled</EmptyTitle>
-            <EmptyDescription>
-              When callers ask to be reached back at a specific time, callbacks appear here automatically.
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      ) : (
-        <Card className="shadow-none">
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-xs">Scheduled Due Time</TableHead>
-                  <TableHead className="text-xs">Contact</TableHead>
-                  <TableHead className="text-xs">Requested Phrase / Reason</TableHead>
-                  <TableHead className="text-xs">Status</TableHead>
-                  <TableHead className="text-xs text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {callbacks.map((cb) => {
-                  const contact = contacts[cb.contact_id];
-                  const due = new Date(cb.due_at).toLocaleString(undefined, {
-                    month: "short",
-                    day: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  });
+      <LoadState
+        loading={loading}
+        error={error}
+        empty={
+          data?.callbacks.length === 0
+            ? "No callbacks found matching filter."
+            : undefined
+        }
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Contact</TableHead>
+              <TableHead>Phone</TableHead>
+              <TableHead>Due at</TableHead>
+              <TableHead>Original Phrase</TableHead>
+              <TableHead>Version</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="text-right">Action</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data?.callbacks.map((cb) => (
+              <TableRow key={cb.id}>
+                <TableCell className="font-medium">
+                  {cb.contact_name ? (
+                    <Link
+                      to={`/contacts/${cb.contact_id}`}
+                      className="hover:underline"
+                    >
+                      {cb.contact_name}
+                    </Link>
+                  ) : (
+                    cb.contact_id.slice(0, 8)
+                  )}
+                </TableCell>
+                <TableCell>{cb.contact_phone || "—"}</TableCell>
+                <TableCell>
+                  <div className="text-sm">
+                    {cb.due_at
+                      ? new Date(cb.due_at).toLocaleString(undefined, {
+                          timeZone: cb.timezone || undefined,
+                          dateStyle: "short",
+                          timeStyle: "short",
+                        })
+                      : "Unset"}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {cb.timezone}
+                  </div>
+                </TableCell>
+                <TableCell className="max-w-xs truncate text-xs text-muted-foreground" title={cb.original_phrase}>
+                  “{cb.original_phrase}”
+                </TableCell>
+                <TableCell>
+                  {cb.agent_version_number ? `v${cb.agent_version_number}` : "—"}
+                </TableCell>
+                <TableCell>
+                  <StatusBadge value={cb.status} />
+                </TableCell>
+                <TableCell className="text-right">
+                  {cb.status === "scheduled" ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setSelectedCallback(cb);
+                        setSelectedEndpoint(
+                          availableEndpoints[0]?.id || "",
+                        );
+                      }}
+                    >
+                      <Play className="mr-1 size-3.5" />
+                      Launch
+                    </Button>
+                  ) : cb.run_id ? (
+                    <Button asChild size="sm" variant="ghost">
+                      <Link to={`/runs/${cb.run_id}`}>View Run</Link>
+                    </Button>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">—</span>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </LoadState>
 
-                  return (
-                    <TableRow key={cb.id}>
-                      <TableCell className="text-xs font-mono">
-                        <div className="flex items-center gap-1.5">
-                          <Clock className="size-3.5 text-muted-foreground" />
-                          <span className="font-semibold">{due}</span>
-                          <span className="text-[11px] text-muted-foreground">({cb.timezone})</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-xs">
-                        <div className="flex flex-col">
-                          <span className="font-medium">{contact?.name || cb.contact_id.slice(0, 8)}</span>
-                          <span className="font-mono text-[11px] text-muted-foreground">
-                            {contact?.phone_number || "—"}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground max-w-xs truncate">
-                        "{cb.original_phrase}"
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="outline"
-                          className={
-                            cb.status === "scheduled"
-                              ? "bg-amber-50 text-amber-800 border-amber-200 text-[11px]"
-                              : cb.status === "queued"
-                                ? "bg-blue-50 text-blue-700 border-blue-200 text-[11px]"
-                                : "bg-secondary text-muted-foreground text-[11px]"
-                          }
-                        >
-                          {cb.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {cb.status === "scheduled" && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-xs h-7 px-2"
-                            disabled={busyAction === cb.id}
-                            onClick={() => void triggerLaunch(cb.id)}
-                          >
-                            <PhoneCall className="size-3 mr-1" /> Call Now
-                          </Button>
-                        )}
-                        {cb.call_id && (
-                          <Button asChild variant="link" size="sm" className="text-xs h-7 px-1">
-                            <Link to={`/runs`}>View Run</Link>
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
-    </div>
+      {/* Manual Launch Sheet */}
+      <Sheet
+        open={Boolean(selectedCallback)}
+        onOpenChange={(open) => !open && setSelectedCallback(null)}
+      >
+        <SheetContent>
+          <SheetHeader>
+            <SheetTitle>Launch Callback</SheetTitle>
+            <SheetDescription>
+              Select an available modem runtime endpoint to place this return call now.
+            </SheetDescription>
+          </SheetHeader>
+
+          {selectedCallback && (
+            <div className="mt-6 flex flex-col gap-5">
+              <div className="rounded-md border p-3 text-sm">
+                <p className="font-semibold text-foreground">
+                  {selectedCallback.contact_name || "Contact"}
+                </p>
+                <p className="text-muted-foreground">{selectedCallback.contact_phone}</p>
+                <p className="mt-2 text-xs italic text-muted-foreground">
+                  “{selectedCallback.original_phrase}”
+                </p>
+              </div>
+
+              <Field>
+                <FieldLabel htmlFor="callback-endpoint">
+                  Runtime Endpoint
+                </FieldLabel>
+                <NativeSelect
+                  id="callback-endpoint"
+                  value={selectedEndpoint}
+                  onChange={(e) => setSelectedEndpoint(e.target.value)}
+                >
+                  <option value="">Select an endpoint...</option>
+                  {dialOptions.data?.endpoints.map((ep) => (
+                    <option
+                      key={ep.id}
+                      value={ep.id}
+                      disabled={Boolean(ep.active_run_id)}
+                    >
+                      {ep.name} {ep.active_run_id ? "(Occupied)" : "(Available)"}
+                    </option>
+                  ))}
+                </NativeSelect>
+                <FieldDescription>
+                  Uncertain attempts are never redialed automatically.
+                </FieldDescription>
+              </Field>
+
+              <SheetFooter className="mt-auto">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setSelectedCallback(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  disabled={!selectedEndpoint || launchBusy}
+                  onClick={() => void launchCallback()}
+                >
+                  <PhoneCall className="mr-1.5 size-4" />
+                  {launchBusy ? "Launching…" : "Dial Now"}
+                </Button>
+              </SheetFooter>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
+    </PageBody>
   );
 }

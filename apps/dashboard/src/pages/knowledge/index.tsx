@@ -1,261 +1,143 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { BookOpen, ChevronRight, Database, Plus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import { LoadState, PageBody, PageHeader } from "@/components/record-page";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
 import {
   Sheet,
   SheetContent,
   SheetDescription,
+  SheetFooter,
   SheetHeader,
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { Field, FieldLabel } from "@/components/ui/field";
-import { Spinner } from "@/components/ui/spinner";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { useResource } from "@/lib/resources";
 
-interface KBItem {
+type Base = {
   id: string;
   name: string;
-  config: {
-    chunk_size: number;
-    chunk_overlap: number;
-    markdown_aware: boolean;
-    supported_sources: string[];
-  };
-}
+  config: { embedding_model: string; embedding_dimensions: number };
+};
 
 export function KnowledgePage() {
   const api = useApi();
   const navigate = useNavigate();
-  const [bases, setBases] = useState<KBItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  // Create knowledge base sheet state
-  const [openAddSheet, setOpenAddSheet] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [kbName, setKbName] = useState("");
-  const [chunkSize, setChunkSize] = useState(400);
-  const [chunkOverlap, setChunkOverlap] = useState(50);
-
-  async function load() {
-    setLoading(true);
-    setError("");
+  const { data, loading, error, reload } = useResource<{
+    knowledge_bases: Base[];
+  }>("/knowledge-bases");
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function create(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
     try {
-      const data = await api<{ knowledge_bases: KBItem[] }>("/knowledge-bases");
-      setBases(data.knowledge_bases);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to load knowledge bases";
-      setError(msg);
-      toast.error(msg);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void load();
-  }, []);
-
-  async function handleCreateKB(e: FormEvent) {
-    e.preventDefault();
-    if (!kbName.trim()) {
-      toast.error("Please enter a name for the knowledge base");
-      return;
-    }
-    setCreating(true);
-    try {
-      const res = await api<{ id: string; name: string }>("/knowledge-bases", {
+      const result = await api<{ id: string }>("/knowledge-bases", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: kbName.trim(),
-          config: {
-            chunk_size: Number(chunkSize) || 400,
-            chunk_overlap: Number(chunkOverlap) || 50,
-            markdown_aware: true,
-            supported_sources: ["text", "markdown", "pdf"],
-          },
-        }),
+        body: JSON.stringify({ name: name.trim() }),
       });
-      toast.success(`Knowledge base '${kbName}' created`);
-      setOpenAddSheet(false);
-      setKbName("");
-      navigate(`/knowledge/${res.id}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create knowledge base");
+      toast.success("Knowledge base created");
+      setOpen(false);
+      setName("");
+      await reload();
+      navigate(`/knowledge/${result.id}`);
+    } catch (cause) {
+      toast.error(
+        cause instanceof Error
+          ? cause.message
+          : "Could not create knowledge base",
+      );
     } finally {
-      setCreating(false);
+      setBusy(false);
     }
   }
-
   return (
-    <div className="flex flex-col gap-5 p-6 max-w-6xl mx-auto">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Knowledge Bases</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Document ingestion, vector embeddings (pgvector), and semantic RAG context sources for voice agents.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => void load()}>
-            <RefreshCw className="size-3.5 mr-1.5" /> Refresh
-          </Button>
-          <Sheet open={openAddSheet} onOpenChange={setOpenAddSheet}>
+    <PageBody>
+      <PageHeader
+        title="Knowledge"
+        description="Mutable text, PDF and Markdown sources. Ingestion settings belong to each base."
+        action={
+          <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger asChild>
-              <Button size="sm" className="gap-1.5 bg-primary text-primary-foreground">
-                <Plus className="size-3.5" /> Create Knowledge Base
-              </Button>
+              <Button>New knowledge base</Button>
             </SheetTrigger>
-            <SheetContent side="right" className="flex flex-col p-6 w-full sm:max-w-md">
-              <SheetHeader className="p-0 mb-4">
-                <SheetTitle className="flex items-center gap-2 text-lg">
-                  <Database className="size-5 text-primary" />
-                  New Knowledge Base
-                </SheetTitle>
-                <SheetDescription>
-                  Create an isolated pgvector collection for indexing project documents and guidelines.
-                </SheetDescription>
-              </SheetHeader>
-
-              <form onSubmit={handleCreateKB} className="flex flex-col gap-4 flex-1 justify-between">
-                <div className="flex flex-col gap-4">
+            <SheetContent>
+              <form onSubmit={create} className="flex h-full flex-col gap-6">
+                <SheetHeader>
+                  <SheetTitle>New knowledge base</SheetTitle>
+                  <SheetDescription>
+                    Backend defaults apply to chunking and embeddings.
+                  </SheetDescription>
+                </SheetHeader>
+                <FieldGroup>
                   <Field>
-                    <FieldLabel htmlFor="kb-name">Collection Name</FieldLabel>
+                    <FieldLabel htmlFor="kb-name">Name</FieldLabel>
                     <Input
                       id="kb-name"
-                      placeholder="e.g. Sales FAQ & Pricing"
+                      value={name}
+                      onChange={(event) => setName(event.target.value)}
                       required
-                      value={kbName}
-                      onChange={(e) => setKbName(e.target.value)}
+                      maxLength={120}
                     />
                   </Field>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field>
-                      <FieldLabel htmlFor="kb-chunk">Chunk Size (chars)</FieldLabel>
-                      <Input
-                        id="kb-chunk"
-                        type="number"
-                        min={100}
-                        max={4000}
-                        value={chunkSize}
-                        onChange={(e) => setChunkSize(Number(e.target.value))}
-                      />
-                    </Field>
-
-                    <Field>
-                      <FieldLabel htmlFor="kb-overlap">Overlap (chars)</FieldLabel>
-                      <Input
-                        id="kb-overlap"
-                        type="number"
-                        min={0}
-                        max={500}
-                        value={chunkOverlap}
-                        onChange={(e) => setChunkOverlap(Number(e.target.value))}
-                      />
-                    </Field>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-end gap-3 pt-4 border-t">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setOpenAddSheet(false)}
-                    disabled={creating}
-                  >
-                    Cancel
+                </FieldGroup>
+                <SheetFooter className="mt-auto">
+                  <Button type="submit" disabled={busy || !name.trim()}>
+                    {busy ? "Creating…" : "Create"}
                   </Button>
-                  <Button type="submit" disabled={creating || !kbName.trim()}>
-                    {creating ? <Spinner className="size-4 mr-1.5" /> : null}
-                    Create Collection
-                  </Button>
-                </div>
+                </SheetFooter>
               </form>
             </SheetContent>
           </Sheet>
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {[1, 2].map((n) => (
-            <Card key={n} className="p-4">
-              <Skeleton className="h-5 w-32 mb-2" />
-              <Skeleton className="h-4 w-48 mb-4" />
-              <Skeleton className="h-8 w-20" />
-            </Card>
-          ))}
-        </div>
-      ) : error ? (
-        <Empty>
-          <EmptyHeader>
-            <EmptyTitle>Could not load knowledge bases</EmptyTitle>
-            <EmptyDescription>{error}</EmptyDescription>
-          </EmptyHeader>
-          <Button variant="outline" size="sm" onClick={() => void load()}>
-            Retry
-          </Button>
-        </Empty>
-      ) : bases.length === 0 ? (
-        <Empty>
-          <EmptyHeader>
-            <EmptyTitle>No knowledge bases configured</EmptyTitle>
-            <EmptyDescription>
-              Create a knowledge base to ground voice agents with product docs, FAQs, and pricing matrices.
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {bases.map((kb) => (
-            <Card
-              key={kb.id}
-              className="group flex flex-col justify-between hover:border-border transition-colors shadow-none"
-            >
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex size-8 items-center justify-center rounded-md bg-primary/10 text-primary">
-                    <Database className="size-4" />
-                  </div>
-                  <Badge variant="outline" className="text-[11px] font-mono font-normal">
-                    pgvector
-                  </Badge>
-                </div>
-                <CardTitle className="text-sm font-semibold mt-3 group-hover:text-primary transition-colors">
-                  {kb.name}
-                </CardTitle>
-                <CardDescription className="text-xs line-clamp-1 font-mono">
-                  Chunk: {kb.config.chunk_size} tokens (overlap: {kb.config.chunk_overlap})
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <Button asChild variant="outline" size="sm" className="w-full justify-between text-xs">
-                  <Link to={`/knowledge/${kb.id}`}>
-                    Manage sources & test search
-                    <ChevronRight className="size-3.5 text-muted-foreground" />
-                  </Link>
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
+        }
+      />
+      <LoadState
+        loading={loading}
+        error={error}
+        empty={
+          data?.knowledge_bases.length === 0
+            ? "No knowledge bases yet."
+            : undefined
+        }
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>Embedding</TableHead>
+              <TableHead className="text-right">Open</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data?.knowledge_bases.map((base) => (
+              <TableRow key={base.id}>
+                <TableCell className="font-medium">{base.name}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  {base.config.embedding_model} ·{" "}
+                  {base.config.embedding_dimensions}d
+                </TableCell>
+                <TableCell className="text-right">
+                  <Button asChild variant="link">
+                    <Link to={`/knowledge/${base.id}`}>Sources</Link>
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </LoadState>
+    </PageBody>
   );
 }

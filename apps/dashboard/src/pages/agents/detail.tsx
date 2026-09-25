@@ -1,29 +1,14 @@
-import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import {
-  ArrowLeft,
-  CheckCircle,
-  Copy,
-  ExternalLink,
-  Layers,
-  Play,
-  Plus,
-  Radio,
-  RefreshCw,
-} from "lucide-react";
+import { useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
-import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
+  LoadState,
+  PageBody,
+  PageHeader,
+  StatusBadge,
+} from "@/components/record-page";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -32,220 +17,157 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useResource } from "@/lib/resources";
 
-interface AgentVersionItem {
+type Version = {
   id: string;
   version: number;
   revision: number;
-  status: "draft" | "published";
-  config: any;
+  status: string;
   note: string | null;
-}
+};
+type Agent = { id: string; name: string; active_version_id: string | null };
 
 export function AgentDetailPage() {
-  const { agentId } = useParams();
+  const { agentId = "" } = useParams();
   const api = useApi();
-  const [versions, setVersions] = useState<AgentVersionItem[]>([]);
-  const [activeVersionId, setActiveVersionId] = useState<string | null>(null);
-  const [agentName, setAgentName] = useState<string>("Agent");
-  const [loading, setLoading] = useState(true);
-  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const agents = useResource<{ agents: Agent[] }>("/agents");
+  const versions = useResource<{ versions: Version[] }>(
+    `/agents/${agentId}/versions`,
+  );
+  const [busy, setBusy] = useState<string | null>(null);
+  const agent = agents.data?.agents.find((item) => item.id === agentId);
 
-  async function load() {
-    if (!agentId) return;
-    setLoading(true);
+  async function action(
+    version: Version,
+    kind: "clone" | "publish" | "activate",
+  ) {
+    setBusy(version.id);
     try {
-      const [agentsData, versionsData] = await Promise.all([
-        api<{ agents: Array<{ id: string; name: string; active_version_id: string | null }> }>("/agents"),
-        api<{ versions: AgentVersionItem[] }>(`/agents/${agentId}/versions`),
-      ]);
-      const current = agentsData.agents.find((a) => a.id === agentId);
-      if (current) {
-        setAgentName(current.name);
-        setActiveVersionId(current.active_version_id);
+      if (kind === "activate") {
+        await api(`/agents/${agentId}/activate`, {
+          method: "POST",
+          body: JSON.stringify({ version_id: version.id }),
+        });
+        await agents.reload();
+      } else {
+        const path = `/agent-versions/${version.id}/${kind}`;
+        const result = await api<{ id: string }>(path, {
+          method: "POST",
+          body: JSON.stringify({ revision: version.revision }),
+        });
+        if (kind === "clone")
+          navigate(`/agents/${agentId}/versions/${result.id}`);
+        await versions.reload();
       }
-      setVersions(versionsData.versions);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load agent");
+      toast.success(
+        kind === "clone"
+          ? "Draft cloned"
+          : kind === "publish"
+            ? "Version published"
+            : "Version activated",
+      );
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "Action failed");
     } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void load();
-  }, [agentId]);
-
-  async function cloneVersion(versionId: string, revision: number) {
-    setBusyAction(versionId);
-    try {
-      await api<{ version_id: string }>(`/agent-versions/${versionId}/clone`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ revision }),
-      });
-      toast.success("Created new draft version");
-      await load();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not clone version");
-    } finally {
-      setBusyAction(null);
-    }
-  }
-
-  async function activateVersion(versionId: string) {
-    if (!agentId) return;
-    setBusyAction(versionId);
-    try {
-      await api(`/agents/${agentId}/activate`, {
-        method: "POST",
-        body: JSON.stringify({ version_id: versionId }),
-      });
-      toast.success("Active version updated");
-      setActiveVersionId(versionId);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not activate version");
-    } finally {
-      setBusyAction(null);
+      setBusy(null);
     }
   }
 
   return (
-    <div className="flex flex-col gap-5 p-6 max-w-6xl mx-auto">
-      <div>
-        <Link
-          to="/agents"
-          className="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ArrowLeft className="size-3.5" /> Back to agents
-        </Link>
-        <div className="flex flex-wrap items-center justify-between gap-3 mt-1">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">{agentName}</h1>
-            <p className="text-xs text-muted-foreground font-mono mt-0.5">
-              Agent ID: {agentId}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => void load()}>
-              <RefreshCw className="size-3.5 mr-1.5" /> Refresh
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {loading ? (
-        <Card className="p-6">
-          <Skeleton className="h-6 w-48 mb-4" />
-          <Skeleton className="h-24 w-full" />
-        </Card>
-      ) : versions.length === 0 ? (
-        <Empty>
-          <EmptyHeader>
-            <EmptyTitle>No versions found</EmptyTitle>
-            <EmptyDescription>This agent does not have any versions configured.</EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      ) : (
-        <Card className="shadow-none">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold">Version History</CardTitle>
-            <CardDescription className="text-xs">
-              Published versions are immutable snapshots. Drafts can be edited and published.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-xs w-24">Version</TableHead>
-                  <TableHead className="text-xs">Status</TableHead>
-                  <TableHead className="text-xs">Flow & Models</TableHead>
-                  <TableHead className="text-xs">Notes</TableHead>
-                  <TableHead className="text-xs text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {versions.map((ver) => {
-                  const isActive = ver.id === activeVersionId;
-                  const cfg = ver.config || {};
-                  const llm = cfg.llm?.model ?? "Default LLM";
-                  const tts = cfg.tts?.voice ?? "Default Voice";
-                  const nodesCount = cfg.flow?.nodes?.length ?? 0;
-
-                  return (
-                    <TableRow key={ver.id}>
-                      <TableCell className="font-mono text-xs font-semibold">
-                        v{ver.version} (r{ver.revision})
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1.5">
-                          <Badge
-                            variant="outline"
-                            className={
-                              ver.status === "published"
-                                ? "bg-emerald-50 text-emerald-700 text-[11px] border-emerald-200"
-                                : "bg-secondary text-muted-foreground text-[11px]"
-                            }
-                          >
-                            {ver.status}
-                          </Badge>
-                          {isActive && (
-                            <Badge variant="outline" className="bg-blue-50 text-blue-700 text-[11px] border-blue-200">
-                              Active
-                            </Badge>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        <div className="flex flex-col gap-0.5 font-mono text-[11px]">
-                          <span>{nodesCount} flow nodes</span>
-                          <span className="text-foreground/80">{llm} · {tts}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {ver.note || "No release notes"}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {ver.status === "published" && !isActive && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="text-xs h-7 px-2"
-                              disabled={busyAction === ver.id}
-                              onClick={() => void activateVersion(ver.id)}
-                            >
-                              Make Active
-                            </Button>
-                          )}
-                          {ver.status === "published" && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="text-xs h-7 px-2"
-                              disabled={busyAction === ver.id}
-                              onClick={() => void cloneVersion(ver.id, ver.revision)}
-                            >
-                              <Copy className="size-3 mr-1" /> Clone Draft
-                            </Button>
-                          )}
-                          <Button asChild variant="outline" size="sm" className="text-xs h-7 px-2">
-                            <Link to={`/agents/${agentId}/versions/${ver.id}`}>
-                              {ver.status === "draft" ? "Edit Draft" : "View Snapshot"}
-                              <ExternalLink className="size-3 ml-1" />
-                            </Link>
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
-    </div>
+    <PageBody>
+      <PageHeader
+        title={agent?.name ?? "Agent"}
+        description="Version history. Published configurations are immutable."
+        action={
+          <Button asChild variant="outline">
+            <Link to="/agents">All agents</Link>
+          </Button>
+        }
+      />
+      <LoadState
+        loading={agents.loading || versions.loading}
+        error={agents.error || versions.error}
+        empty={
+          versions.data?.versions.length === 0
+            ? "No versions found."
+            : undefined
+        }
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Version</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Note</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {versions.data?.versions.map((version) => (
+              <TableRow key={version.id}>
+                <TableCell>
+                  <Link
+                    className="font-medium text-primary hover:underline"
+                    to={`/agents/${agentId}/versions/${version.id}`}
+                  >
+                    v{version.version}
+                  </Link>
+                  {agent?.active_version_id === version.id && (
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      Active
+                    </span>
+                  )}
+                </TableCell>
+                <TableCell>
+                  <StatusBadge value={version.status} />
+                </TableCell>
+                <TableCell className="max-w-64 truncate text-muted-foreground">
+                  {version.note || "No note"}
+                </TableCell>
+                <TableCell className="flex justify-end gap-1">
+                  <Button size="sm" variant="ghost" asChild>
+                    <Link to={`/agents/${agentId}/versions/${version.id}`}>
+                      {version.status === "draft" ? "Edit" : "View"}
+                    </Link>
+                  </Button>
+                  {version.status === "draft" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy === version.id}
+                      onClick={() => void action(version, "publish")}
+                    >
+                      Publish
+                    </Button>
+                  )}
+                  {version.status === "published" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy === version.id}
+                      onClick={() => void action(version, "clone")}
+                    >
+                      Clone draft
+                    </Button>
+                  )}
+                  {version.status === "published" &&
+                    agent?.active_version_id !== version.id && (
+                      <Button
+                        size="sm"
+                        disabled={busy === version.id}
+                        onClick={() => void action(version, "activate")}
+                      >
+                        Activate
+                      </Button>
+                    )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </LoadState>
+    </PageBody>
   );
 }

@@ -158,6 +158,24 @@ async def seed() -> None:
                     },
                 },
             ),
+            (
+                "schedule_callback",
+                "Schedule a callback for a requested date and time mentioned by the caller.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "time": {
+                            "type": "string",
+                            "description": "The date and time requested by the caller (e.g., 'tomorrow morning', 'Monday at 2 PM').",
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Optional reason or topic for the callback.",
+                        },
+                    },
+                    "required": ["time"],
+                },
+            ),
         ]
 
         published_tool_versions: dict[str, tuple[str, str]] = {}
@@ -383,9 +401,14 @@ async def seed() -> None:
             ),
             FlowNodeConfig(
                 id="callback_scheduling",
-                prompt="Ask what day and time works best for a quick callback. Once provided, confirm warmly, assure them the WhatsApp catalog is on the way, and call end_call().",
+                prompt="Ask what day and time works best for a quick callback. Once provided, call schedule_callback(time=...) to record the callback. Then confirm warmly, assure them the WhatsApp catalog is on the way, and call end_call().",
                 terminal=True,
-                tool_bindings=["change_node", "end_call", "send_whatsapp_template"],
+                tool_bindings=[
+                    "change_node",
+                    "end_call",
+                    "schedule_callback",
+                    "send_whatsapp_template",
+                ],
             ),
             FlowNodeConfig(
                 id="diplomatic_exit",
