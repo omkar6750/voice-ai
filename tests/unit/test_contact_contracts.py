@@ -1,6 +1,6 @@
 import pytest
 from pydantic import ValidationError
-from voice_api.contact_contracts import ContactBody
+from voice_api.schemas.contact import ContactBody
 
 
 def test_contact_normalization_and_unknown_timezone():

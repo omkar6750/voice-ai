@@ -8,9 +8,10 @@ from fastapi import HTTPException
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
-from voice_api.execution_routes import Claim, claim
+from voice_api.api.v1.endpoints.execution import claim
 from voice_api.models import Agent, AgentVersion, Call, Contact, Run, RuntimeEndpoint
 from voice_api.models.common import new_id
+from voice_api.schemas.execution import Claim
 from voice_runtime.contracts import AgentConfig
 
 

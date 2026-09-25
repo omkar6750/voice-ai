@@ -6,8 +6,8 @@ import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
-from voice_api.auth import require_operator
-from voice_api.db import get_session
+from voice_api.core.security import require_operator
+from voice_api.db.session import get_session
 from voice_api.main import app
 
 

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from voice_api.config import get_settings
+from voice_api.core.config import get_settings
 
 
 class VaultError(ValueError):

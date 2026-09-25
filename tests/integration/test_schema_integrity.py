@@ -9,7 +9,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
-from voice_api.main import RevisionBody, update_agent_version
+from voice_api.api.v1.endpoints.agents import update_agent_version
 from voice_api.models import (
     Agent,
     AgentVersion,
@@ -18,6 +18,7 @@ from voice_api.models import (
     Exchange,
 )
 from voice_api.models.common import new_id
+from voice_api.schemas.agent import RevisionBody
 
 pytestmark = pytest.mark.skipif(
     not os.getenv("VOICE_TEST_DATABASE_URL"), reason="Set isolated VOICE_TEST_DATABASE_URL"

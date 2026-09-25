@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from voice_api.models import Call, Run, WorkspaceSettings
 from voice_api.models.common import new_id
-from voice_api.resolution import fingerprint
+from voice_api.services.resolution_service import fingerprint
 
 
 async def setup_call(client):

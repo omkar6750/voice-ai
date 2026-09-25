@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
-from voice_api.config import get_settings
+from voice_api.core.config import get_settings
 from voice_api.models import ConversationMessage, Exchange, RunArtifact, TraceSpan
 from voice_api.models.common import new_id
 

@@ -10,15 +10,6 @@ from pydantic import ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from voice_api.api.v1.api import api_router
-from voice_api.api.v1.endpoints.agents import update_agent_version
-from voice_api.schemas.agent import (
-    ActivateAgentBody,
-    BindToolBody,
-    CreateBody,
-    ExpectedRevision,
-    RevisionBody,
-)
-from voice_api.schemas.call import StartCallBody
 
 app = FastAPI(title="Voice AI API", version="0.2.0")
 
@@ -69,14 +60,3 @@ app.include_router(api_router, prefix="/api")
 dashboard_dist = Path(__file__).resolve().parents[2] / "dashboard" / "dist"
 if dashboard_dist.is_dir():
     app.mount("/", DashboardFiles(directory=dashboard_dist, html=True), name="dashboard")
-
-__all__ = [
-    "ActivateAgentBody",
-    "BindToolBody",
-    "CreateBody",
-    "ExpectedRevision",
-    "RevisionBody",
-    "StartCallBody",
-    "app",
-    "update_agent_version",
-]

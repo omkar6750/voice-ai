@@ -5,7 +5,7 @@ from sqlalchemy import DateTime, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from voice_api.db import Base
+from voice_api.db.base_class import Base
 
 
 def new_id() -> str:
