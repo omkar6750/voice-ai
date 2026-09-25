@@ -27,6 +27,11 @@ const AgentEditorPage = lazy(() =>
 const ContactsPage = lazy(() =>
   import("@/pages/contacts").then((page) => ({ default: page.ContactsPage })),
 );
+const ContactDetailPage = lazy(() =>
+  import("@/pages/contacts/detail").then((page) => ({
+    default: page.ContactDetailPage,
+  })),
+);
 const KnowledgePage = lazy(() =>
   import("@/pages/knowledge").then((page) => ({ default: page.KnowledgePage })),
 );
@@ -53,9 +58,16 @@ const IntegrationDetailPage = lazy(() =>
     default: page.IntegrationDetailPage,
   })),
 );
+const CallbacksPage = lazy(() =>
+  import("@/pages/callbacks").then((page) => ({ default: page.CallbacksPage })),
+);
+const EndpointsPage = lazy(() =>
+  import("@/pages/endpoints").then((page) => ({ default: page.EndpointsPage })),
+);
 const SettingsPage = lazy(() =>
   import("@/pages/settings").then((page) => ({ default: page.SettingsPage })),
 );
+
 
 export function AppRoutes() {
   return (
@@ -78,6 +90,7 @@ export function AppRoutes() {
           element={<AgentEditorPage />}
         />
         <Route path="/contacts" element={<ContactsPage />} />
+        <Route path="/contacts/:contactId" element={<ContactDetailPage />} />
         <Route path="/knowledge" element={<KnowledgePage />} />
         <Route path="/knowledge/:baseId" element={<KnowledgeDetailPage />} />
         <Route path="/tools" element={<ToolsPage />} />
@@ -87,26 +100,9 @@ export function AppRoutes() {
           path="/integrations/:connectionId"
           element={<IntegrationDetailPage />}
         />
-        {/* TODO(API): GET /callbacks with callback ID, contact, pinned version, due time, status, claim and resulting run. */}
-        <Route
-          path="/callbacks"
-          element={
-            <PendingPage
-              title="Callbacks"
-              reason="Scheduling and launch routes exist, but no callback list route exists yet. No queue or count is invented."
-            />
-          }
-        />
-        {/* TODO(API): GET /runtime-endpoints with saved config, active claim, health snapshot and readiness. */}
-        <Route
-          path="/endpoints"
-          element={
-            <PendingPage
-              title="Endpoints"
-              reason="Endpoint registration exists, but the API cannot list endpoints or their live modem status yet."
-            />
-          }
-        />
+        <Route path="/callbacks" element={<CallbacksPage />} />
+        <Route path="/endpoints" element={<EndpointsPage />} />
+
         <Route path="/settings" element={<SettingsPage />} />
         <Route
           path="*"

@@ -16,6 +16,14 @@ class ConnectionBody(BaseModel):
     enabled: bool = False
 
 
+class UpdateConnectionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    label: str | None = Field(default=None, min_length=1, max_length=120)
+    config: WhatsAppConfig | None = None
+    enabled: bool | None = None
+    expected_updated_at: str | None = None
+
+
 class SecretBody(BaseModel):
     value: str = Field(min_length=1, max_length=8192)
 
@@ -26,3 +34,10 @@ class MediaImportBody(BaseModel):
     mime_type: str = Field(min_length=1, max_length=100)
     size_bytes: int = Field(ge=0)
     sha256: str = Field(pattern="^[a-f0-9]{64}$")
+
+
+class GenerateTemplateToolBody(BaseModel):
+    template_name: str = Field(min_length=1)
+    language: str = Field(default="en_US")
+    tool_name: str | None = None
+    description: str | None = None

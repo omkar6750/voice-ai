@@ -6,9 +6,11 @@ This deliberately does not import the protected standalone demo.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +28,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.groq.llm import GroqLLMService
 from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.services.sarvam.tts import SarvamTTSService
@@ -34,8 +37,213 @@ from pipecat.workers.runner import WorkerRunner
 from voice_runtime.call_capture import CallCapture
 from voice_runtime.execution.exchange import ExchangeTracker, bind_transcripts
 from voice_runtime.execution.observer import EvidenceObserver
+from voice_runtime.execution.whatsapp import shared_inbound_window
 from voice_runtime.telephony.base import CallState
 from voice_runtime.telephony.usb_audio import Sim7600UsbAudioBridge
+
+
+def _extract_transcript(
+    context: LLMContext | None, tracker: ExchangeTracker | None = None, limit: int = 25
+) -> str:
+    """Extract clean dialogue exchanges from the LLM context or tracker."""
+    transcript_lines: list[str] = []
+    if context and hasattr(context, "messages"):
+        for msg in getattr(context, "messages", []):
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role in ("user", "assistant") and content and isinstance(content, str):
+                label = "Caller" if role == "user" else "Agent"
+                transcript_lines.append(f"{label}: {content}")
+    elif tracker and hasattr(tracker, "transcripts"):
+        for t in getattr(tracker, "transcripts", []):
+            label = "Caller" if getattr(t, "speaker", "") == "user" else "Agent"
+            transcript_lines.append(f"{label}: {getattr(t, 'text', '')}")
+    return "\n".join(transcript_lines[-limit:])
+
+
+def trim_classifier_result(res: dict) -> dict:
+    """Schema-agnostic trimmer for classification output matching demo_call.py compact format."""
+    if not isinstance(res, dict):
+        return {"result": str(res)}
+    trimmed: dict[str, Any] = {}
+    for k, v in res.items():
+        if isinstance(v, dict):
+            choice = v.get("choice")
+            if choice is not None:
+                trimmed[k] = choice
+            probs = v.get("probabilities")
+            if isinstance(probs, dict):
+                for pk, pv in probs.items():
+                    if isinstance(pv, (int, float)) and pv >= 0.1:
+                        trimmed[f"{k}_{pk}"] = round(float(pv), 2)
+            elif "confidence" in v and v["confidence"] is not None:
+                trimmed[f"{k}_conf"] = round(float(v["confidence"]), 2)
+        else:
+            trimmed[k] = v
+    return trimmed
+
+
+async def run_jev_classification(
+    api_key: str,
+    transcript: str,
+    questions: dict,
+    model: str = "jev-latest",
+    api_url: str = "https://api.typesafe.ai/v1/systemone",
+) -> dict:
+    """Execute TypeSafe AI Jev System One multi-choice classification."""
+    jev_payload = {
+        "model": model,
+        "state": transcript,
+        "questions": questions,
+    }
+    if not api_key:
+        logger.warning("JEV API key not configured on runtime; using fallback")
+        return {
+            "lead_temperature": {
+                "choice": "warm",
+                "probabilities": {"hot": 0.2, "warm": 0.6, "cold": 0.2},
+                "confidence": 0.5,
+                "rationale": "Jev API key missing",
+            },
+            "service_fit": {"choice": "strong_fit", "confidence": 0.5},
+            "tone": {"choice": "receptive", "confidence": 0.5},
+        }
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                api_url,
+                json=jev_payload,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                answers = data.get("answers", data)
+                normalized: dict[str, Any] = {}
+                for key, val in answers.items():
+                    if isinstance(val, dict):
+                        normalized[key] = val
+                    elif isinstance(val, str):
+                        normalized[key] = {"choice": val, "confidence": 1.0}
+                    else:
+                        normalized[key] = {"choice": str(val), "confidence": 0.5}
+                return normalized
+            logger.error("JEV System One HTTP {}: {}", resp.status_code, resp.text[:300])
+    except Exception as exc:
+        logger.error("JEV System One API error: {}", exc)
+    return {
+        "lead_temperature": {
+            "choice": "warm",
+            "probabilities": {"hot": 0.2, "warm": 0.6, "cold": 0.2},
+            "confidence": 0.5,
+            "rationale": "Fallback classification",
+        },
+        "service_fit": {"choice": "strong_fit", "confidence": 0.5},
+        "tone": {"choice": "receptive", "confidence": 0.5},
+    }
+
+
+async def run_llm_classification(
+    api_key: str,
+    transcript: str,
+    prompt: str = "Classify the supplied conversation using only observed evidence.",
+    model: str = "llama-3.3-70b-versatile",
+) -> dict:
+    """Execute LLM categorization with compact JSON return."""
+    if not api_key:
+        logger.warning("Groq API key not configured for LLM classification")
+        return {
+            "lead_temperature": "warm",
+            "service_fit": "strong_fit",
+            "tone": "receptive",
+        }
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                json={
+                    "model": model,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                f"{prompt}\nReturn your evaluation strictly as a valid, compact JSON object."
+                            ),
+                        },
+                        {"role": "user", "content": f"Dialogue Transcript:\n{transcript}"},
+                    ],
+                    "temperature": 0.1,
+                    "response_format": {"type": "json_object"},
+                },
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if resp.status_code == 200:
+                raw_data = json.loads(resp.json()["choices"][0]["message"]["content"])
+                return raw_data if isinstance(raw_data, dict) else {"result": raw_data}
+            logger.error("LLM classification HTTP {}: {}", resp.status_code, resp.text[:300])
+    except Exception as exc:
+        logger.error("LLM classification error: {}", exc)
+    return {
+        "lead_temperature": "warm",
+        "service_fit": "strong_fit",
+        "tone": "receptive",
+    }
+
+
+def _parse_spoken_callback_time(phrase: str) -> datetime:
+    """Parse common spoken natural language date and time phrases into aware UTC datetime."""
+    phrase_lower = phrase.lower()
+    now = datetime.now(UTC)
+    if "hour" in phrase_lower:
+        m = re.search(r"(\d+)\s*hour", phrase_lower)
+        if m:
+            return now + timedelta(hours=int(m.group(1)))
+    target_date = now.date()
+    if "tomorrow" in phrase_lower:
+        target_date += timedelta(days=1)
+    elif "day after tomorrow" in phrase_lower:
+        target_date += timedelta(days=2)
+    elif "next week" in phrase_lower:
+        target_date += timedelta(days=7)
+    else:
+        weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        for idx, day in enumerate(weekdays):
+            if day in phrase_lower:
+                days_ahead = (idx - target_date.weekday()) % 7
+                if days_ahead == 0:
+                    days_ahead = 7
+                target_date += timedelta(days=days_ahead)
+                break
+    hour, minute = 10, 0
+    if "morning" in phrase_lower:
+        hour, minute = 10, 0
+    elif "afternoon" in phrase_lower:
+        hour, minute = 14, 0
+    elif "evening" in phrase_lower:
+        hour, minute = 17, 0
+    elif "night" in phrase_lower:
+        hour, minute = 19, 0
+
+    match = re.search(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", phrase_lower)
+    if match:
+        h = int(match.group(1))
+        m = int(match.group(2)) if match.group(2) else 0
+        ampm = match.group(3)
+        if ampm == "pm" and h < 12:
+            h += 12
+        elif ampm == "am" and h == 12:
+            h = 0
+        elif not ampm and h < 8:
+            h += 12
+        if 0 <= h <= 23 and 0 <= m <= 59:
+            hour, minute = h, m
+
+    due = datetime(target_date.year, target_date.month, target_date.day, hour, minute, tzinfo=UTC)
+    if due <= now:
+        due += timedelta(days=1)
+    return due
 
 
 class TracedFlowManager(FlowManager):
@@ -115,6 +323,7 @@ class NativePipelineHost:
         self.runner_task: asyncio.Task | None = None
         self.ready = asyncio.Event()
         self.errors: list[str] = []
+        self._call_hung_up: bool = False
         self._end_task: asyncio.Task | None = None
         self.tracker: ExchangeTracker | None = None
         self._nodes: dict[str, dict] = {}
@@ -157,9 +366,113 @@ class NativePipelineHost:
                     return {"status": "error", "error": "Transition is not allowed"}
                 return {"status": "ok", "node": target}, self._node(target)
             if name == "end_call":
+                self._call_hung_up = True
                 self._end_task = asyncio.create_task(self.worker.cancel())
                 return {"status": "ok"}
-            if name in ("send_whatsapp_template", "send_followup", "send_whatsapp_message"):
+            if name == "check_whatsapp_window":
+                contact = (
+                    self._snapshot.get("_resolved", {}).get("contact")
+                    or self._snapshot.get("contact_snapshot")
+                    or {}
+                )
+                raw_phone = (
+                    args.get("to")
+                    or contact.get("phone_number")
+                    or contact.get("phone_e164")
+                    or self._snapshot.get("target_snapshot", "")
+                )
+                try:
+                    recipient = re.sub(r"[^\d]", "", raw_phone)
+                except Exception:
+                    recipient = ""
+                if not recipient:
+                    return {"status": "error", "error": "No valid phone number for contact"}
+                is_open = shared_inbound_window.allows_text(connection_id="", to=recipient)
+                return {
+                    "status": "ok",
+                    "window_open": is_open,
+                    "recipient": recipient,
+                    "reason": "Customer service window open"
+                    if is_open
+                    else "Window closed (24h elapsed; template required)",
+                }
+
+            if name == "send_whatsapp_message":
+                contact = (
+                    self._snapshot.get("_resolved", {}).get("contact")
+                    or self._snapshot.get("contact_snapshot")
+                    or {}
+                )
+                raw_phone = (
+                    args.get("to")
+                    or contact.get("phone_number")
+                    or contact.get("phone_e164")
+                    or self._snapshot.get("target_snapshot", "")
+                )
+                recipient = re.sub(r"[^\d]", "", raw_phone)
+                if not recipient:
+                    return {"status": "error", "error": "No valid phone number for contact"}
+
+                is_open = shared_inbound_window.allows_text(connection_id="", to=recipient)
+                if not is_open:
+                    return {
+                        "status": "error",
+                        "error": "Customer service window is closed (24 hours elapsed since last customer inbound message). Meta requires an approved template outside this window.",
+                    }
+
+                text = (args.get("text") or args.get("message") or "").strip()
+                if not text:
+                    return {"status": "error", "error": "Message text cannot be empty"}
+
+                access_token = getattr(self.settings, "whatsapp_access_token", None) or os.getenv(
+                    "VOICE_WHATSAPP_ACCESS_TOKEN", ""
+                )
+                phone_number_id = getattr(
+                    self.settings, "whatsapp_phone_number_id", None
+                ) or os.getenv("VOICE_WHATSAPP_PHONE_NUMBER_ID", "")
+                if not access_token or not phone_number_id:
+                    logger.warning(
+                        "WhatsApp credentials not configured on runtime; failing tool cleanly"
+                    )
+                    return {
+                        "status": "error",
+                        "error": "WhatsApp credentials not configured on runtime",
+                    }
+
+                payload = {
+                    "messaging_product": "whatsapp",
+                    "recipient_type": "individual",
+                    "to": recipient,
+                    "type": "text",
+                    "text": {"body": text, "preview_url": False},
+                }
+                try:
+                    logger.info("WHATSAPP sending direct message to {}", recipient)
+                    async with httpx.AsyncClient(timeout=10) as client:
+                        resp = await client.post(
+                            f"https://graph.facebook.com/v21.0/{phone_number_id}/messages",
+                            json=payload,
+                            headers={"Authorization": f"Bearer {access_token}"},
+                        )
+                        if resp.status_code >= 400:
+                            logger.error(
+                                "WhatsApp API error: {} {}", resp.status_code, resp.text[:300]
+                            )
+                            return {
+                                "status": "error",
+                                "error": f"WhatsApp API {resp.status_code}: {resp.text[:200]}",
+                            }
+                        data = resp.json()
+                        msg_id = (data.get("messages") or [{}])[0].get("id", "unknown")
+                        logger.info("WhatsApp direct message sent successfully: msg_id={}", msg_id)
+                        return {"status": "ok", "message_id": msg_id}
+                except Exception as exc:
+                    logger.error("WhatsApp direct message exception: {}", exc)
+                    return {"status": "error", "error": f"WhatsApp request failed: {exc}"}
+
+            if name in ("send_whatsapp_template", "send_followup") or name.startswith(
+                "whatsapp_template_"
+            ):
                 access_token = getattr(self.settings, "whatsapp_access_token", None) or os.getenv(
                     "VOICE_WHATSAPP_ACCESS_TOKEN", ""
                 )
@@ -181,7 +494,8 @@ class NativePipelineHost:
                     or {}
                 )
                 raw_phone = (
-                    contact.get("phone_number")
+                    args.get("to")
+                    or contact.get("phone_number")
                     or contact.get("phone_e164")
                     or self._snapshot.get("target_snapshot", "")
                 )
@@ -191,15 +505,24 @@ class NativePipelineHost:
                     return {"status": "error", "error": "No valid phone number for contact"}
 
                 caller_name = (args.get("caller_name") or contact.get("name") or "there").strip()
-                template_name = getattr(self.settings, "whatsapp_template_name", None) or os.getenv(
-                    "VOICE_WHATSAPP_TEMPLATE_NAME", "dialtone_followup"
-                )
+                if name.startswith("whatsapp_template_"):
+                    template_name = args.get("template_name") or name.removeprefix(
+                        "whatsapp_template_"
+                    )
+                else:
+                    template_name = (
+                        args.get("template_name")
+                        or getattr(self.settings, "whatsapp_template_name", None)
+                        or os.getenv("VOICE_WHATSAPP_TEMPLATE_NAME", "dialtone_followup")
+                    )
                 header_media_id = getattr(
                     self.settings, "whatsapp_header_media_id", None
                 ) or os.getenv("VOICE_WHATSAPP_HEADER_MEDIA_ID", "")
 
                 summary = f"Thank you for speaking with Northstar Software Studio, {caller_name}! We have prepared your custom development overview and pricing catalog."
                 if name == "send_followup" and args.get("message"):
+                    summary = args["message"]
+                elif args.get("message"):
                     summary = args["message"]
 
                 components = []
@@ -210,22 +533,34 @@ class NativePipelineHost:
                             "parameters": [{"type": "image", "image": {"id": header_media_id}}],
                         }
                     )
-                components.append(
-                    {
-                        "type": "body",
-                        "parameters": [
-                            {"type": "text", "text": caller_name},
-                            {"type": "text", "text": " ".join(summary.split())[:1024]},
-                        ],
-                    }
-                )
+                if args.get("components"):
+                    components.extend(args["components"])
+                else:
+                    body_params = [{"type": "text", "text": caller_name}]
+                    if args.get("message") or not name.startswith("whatsapp_template_"):
+                        body_params.append(
+                            {"type": "text", "text": " ".join(summary.split())[:1024]}
+                        )
+                    for k in sorted(args.keys()):
+                        if k.startswith("param_") and k != "param_1":
+                            body_params.append({"type": "text", "text": str(args[k])[:1024]})
+                    components.append({"type": "body", "parameters": body_params})
+
+                template_lang = args.get("language") or "en"
+                if len(template_lang) > 2 and "_" in template_lang:
+                    pass
+                elif len(template_lang) == 2:
+                    pass
+                else:
+                    template_lang = "en"
+
                 payload = {
                     "messaging_product": "whatsapp",
                     "to": recipient,
                     "type": "template",
                     "template": {
                         "name": template_name,
-                        "language": {"code": "en"},
+                        "language": {"code": template_lang},
                         "components": components,
                     },
                 }
@@ -253,6 +588,111 @@ class NativePipelineHost:
                 except Exception as exc:
                     logger.error("WhatsApp dispatch exception: {}", exc)
                     return {"status": "error", "error": f"WhatsApp request failed: {exc}"}
+
+            if name in ("classify_jev", "classify_lead"):
+                transcript = _extract_transcript(getattr(self, "context", None), self.tracker)
+                classifier_cfg = self._snapshot.get("classifier", {})
+                jev_cfg = classifier_cfg.get("jev", {})
+                questions = jev_cfg.get("questions")
+                if not questions:
+                    from voice_runtime.contracts.cadence import default_jev_questions
+
+                    questions = {k: v.model_dump() for k, v in default_jev_questions().items()}
+                elif isinstance(questions, dict):
+                    questions = {
+                        k: (v.model_dump() if hasattr(v, "model_dump") else v)
+                        for k, v in questions.items()
+                    }
+                jev_key = getattr(self.settings, "jev_api_key", None) or os.getenv(
+                    "VOICE_JEV_API_KEY", ""
+                )
+                res = await run_jev_classification(
+                    api_key=jev_key,
+                    transcript=transcript,
+                    questions=questions,
+                    model=jev_cfg.get("model", "jev-latest"),
+                    api_url=jev_cfg.get("api_url", "https://api.typesafe.ai/v1/systemone"),
+                )
+                logger.info("JEV CLASSIFY RESULT: {}", res)
+                return trim_classifier_result(res)
+
+            if name == "classify_llm":
+                transcript = _extract_transcript(getattr(self, "context", None), self.tracker)
+                classifier_cfg = self._snapshot.get("classifier", {})
+                llm_cfg = classifier_cfg.get("model", {})
+                groq_key = getattr(self.settings, "groq_api_key", None) or os.getenv(
+                    "VOICE_GROQ_API_KEY", ""
+                )
+                res = await run_llm_classification(
+                    api_key=groq_key,
+                    transcript=transcript,
+                    prompt=classifier_cfg.get(
+                        "prompt", "Classify the supplied conversation using only observed evidence."
+                    ),
+                    model=llm_cfg.get("model", "llama-3.3-70b-versatile"),
+                )
+                logger.info("LLM CLASSIFY RESULT: {}", res)
+                return trim_classifier_result(res)
+
+            if name == "schedule_callback":
+                raw_time = (
+                    args.get("time")
+                    or args.get("when")
+                    or args.get("due_at")
+                    or args.get("phrase")
+                    or "tomorrow morning"
+                )
+                reason = args.get("reason") or "Customer requested callback"
+                contact = (
+                    self._snapshot.get("_resolved", {}).get("contact")
+                    or self._snapshot.get("contact_snapshot")
+                    or {}
+                )
+                contact_id = contact.get("id") or self._snapshot.get("contact_id")
+                agent_version_id = self._snapshot.get("agent_version_id") or (
+                    self._snapshot.get("_resolved", {}).get("agent_version") or {}
+                ).get("id")
+                if not contact_id or not agent_version_id:
+                    logger.warning("schedule_callback missing contact_id or agent_version_id")
+                    return {
+                        "status": "error",
+                        "error": "Contact ID or Agent Version ID not found in session",
+                    }
+
+                timezone = contact.get("timezone") or "Asia/Kolkata"
+                due_at = _parse_spoken_callback_time(raw_time)
+
+                try:
+                    from uuid import uuid4
+
+                    from voice_api.db.session import SessionFactory
+                    from voice_api.models import Callback
+
+                    request_key = f"{self.run_id}_{uuid4().hex[:8]}"
+                    async with SessionFactory() as session:
+                        cb = Callback(
+                            request_key=request_key,
+                            contact_id=contact_id,
+                            agent_version_id=agent_version_id,
+                            due_at=due_at,
+                            timezone=timezone,
+                            original_phrase=f"{raw_time} ({reason})",
+                            status="scheduled",
+                        )
+                        session.add(cb)
+                        await session.commit()
+                        logger.info(
+                            "SCHEDULE_CALLBACK created callback id={} due_at={}", cb.id, due_at
+                        )
+                        return {
+                            "status": "ok",
+                            "callback_id": cb.id,
+                            "scheduled_time": due_at.strftime("%A at %I:%M %p UTC"),
+                            "message": f"Callback confirmed for {due_at.strftime('%A at %I:%M %p')}",
+                        }
+                except Exception as exc:
+                    logger.error("schedule_callback failed to persist: {}", exc)
+                    return {"status": "error", "error": f"Failed to persist callback: {exc}"}
 
             return {"status": "error", "error": "Tool adapter is not connected to live runtime"}
 
@@ -311,10 +751,21 @@ class NativePipelineHost:
         }
         if llm_config.get("top_p") is not None:
             llm_settings["top_p"] = llm_config["top_p"]
-        llm = GroqLLMService(
-            api_key=self.settings.groq_api_key,
-            settings=GroqLLMService.Settings(**llm_settings),
-        )
+        if llm_config["provider"] == "groq":
+            llm = GroqLLMService(
+                api_key=self.settings.groq_api_key,
+                settings=GroqLLMService.Settings(**llm_settings),
+            )
+        elif llm_config["provider"] == "gemini":
+            if not self.settings.gemini_api_key:
+                raise ValueError("Gemini API key is not configured")
+            # Preserve provider-default thinking. No universal disable setting exists.
+            llm = GoogleLLMService(
+                api_key=self.settings.gemini_api_key,
+                settings=GoogleLLMService.Settings(llm_settings),
+            )
+        else:
+            raise ValueError("Unsupported LLM provider")
         tts_config = snapshot["tts"]
         if tts_config["provider"] == "sarvam":
             tts = SarvamTTSService(
@@ -354,6 +805,7 @@ class NativePipelineHost:
                 }
             ]
         )
+        self.context = context
         aggregators = LLMContextAggregatorPair(
             context,
             user_params=LLMUserAggregatorParams(vad_analyzer=vad),
@@ -413,7 +865,10 @@ class NativePipelineHost:
 
         @self.worker.event_handler("on_pipeline_error")
         async def failed(_worker, frame):
-            self.errors.append("Pipeline failed; inspect evidence")
+            if not self._call_hung_up:
+                err_msg = getattr(frame, "error", None) or "inspect evidence"
+                logger.warning("Pipeline error during active call: {}", err_msg)
+                self.errors.append(f"Pipeline failed: {err_msg}")
             await self.worker.cancel()
 
         runner = WorkerRunner(handle_sigint=False, handle_sigterm=False)
@@ -426,15 +881,16 @@ class NativePipelineHost:
         self.tracker.begin("greeting")
         await self.flow.initialize(self._node(self._snapshot["flow"]["initial_node"]))
         while self.runner_task and not self.runner_task.done():
-            if self.errors:
+            if self.errors and not self._call_hung_up:
                 raise RuntimeError(self.errors[-1])
             await asyncio.sleep(1)
             if await modem.state() != CallState.ACTIVE:
+                self._call_hung_up = True
                 await self.worker.cancel()
                 break
         if self.runner_task:
             await self.runner_task
-        if self.errors:
+        if self.errors and not self._call_hung_up:
             raise RuntimeError(self.errors[-1])
         return {"flow_node": self.flow.current_node}
 

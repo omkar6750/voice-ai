@@ -1,7 +1,6 @@
 import { ReadOnlyValue } from "@/components/record-page";
 import {
   Field,
-  FieldDescription,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
@@ -23,32 +22,11 @@ export function AudioPanel({
       <div className="flex flex-col gap-4">
         <h2 className="text-base font-semibold">Audio and VAD</h2>
         <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="sample-rate">
-              Input/output sample rate
-            </FieldLabel>
-            <NativeSelect
-              id="sample-rate"
-              value={String(config.audio.sample_rate)}
-              disabled={disabled}
-              onChange={(event) =>
-                change({
-                  ...config,
-                  audio: {
-                    ...config.audio,
-                    sample_rate: Number(event.target.value) as 8000 | 16000,
-                  },
-                })
-              }
-            >
-              <option value="8000">8 kHz</option>
-              <option value="16000">16 kHz</option>
-            </NativeSelect>
-            <FieldDescription>
-              Validate endpoint audio compatibility before dialing. Configured
-              value does not prove modem support.
-            </FieldDescription>
-          </Field>
+          <ReadOnlyValue
+            label="Input/output sample rate"
+            value={`${config.audio.sample_rate / 1000} kHz`}
+            reason="Shown from saved config. Rate changes are not available in this editor."
+          />
           <NumberField
             id="vad-confidence"
             label="VAD confidence"

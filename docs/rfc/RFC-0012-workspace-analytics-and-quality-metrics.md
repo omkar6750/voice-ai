@@ -73,7 +73,7 @@ Instead of vanity metrics and empty decorative widgets, the analytics surface pr
 ├────────────────────────────────────────────────────────────────────────┤
 │ Latency Distribution Breakdown (P50 / P90 / P99)                       │
 │ ┌────────────────────────────────────────────────────────────────────┐ │
-│ │  STT (Sarvam/Deepgram):   [  180ms  |  290ms  |  410ms  ]          │ │
+│ │  STT (Sarvam):            [  180ms  |  290ms  |  410ms  ]          │ │
 │ │  LLM TTFT (Groq/Llama3):  [  220ms  |  380ms  |  650ms  ]          │ │
 │ │  TTS TTFA (Cartesia):     [  140ms  |  210ms  |  340ms  ]          │ │
 │ │  Total Turn Latency:      [  780ms  | 1120ms  | 1680ms  ]          │ │

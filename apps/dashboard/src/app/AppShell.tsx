@@ -1,39 +1,18 @@
 import {
-  Activity,
-  AudioLines,
-  CalendarClock,
-  Database,
-  Link2,
-  ListTodo,
-  LogOut,
-  Radio,
-  Settings2,
-  Users,
+  Activity, AudioLines, CalendarClock, Database, Link2, ListTodo,
+  LogOut, Radio, Settings2, Users,
 } from "lucide-react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { AppRoutes } from "./AppRoutes";
+import { QuickDial } from "./QuickDial";
 import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
+  Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList,
+  BreadcrumbPage, BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarInset,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarProvider,
-  SidebarTrigger,
+  Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
+  SidebarGroupLabel, SidebarHeader, SidebarInset, SidebarMenu,
+  SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
 } from "@/components/ui/sidebar";
 
 const navigation = [
@@ -53,10 +32,7 @@ function SideNavigation({ disconnect }: { disconnect: () => void }) {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <Link
-          to="/runs"
-          className="flex min-h-10 items-center gap-2 px-2 text-sm font-semibold"
-        >
+        <Link to="/runs" className="flex min-h-10 items-center gap-2 px-2 text-sm font-semibold">
           <AudioLines aria-hidden="true" className="size-4" />
           <span className="group-data-[collapsible=icon]:hidden">Voice AI</span>
         </Link>
@@ -68,17 +44,8 @@ function SideNavigation({ disconnect }: { disconnect: () => void }) {
             <SidebarMenu>
               {navigation.map(({ title, path, icon: Icon }) => (
                 <SidebarMenuItem key={path}>
-                  <SidebarMenuButton
-                    asChild
-                    tooltip={title}
-                    isActive={
-                      pathname === path || pathname.startsWith(`${path}/`)
-                    }
-                  >
-                    <NavLink to={path}>
-                      <Icon aria-hidden="true" />
-                      <span>{title}</span>
-                    </NavLink>
+                  <SidebarMenuButton asChild tooltip={title} isActive={pathname === path || pathname.startsWith(`${path}/`)}>
+                    <NavLink to={path}><Icon aria-hidden="true" /><span>{title}</span></NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
@@ -90,8 +57,7 @@ function SideNavigation({ disconnect }: { disconnect: () => void }) {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton onClick={disconnect} tooltip="Disconnect">
-              <LogOut aria-hidden="true" />
-              <span>Disconnect</span>
+              <LogOut aria-hidden="true" /><span>Disconnect</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -107,33 +73,17 @@ function LocationTrail() {
   return (
     <Breadcrumb>
       <BreadcrumbList>
-        <BreadcrumbItem>
-          <BreadcrumbLink asChild>
-            <Link to="/runs">Voice AI</Link>
-          </BreadcrumbLink>
-        </BreadcrumbItem>
+        <BreadcrumbItem><BreadcrumbLink asChild><Link to="/runs">Voice AI</Link></BreadcrumbLink></BreadcrumbItem>
         <BreadcrumbSeparator />
         <BreadcrumbItem>
           {parts.length > 1 ? (
-            <BreadcrumbLink asChild>
-              <Link to={parent?.path ?? "/runs"}>
-                {parent?.title ?? "Workspace"}
-              </Link>
-            </BreadcrumbLink>
-          ) : (
-            <BreadcrumbPage>{parent?.title ?? "Workspace"}</BreadcrumbPage>
-          )}
+            <BreadcrumbLink asChild><Link to={parent?.path ?? "/runs"}>{parent?.title ?? "Workspace"}</Link></BreadcrumbLink>
+          ) : <BreadcrumbPage>{parent?.title ?? "Workspace"}</BreadcrumbPage>}
         </BreadcrumbItem>
-        {parts.length > 1 && (
-          <>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbPage className="max-w-44 truncate">
-                {parts[parts.length - 1].slice(0, 12)}
-              </BreadcrumbPage>
-            </BreadcrumbItem>
-          </>
-        )}
+        {parts.length > 1 && <>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem><BreadcrumbPage className="max-w-44 truncate">{parts[parts.length - 1].slice(0, 12)}</BreadcrumbPage></BreadcrumbItem>
+        </>}
       </BreadcrumbList>
     </Breadcrumb>
   );
@@ -147,10 +97,9 @@ export function AppShell({ disconnect }: { disconnect: () => void }) {
         <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
           <SidebarTrigger />
           <LocationTrail />
+          <div className="ml-auto"><QuickDial /></div>
         </header>
-        <main className="min-w-0 flex-1">
-          <AppRoutes />
-        </main>
+        <main className="min-w-0 flex-1"><AppRoutes /></main>
       </SidebarInset>
     </SidebarProvider>
   );

@@ -42,6 +42,8 @@ export type Connection = {
   enabled: boolean;
   config: { phone_number_id: string; waba_id: string; api_version: string };
   secret_names: string[];
+  updated_at?: string;
+  created_at?: string;
 };
 
 export function IntegrationsPage() {

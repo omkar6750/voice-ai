@@ -6,11 +6,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import AwareDatetime, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_operator
-from voice_api.models import AgentVersion, Callback, Contact, WorkspaceSettings
+from voice_api.models import AgentVersion, Call, Callback, Contact, Run, WorkspaceSettings
 from voice_api.services.call_service import queue_call
 from voice_runtime.contracts import WorkspaceConfig
 from voice_runtime.contracts.base import ConfigModel
@@ -18,6 +18,86 @@ from voice_runtime.contracts.base import ConfigModel
 Session = Depends(get_session)
 
 router = APIRouter(tags=["callbacks"], dependencies=[Depends(require_operator)])
+
+
+@router.get("/callbacks")
+async def list_callbacks(
+    status: str | None = None,
+    due_before: datetime | None = None,
+    due_after: datetime | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    session: AsyncSession = Session,
+) -> dict:
+    stmt = (
+        select(
+            Callback,
+            Contact.name.label("contact_name"),
+            Contact.phone_number.label("contact_phone"),
+            AgentVersion.version.label("agent_version_number"),
+            Run.id.label("run_id"),
+            Run.error.label("last_error"),
+        )
+        .join(Contact, Callback.contact_id == Contact.id, isouter=True)
+        .join(AgentVersion, Callback.agent_version_id == AgentVersion.id, isouter=True)
+        .join(Call, Callback.call_id == Call.id, isouter=True)
+        .join(Run, Call.run_id == Run.id, isouter=True)
+    )
+    if status:
+        stmt = stmt.where(Callback.status == status)
+    if due_before:
+        stmt = stmt.where(Callback.due_at <= due_before)
+    if due_after:
+        stmt = stmt.where(Callback.due_at >= due_after)
+
+    stmt = (
+        stmt.order_by(Callback.due_at.asc(), Callback.created_at.desc())
+        .limit(min(limit, 100))
+        .offset(max(offset, 0))
+    )
+    results = (await session.execute(stmt)).all()
+
+    count_stmt = select(func.count(Callback.id))
+    if status:
+        count_stmt = count_stmt.where(Callback.status == status)
+    if due_before:
+        count_stmt = count_stmt.where(Callback.due_at <= due_before)
+    if due_after:
+        count_stmt = count_stmt.where(Callback.due_at >= due_after)
+    total = await session.scalar(count_stmt) or 0
+
+    row = await session.get(WorkspaceSettings, 1)
+    workspace_config = WorkspaceConfig.model_validate(row.config if row else {})
+
+    callbacks = [
+        {
+            "id": cb.id,
+            "contact_id": cb.contact_id,
+            "contact_name": contact_name,
+            "contact_phone": contact_phone,
+            "agent_version_id": cb.agent_version_id,
+            "agent_version_number": agent_version_number,
+            "due_at": cb.due_at.isoformat() if cb.due_at else None,
+            "timezone": cb.timezone,
+            "original_phrase": cb.original_phrase,
+            "status": cb.status,
+            "automatic_attempts": cb.automatic_attempts,
+            "call_id": cb.call_id,
+            "run_id": run_id,
+            "last_error": last_error,
+            "claimed_at": cb.claimed_at.isoformat() if cb.claimed_at else None,
+            "completed_at": cb.completed_at.isoformat() if cb.completed_at else None,
+            "created_at": cb.created_at.isoformat() if cb.created_at else None,
+        }
+        for cb, contact_name, contact_phone, agent_version_number, run_id, last_error in results
+    ]
+
+    return {
+        "callbacks": callbacks,
+        "total": total,
+        "automatic_callbacks_enabled": workspace_config.automatic_callbacks_enabled,
+        "callback_due_window_minutes": workspace_config.callback_due_window_minutes,
+    }
 
 
 class ScheduleCallback(ConfigModel):

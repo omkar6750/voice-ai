@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+
 import { LoadState, PageBody, PageHeader } from "@/components/record-page";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,6 +12,9 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
+import { SearchableSelect } from "@/components/ui/searchable-select";
+import { getTimezones, LANGUAGES } from "@/lib/geo-data";
 import {
   Sheet,
   SheetContent,
@@ -97,82 +102,98 @@ export function ContactsPage() {
               <Button>New contact</Button>
             </SheetTrigger>
             <SheetContent>
-              <form onSubmit={create} className="flex h-full flex-col gap-6">
-                <SheetHeader>
+              <form onSubmit={create} className="flex min-h-full flex-col justify-between gap-4">
+                <SheetHeader className="pb-1">
                   <SheetTitle>New contact</SheetTitle>
                   <SheetDescription>
-                    Use international phone format. Leave timezone unknown if
-                    not confirmed.
+                    Phone destination and context. Timezone determines callback schedule.
                   </SheetDescription>
                 </SheetHeader>
-                <FieldGroup>
-                  <Field>
+
+                <FieldGroup className="gap-3">
+                  <Field className="gap-1">
                     <FieldLabel htmlFor="contact-name">Name</FieldLabel>
                     <Input
                       id="contact-name"
                       value={name}
                       onChange={(event) => setName(event.target.value)}
                       maxLength={120}
+                      placeholder="e.g. Omkar Pawar"
                       required
                     />
                   </Field>
-                  <Field>
-                    <FieldLabel htmlFor="contact-phone">
-                      Phone number
-                    </FieldLabel>
-                    <Input
+
+                  <Field className="gap-1">
+                    <div className="flex items-center justify-between">
+                      <FieldLabel htmlFor="contact-phone">Phone number</FieldLabel>
+                      <span className="text-[11px] text-muted-foreground">Select country or type +E.164</span>
+                    </div>
+                    <PhoneInput
                       id="contact-phone"
-                      type="tel"
                       value={phone}
-                      onChange={(event) => setPhone(event.target.value)}
-                      placeholder="+15551234567"
+                      onChange={setPhone}
                       required
-                      pattern="\+[1-9][0-9]{7,14}"
                     />
-                    <FieldDescription>
-                      Include + and country code.
-                    </FieldDescription>
                   </Field>
-                  <Field>
-                    <FieldLabel htmlFor="contact-timezone">Timezone</FieldLabel>
-                    <Input
+
+                  <Field className="gap-1">
+                    <div className="flex items-center justify-between">
+                      <FieldLabel htmlFor="contact-timezone">IANA Timezone</FieldLabel>
+                      <span className="text-[11px] text-muted-foreground">For callback due calculations</span>
+                    </div>
+                    <SearchableSelect
                       id="contact-timezone"
                       value={timezone}
-                      onChange={(event) => setTimezone(event.target.value)}
-                      placeholder="Asia/Kolkata"
-                    />
-                    <FieldDescription>
-                      IANA timezone, not UTC offset.
-                    </FieldDescription>
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="contact-business">Business</FieldLabel>
-                    <Input
-                      id="contact-business"
-                      value={business}
-                      onChange={(event) => setBusiness(event.target.value)}
+                      onChange={setTimezone}
+                      options={getTimezones()}
+                      placeholder="Search timezone (e.g. Asia/Kolkata)..."
                     />
                   </Field>
-                  <Field>
-                    <FieldLabel htmlFor="contact-source">Source</FieldLabel>
-                    <Input
-                      id="contact-source"
-                      value={source}
-                      onChange={(event) => setSource(event.target.value)}
-                    />
-                  </Field>
-                  <Field>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field className="gap-1">
+                      <FieldLabel htmlFor="contact-business">Organization</FieldLabel>
+                      <Input
+                        id="contact-business"
+                        value={business}
+                        onChange={(event) => setBusiness(event.target.value)}
+                        placeholder="e.g. Acme Corp"
+                      />
+                    </Field>
+
+                    <Field className="gap-1">
+                      <FieldLabel htmlFor="contact-source">Acquisition</FieldLabel>
+                      <Input
+                        id="contact-source"
+                        value={source}
+                        onChange={(event) => setSource(event.target.value)}
+                        placeholder="e.g. Inbound / Web"
+                      />
+                    </Field>
+                  </div>
+
+                  <Field className="gap-1">
                     <FieldLabel htmlFor="contact-language">Language</FieldLabel>
-                    <Input
+                    <SearchableSelect
                       id="contact-language"
                       value={language}
-                      onChange={(event) => setLanguage(event.target.value)}
-                      placeholder="en-IN"
+                      onChange={setLanguage}
+                      options={LANGUAGES}
+                      placeholder="Search language (e.g. en-US, hi-IN)..."
                     />
                   </Field>
                 </FieldGroup>
-                <SheetFooter className="mt-auto">
-                  <Button type="submit" disabled={busy}>
+
+                <SheetFooter className="border-t pt-3 mt-auto">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" size="sm" disabled={busy}>
                     {busy ? "Creating…" : "Create contact"}
                   </Button>
                 </SheetFooter>
@@ -203,7 +224,14 @@ export function ContactsPage() {
           <TableBody>
             {data?.contacts.map((contact) => (
               <TableRow key={contact.id}>
-                <TableCell className="font-medium">{contact.name}</TableCell>
+                <TableCell className="font-medium">
+                  <Link
+                    to={`/contacts/${contact.id}`}
+                    className="hover:underline text-primary"
+                  >
+                    {contact.name}
+                  </Link>
+                </TableCell>
                 <TableCell>{contact.phone_number}</TableCell>
                 <TableCell className="text-muted-foreground">
                   {contact.timezone || "Unknown"}
@@ -216,8 +244,7 @@ export function ContactsPage() {
         </Table>
       </LoadState>
       <p className="text-xs text-muted-foreground">
-        Editing, deleting and contact facts need API routes. This page offers
-        list and create only.
+        Click any contact name to view observed facts, call history, and edit details.
       </p>
     </PageBody>
   );

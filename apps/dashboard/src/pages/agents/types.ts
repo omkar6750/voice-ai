@@ -44,12 +44,12 @@ export type AgentConfig = {
   };
   stt: { provider: "sarvam"; model: "saaras:v3" };
   llm: {
-    provider: "groq";
+    provider: "groq" | "gemini";
     model: string;
     temperature: number;
     max_tokens: number;
     top_p: number | null;
-    reasoning_effort: "none";
+    reasoning_effort: "none" | "provider_default";
   };
   tts: {
     provider: "sarvam" | "cartesia";
@@ -78,11 +78,76 @@ export type AgentConfig = {
   context: {
     prune_node_ids: string[];
     remove_transition_tool_pairs: boolean;
-    summarizer: Record<string, unknown>;
+    summarizer: SummarizerConfig;
   };
-  classifier: Record<string, unknown>;
+  classifier: ClassifierConfig;
   pipeline_logs: "inherit" | "enabled" | "disabled";
 };
+
+export type CadenceConfig = {
+  enabled: boolean;
+  node_entries?: string[];
+  node_exits?: string[];
+  every_n_exchanges?: number | null;
+  interval_secs?: number | null;
+  explicit_requests?: boolean;
+  on_finalization?: boolean;
+  cooldown_secs?: number;
+  max_attempts?: number;
+};
+
+export type JevQuestion = {
+  type: string;
+  instructions: string;
+  criteria: Record<string, string>;
+};
+
+export type JevClassifierConfig = {
+  model: string;
+  api_url: string;
+  questions: Record<string, JevQuestion>;
+};
+
+export type ClassifierConfig = CadenceConfig & {
+  classifier_type?: "llm" | "jev";
+  model?: {
+    provider?: string;
+    model?: string;
+    temperature?: number;
+    max_tokens?: number;
+  };
+  prompt?: string;
+  jev?: JevClassifierConfig;
+  answer_signals?: string[];
+  topic_signals?: string[];
+  keywords?: string[];
+  confidence_threshold?: number;
+  consecutive_verdicts?: number;
+};
+
+export type SummarizerConfig = CadenceConfig & {
+  model?: {
+    provider?: string;
+    model?: string;
+    temperature?: number;
+    max_tokens?: number;
+  };
+  prompt?: string;
+  answer_signals?: string[];
+  topic_signals?: string[];
+  keywords?: string[];
+  unsummarized_messages?: number;
+  unsummarized_exchanges?: number | null;
+  token_threshold?: number | null;
+  context_window_tokens?: number;
+  compaction_threshold?: number;
+  hard_ceiling?: number;
+  target_ratio?: number;
+  output_budget_tokens?: number;
+  preserve_opening_messages?: number;
+  preserve_recent_messages?: number;
+};
+
 export type AgentVersion = {
   id: string;
   version: number;
@@ -91,8 +156,19 @@ export type AgentVersion = {
   note: string | null;
   config: AgentConfig;
 };
+export type ProviderVoice = { id: string; name: string; gender?: string };
+export type ProviderEntry = {
+  provider: string;
+  slots: string[];
+  models: string[];
+  models_by_slot?: Record<string, string[]>;
+  voices?: ProviderVoice[];
+  languages?: string[];
+  status?: string;
+  checked_at?: string | null;
+};
 export type ProviderCatalog = {
-  providers: { provider: string; slots: string[]; models: string[] }[];
+  providers: ProviderEntry[];
 };
 export type ToolSummary = { id: string; name: string };
 export type ToolVersion = {

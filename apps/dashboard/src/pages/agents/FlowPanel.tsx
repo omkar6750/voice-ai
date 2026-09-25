@@ -247,7 +247,69 @@ export function FlowPanel({
         )}
         <div>
           <h3 className="mb-2 text-sm font-semibold">
+            Classifier triggers for this node
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={
+                (config.classifier.node_entries ?? []).includes(node.id)
+                  ? "default"
+                  : "outline"
+              }
+              aria-pressed={(config.classifier.node_entries ?? []).includes(
+                node.id,
+              )}
+              disabled={disabled}
+              onClick={() => {
+                const current = config.classifier.node_entries ?? [];
+                const next = current.includes(node.id)
+                  ? current.filter((id) => id !== node.id)
+                  : [...current, node.id];
+                change({
+                  ...config,
+                  classifier: { ...config.classifier, node_entries: next },
+                });
+              }}
+            >
+              {(config.classifier.node_entries ?? []).includes(node.id)
+                ? "✓ Triggers on entry"
+                : "Trigger on entry"}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={
+                (config.classifier.node_exits ?? []).includes(node.id)
+                  ? "default"
+                  : "outline"
+              }
+              aria-pressed={(config.classifier.node_exits ?? []).includes(
+                node.id,
+              )}
+              disabled={disabled}
+              onClick={() => {
+                const current = config.classifier.node_exits ?? [];
+                const next = current.includes(node.id)
+                  ? current.filter((id) => id !== node.id)
+                  : [...current, node.id];
+                change({
+                  ...config,
+                  classifier: { ...config.classifier, node_exits: next },
+                });
+              }}
+            >
+              {(config.classifier.node_exits ?? []).includes(node.id)
+                ? "✓ Triggers on exit"
+                : "Trigger on exit"}
+            </Button>
+          </div>
+        </div>
+        <div>
+          <h3 className="mb-2 text-sm font-semibold">
             Tools available in this node
+
           </h3>
           <div className="flex flex-wrap gap-2">
             {boundTools.length ? (

@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { useResource } from "@/lib/resources";
 import { AudioPanel } from "./AudioPanel";
+import { ClassifierPanel } from "./ClassifierPanel";
 import { ContextPanel } from "./ContextPanel";
 import { FlowPanel } from "./FlowPanel";
 import { KnowledgePanel } from "./KnowledgePanel";
@@ -33,11 +34,13 @@ const sections = [
   "Flow",
   "Models",
   "Audio",
+  "Classifier",
   "Context",
   "Tools",
   "Knowledge",
   "Logging",
 ] as const;
+
 
 export function AgentEditorPage() {
   const { agentId = "", versionId = "" } = useParams();
@@ -210,7 +213,22 @@ export function AgentEditorPage() {
                 disabled={disabled}
               />
             )}
-            {section === "Context" && <ContextPanel config={draft} />}
+            {section === "Classifier" && (
+              <ClassifierPanel
+                config={draft}
+                change={setDraft}
+                providers={providers.data}
+                disabled={disabled}
+              />
+            )}
+            {section === "Context" && (
+              <ContextPanel
+                config={draft}
+                change={setDraft}
+                disabled={disabled}
+              />
+            )}
+
             {section === "Tools" && (
               <ToolsPanel
                 config={draft}

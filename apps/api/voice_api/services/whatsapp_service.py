@@ -4,9 +4,15 @@ import copy
 import hashlib
 import hmac
 import re
-from datetime import UTC, datetime, timedelta
 
 import httpx
+from voice_runtime.execution.whatsapp import (
+    InboundWindow,
+    recipient,
+    shared_inbound_window,
+)
+
+_inbound_window = shared_inbound_window
 
 
 class ProviderError(RuntimeError):
@@ -22,42 +28,6 @@ def graph_id(value: str) -> str:
     if not re.fullmatch(r"[0-9]+", value):
         raise ValueError("Expected a numeric Meta resource ID")
     return value
-
-
-def recipient(value: str) -> str:
-    value = value.removeprefix("+")
-    if not re.fullmatch(r"[1-9][0-9]{5,14}", value):
-        raise ValueError("Expected an international phone number")
-    return value
-
-
-class InboundWindow:
-    """Only sender/timestamp survive a webhook; restarting deliberately loses the window."""
-
-    def __init__(self, max_entries: int = 10000):
-        self.latest: dict[tuple[str, str], datetime] = {}
-        self.max_entries = max_entries
-
-    def observe(self, connection_id: str, sender: str, timestamp: str, *, now=None):
-        now = now or datetime.now(UTC)
-        try:
-            at = datetime.fromtimestamp(int(timestamp), UTC)
-            sender = recipient(sender)
-        except (ValueError, TypeError, OverflowError, OSError):
-            return
-        if at > now or now - at >= timedelta(hours=24):
-            return
-        key = (connection_id, sender)
-        for expired in [k for k, v in self.latest.items() if now - v >= timedelta(hours=24)]:
-            del self.latest[expired]
-        if key not in self.latest and len(self.latest) >= self.max_entries:
-            del self.latest[min(self.latest, key=self.latest.get)]
-        self.latest[key] = max(at, self.latest.get(key, at))
-
-    def allows_text(self, connection_id: str, to: str, *, now=None) -> bool:
-        at = self.latest.get((connection_id, recipient(to)))
-        age = (now or datetime.now(UTC)) - at if at else None
-        return age is not None and timedelta(0) <= age < timedelta(hours=24)
 
 
 def verify_signature(body: bytes, signature: str | None, app_secret: str) -> bool:
@@ -166,3 +136,15 @@ class WhatsAppAdapter:
             return message_id
         except (KeyError, IndexError, TypeError, ValueError):
             raise ProviderError(uncertain=True) from None
+
+
+__all__ = [
+    "InboundWindow",
+    "ProviderError",
+    "WhatsAppAdapter",
+    "_inbound_window",
+    "graph_id",
+    "message_payload",
+    "recipient",
+    "verify_signature",
+]
