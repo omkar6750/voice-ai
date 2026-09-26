@@ -15,6 +15,8 @@ from .tools import ToolBinding
 class FlowNodeConfig(ConfigModel):
     id: Identifier
     prompt: str = ""
+    role_prompt: str | None = None
+    context_strategy: Literal["append", "reset"] = "append"
     transitions: list[Identifier] = Field(default_factory=list)
     tool_bindings: list[Identifier] = Field(default_factory=list)
     entry_actions: list[Identifier] = Field(default_factory=list)

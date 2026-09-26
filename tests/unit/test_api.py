@@ -313,3 +313,18 @@ async def test_create_and_patch_contact_with_metadata(monkeypatch) -> None:
         }
     finally:
         app.dependency_overrides.pop(get_session, None)
+
+
+def test_flow_node_config_allows_role_prompt_and_context_strategy() -> None:
+    from voice_runtime.contracts.agent import FlowNodeConfig
+
+    node = FlowNodeConfig(
+        id="greeting",
+        prompt="Hello!",
+        role_prompt="You are a helpful assistant.",
+        context_strategy="reset",
+        terminal=True,
+    )
+    assert node.role_prompt == "You are a helpful assistant."
+    assert node.context_strategy == "reset"
+
