@@ -88,18 +88,74 @@ def _spawn_call_task(run_id: str, endpoint_id: str) -> None:
 async def start_call(
     body: StartCallBody, session: AsyncSession = Session, _: None = Operator
 ) -> dict:
-    if body.dispatch and (not body.endpoint_id or not get_settings().operator_token):
-        raise HTTPException(422, "Dispatch needs an endpoint and operator token")
+    is_twilio = body.telephony is not None and body.telephony.provider == "twilio"
+    if body.dispatch:
+        if is_twilio:
+            if not get_settings().public_base_url:
+                raise HTTPException(422, "Twilio dispatch requires VOICE_PUBLIC_BASE_URL")
+        else:
+            endpoint = body.telephony.endpoint_id if body.telephony else body.endpoint_id
+            if not endpoint or not get_settings().operator_token:
+                raise HTTPException(422, "Dispatch needs an endpoint and operator token")
+
     run, call = await queue_call(
-        session, body.contact_id, body.agent_version_id, body.endpoint_id, body.logging_override
+        session,
+        body.contact_id,
+        body.agent_version_id,
+        body.endpoint_id,
+        body.logging_override,
+        body.telephony,
     )
     await session.commit()
+
     if body.dispatch:
-        _spawn_call_task(run.id, body.endpoint_id)
+        if is_twilio:
+            from voice_api.models.common import now
+            from voice_api.services.twilio_service import resolve_twilio_credentials
+            from voice_runtime.telephony.twilio import PublicTelephonyUrls, TwilioCallController
+
+            settings = get_settings()
+            public_urls = PublicTelephonyUrls(settings.public_base_url)
+            _, creds = await resolve_twilio_credentials(session, call.telephony_connection_id)
+            controller = TwilioCallController(creds)
+            try:
+                call_sid = await controller.dial(
+                    to=call.target_snapshot,
+                    from_number=call.from_number,
+                    media_ws_url=public_urls.twilio_media(call.correlation_id),
+                    status_callback_url=public_urls.twilio_call_status(call.correlation_id),
+                    stream_status_callback_url=public_urls.twilio_stream_status(
+                        call.correlation_id
+                    ),
+                    correlation_id=call.correlation_id,
+                    run_id=run.id,
+                )
+                call.provider_call_id = call_sid
+                call.status = "dialing"
+                await session.commit()
+            except Exception as err:
+                logger.exception("Failed to place Twilio outbound call: {}", err)
+                call.status = "failed"
+                run.status = "failed"
+                call.ended_at = now()
+                run.ended_at = now()
+                error_msg = getattr(err, "msg", None) or str(err)
+                if creds and creds.auth_token and creds.auth_token in error_msg:
+                    error_msg = error_msg.replace(creds.auth_token, "[REDACTED]")
+                meta = dict(call.provider_metadata or {})
+                meta["error"] = error_msg
+                call.provider_metadata = meta
+                await session.commit()
+                raise HTTPException(502, f"Failed to place Twilio call: {error_msg}") from err
+        else:
+            endpoint = body.telephony.endpoint_id if body.telephony else body.endpoint_id
+            _spawn_call_task(run.id, endpoint)
+
     return {
         "run_id": run.id,
         "call_id": call.id,
-        "status": "dispatching" if body.dispatch else "queued",
+        "provider": getattr(call, "provider", "sim7600"),
+        "status": call.status if is_twilio else ("dispatching" if body.dispatch else "queued"),
         "target": call.target_snapshot,
     }
 
@@ -117,6 +173,9 @@ def _call_response(call: Call) -> dict:
         "contact_id": call.contact_id,
         "agent_version_id": call.agent_version_id,
         "target_snapshot": call.target_snapshot,
+        "provider": call.provider,
+        "from_number": call.from_number,
+        "telephony_connection_id": call.telephony_connection_id,
         "status": call.status,
         "recording_path": call.recording_path,
         "answered_at": call.answered_at,
@@ -143,12 +202,59 @@ async def dispatch_queued_call(
     if call.status != "queued":
         raise HTTPException(409, "Only queued calls can be dispatched")
     run = await session.get(Run, call.run_id) if call.run_id else None
-    if run is None or not run.endpoint_id or not get_settings().operator_token:
+    if run is None:
+        raise HTTPException(404, "Run not found")
+
+    if call.provider == "twilio":
+        from voice_api.models.common import now
+        from voice_api.services.twilio_service import resolve_twilio_credentials
+        from voice_runtime.telephony.twilio import PublicTelephonyUrls, TwilioCallController
+
+        settings = get_settings()
+        if not settings.public_base_url:
+            raise HTTPException(422, "Twilio dispatch requires VOICE_PUBLIC_BASE_URL")
+        public_urls = PublicTelephonyUrls(settings.public_base_url)
+        _, creds = await resolve_twilio_credentials(session, call.telephony_connection_id)
+        controller = TwilioCallController(creds)
+        try:
+            call_sid = await controller.dial(
+                to=call.target_snapshot,
+                from_number=call.from_number,
+                media_ws_url=public_urls.twilio_media(call.correlation_id),
+                status_callback_url=public_urls.twilio_call_status(call.correlation_id),
+                stream_status_callback_url=public_urls.twilio_stream_status(call.correlation_id),
+                correlation_id=call.correlation_id,
+                run_id=run.id,
+            )
+            call.provider_call_id = call_sid
+            call.status = "dialing"
+            await session.commit()
+        except Exception as err:
+            logger.exception("Failed to place Twilio outbound call: {}", err)
+            call.status = "failed"
+            run.status = "failed"
+            call.ended_at = now()
+            run.ended_at = now()
+            meta = dict(call.provider_metadata or {})
+            meta["error"] = str(err)
+            call.provider_metadata = meta
+            await session.commit()
+            raise HTTPException(502, f"Failed to place Twilio call: {err}") from err
+        return {
+            "run_id": run.id,
+            "call_id": call.id,
+            "provider": call.provider,
+            "status": "dialing",
+            "target": call.target_snapshot,
+        }
+
+    if not run.endpoint_id or not get_settings().operator_token:
         raise HTTPException(422, "Dispatch needs an endpoint and operator token")
     _spawn_call_task(run.id, run.endpoint_id)
     return {
         "run_id": run.id,
         "call_id": call.id,
+        "provider": call.provider,
         "status": "dispatching",
         "target": call.target_snapshot,
     }

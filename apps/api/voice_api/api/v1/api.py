@@ -13,6 +13,7 @@ from voice_api.api.v1.endpoints import (
     providers_router,
     reconciliation_router,
     runs_router,
+    telephony_router,
     tools_router,
     workspace_router,
 )
@@ -38,3 +39,4 @@ api_router.include_router(reconciliation_router)
 api_router.include_router(knowledge_router)
 api_router.include_router(integrations_router)
 api_router.include_router(calendar_router)
+api_router.include_router(telephony_router)

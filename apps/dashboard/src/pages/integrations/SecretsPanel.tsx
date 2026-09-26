@@ -10,18 +10,23 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 
-const names = ["access_token", "app_secret", "verify_token"] as const;
+const whatsappSecrets = ["access_token", "app_secret", "verify_token"] as const;
+const twilioSecrets = ["auth_token"] as const;
+
 export function SecretsPanel({
   connectionId,
+  provider = "whatsapp",
   configured,
   reload,
 }: {
   connectionId: string;
+  provider?: "whatsapp" | "twilio_voice";
   configured: string[];
   reload: () => Promise<unknown>;
 }) {
   const api = useApi();
-  const [name, setName] = useState<(typeof names)[number]>("access_token");
+  const names = provider === "twilio_voice" ? twilioSecrets : whatsappSecrets;
+  const [name, setName] = useState<string>(names[0]);
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   async function save(event: FormEvent) {

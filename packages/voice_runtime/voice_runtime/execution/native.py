@@ -1,5 +1,6 @@
-"""DB-snapshot-driven Pipecat host for one SIM7600 call.
+"""DB-snapshot-driven Pipecat host for one voice call.
 
+Transport-neutral: the caller injects a ready Pipecat BaseTransport.
 This deliberately does not import the protected standalone demo.
 """
 
@@ -40,7 +41,6 @@ from voice_runtime.execution.exchange import ExchangeTracker, bind_transcripts
 from voice_runtime.execution.observer import EvidenceObserver
 from voice_runtime.execution.temporal import resolve_local_time_context
 from voice_runtime.telephony.base import CallState
-from voice_runtime.telephony.usb_audio import Sim7600UsbAudioBridge
 
 
 def _extract_transcript(
@@ -887,7 +887,7 @@ class NativePipelineHost:
 
         return handle
 
-    async def prepare(self, snapshot: dict, tracker: ExchangeTracker) -> None:
+    async def prepare(self, snapshot: dict, tracker: ExchangeTracker, *, transport=None) -> None:
         self.tracker, self._snapshot = tracker, snapshot
         self._nodes = {node["id"]: node for node in snapshot["flow"]["nodes"]}
         if snapshot.get("background_hooks") or any(
@@ -914,17 +914,21 @@ class NativePipelineHost:
         if snapshot["tts"]["provider"] == "cartesia" and not self.settings.cartesia_api_key:
             raise ValueError("cartesia_api_key is not configured")
         rate = snapshot["audio"]["sample_rate"]
-        endpoint = snapshot["_resolved"]["endpoint"]
         self.directory.mkdir(parents=True, exist_ok=True)
         self.capture = CallCapture(self.directory, rate)
-        transport = Sim7600UsbAudioBridge(
-            endpoint["audio_port"],
-            endpoint["baudrate"],
-            sample_rate=rate,
-            channels=1,
-            capture=self.capture,
-            frame_ms=snapshot["audio"]["frame_ms"],
-        ).transport()
+        if transport is None:
+            # Legacy SIM7600 path: construct transport from endpoint config.
+            endpoint = snapshot["_resolved"]["endpoint"]
+            from voice_runtime.telephony.usb_audio import Sim7600UsbAudioBridge
+
+            transport = Sim7600UsbAudioBridge(
+                endpoint["audio_port"],
+                endpoint["baudrate"],
+                sample_rate=rate,
+                channels=1,
+                capture=self.capture,
+                frame_ms=snapshot["audio"]["frame_ms"],
+            ).transport()
         stt = SarvamSTTService(
             api_key=self.settings.sarvam_api_key,
             settings=SarvamSTTService.Settings(model=snapshot["stt"]["model"]),
@@ -1039,7 +1043,7 @@ class NativePipelineHost:
         )
         self.worker = PipelineWorker(
             pipeline,
-            observers=[self.observer],
+            observers=[self.observer, self.capture],
             enable_rtvi=False,
             params=PipelineParams(
                 enable_metrics=True,
@@ -1085,14 +1089,30 @@ class NativePipelineHost:
         async with asyncio.timeout(15):
             await self.ready.wait()
 
-    async def converse(self, modem) -> dict:
+    async def converse(self, modem_or_check=None) -> dict:
+        """Run conversation until pipeline ends or call drops.
+
+        modem_or_check can be:
+          - A modem object with async .state() -> CallState  (SIM7600 path)
+          - An async callable returning bool (True=still active) (Twilio/generic)
+          - None (no liveness polling; pipeline ends on its own)
+        """
         self.tracker.begin("greeting")
         await self.flow.initialize(self._node(self._snapshot["flow"]["initial_node"]))
+
+        async def _check_active() -> bool:
+            if modem_or_check is None:
+                return True
+            if callable(modem_or_check) and not hasattr(modem_or_check, "state"):
+                return await modem_or_check()
+            # Legacy SIM modem path
+            return await modem_or_check.state() == CallState.ACTIVE
+
         while self.runner_task and not self.runner_task.done():
             if self.errors and not self._call_hung_up:
                 raise RuntimeError(self.errors[-1])
             await asyncio.sleep(1)
-            if await modem.state() != CallState.ACTIVE:
+            if not await _check_active():
                 self._call_hung_up = True
                 await self.worker.cancel()
                 break

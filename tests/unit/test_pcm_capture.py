@@ -54,3 +54,49 @@ async def test_wrong_modem_rate_is_rejected():
     with pytest.raises(ValueError, match="16 kHz"):
         await output.write_audio_frame(OutputAudioRawFrame(b"\0" * 320, 8000, 1))
     owner.write.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_frame_pushed_capture_for_injected_transport(tmp_path):
+    from types import SimpleNamespace
+
+    from pipecat.frames.frames import InputAudioRawFrame, OutputAudioRawFrame
+    from pipecat.observers.base_observer import FramePushed
+    from pipecat.transports.base_input import BaseInputTransport
+    from pipecat.transports.base_output import BaseOutputTransport
+
+    capture = CallCapture(tmp_path, sample_rate=8000)
+
+    from unittest.mock import MagicMock
+
+    input_transport = MagicMock(spec=BaseInputTransport)
+    input_transport.name = "input_transport"
+    input_frame = InputAudioRawFrame(b"\x10\x20" * 80, 8000, 1)
+    await capture.on_push_frame(
+        FramePushed(
+            source=input_transport,
+            destination=SimpleNamespace(name="stt"),
+            frame=input_frame,
+            direction=SimpleNamespace(name="UPSTREAM"),
+            timestamp=0,
+        )
+    )
+
+    # Simulate frame pushed to BaseOutputTransport
+    output_transport = MagicMock(spec=BaseOutputTransport)
+    output_transport.name = "output_transport"
+    output_frame = OutputAudioRawFrame(b"\x30\x40" * 80, 8000, 1)
+    await capture.on_push_frame(
+        FramePushed(
+            source=SimpleNamespace(name="tts"),
+            destination=output_transport,
+            frame=output_frame,
+            direction=SimpleNamespace(name="DOWNSTREAM"),
+            timestamp=0,
+        )
+    )
+
+    capture.close()
+    assert (tmp_path / "input.wav").is_file()
+    assert (tmp_path / "output.wav").is_file()
+    assert (tmp_path / "mixed.wav").is_file()

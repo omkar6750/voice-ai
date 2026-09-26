@@ -16,6 +16,7 @@ dependencies = [
     "pypdf>=5,<7",
     "pyserial>=3.5,<4",
     "sqlalchemy[asyncio]>=2.0,<3",
+    "twilio>=9.0,<10",
     "tzdata>=2025.1",
     "uvicorn[standard]>=0.34,<1",
     "google-genai>=2.25.0",

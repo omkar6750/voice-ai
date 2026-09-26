@@ -42,9 +42,9 @@ type CalendarIntegration = { id: string; display_name: string; provider: "google
 export type Connection = {
   id: string;
   label: string;
-  provider: "whatsapp";
+  provider: "whatsapp" | "twilio_voice";
   enabled: boolean;
-  config: { phone_number_id: string; waba_id: string; api_version: string };
+  config: Record<string, any>;
   secret_names: string[];
   updated_at?: string;
   created_at?: string;
@@ -60,6 +60,7 @@ export function IntegrationsPage() {
   }>("/integrations");
   const calendars = useResource<{ integrations: CalendarIntegration[] }>("/calendar-integrations");
   const [open, setOpen] = useState(false);
+  const [newType, setNewType] = useState<"whatsapp" | "twilio_voice">("twilio_voice");
   const hasActiveWhatsapp = Boolean(
     data?.connections.some((c) => c.provider === "whatsapp" && !c.deleted_at),
   );
@@ -68,6 +69,8 @@ export function IntegrationsPage() {
   const [phoneId, setPhoneId] = useState("");
   const [wabaId, setWabaId] = useState("");
   const [apiVersion, setApiVersion] = useState("");
+  const [accountSid, setAccountSid] = useState("");
+  const [authToken, setAuthToken] = useState("");
   const [calendarLabel, setCalendarLabel] = useState("My Google Calendar");
   async function connectCalendar() {
     try {
@@ -99,21 +102,80 @@ export function IntegrationsPage() {
     event.preventDefault();
     setBusy(true);
     try {
+      const payload =
+        newType === "twilio_voice"
+          ? {
+              label: label.trim(),
+              provider: "twilio_voice",
+              enabled: false,
+              config: {
+                account_sid: accountSid.trim(),
+                phone_numbers: [],
+              },
+            }
+          : {
+              label: label.trim(),
+              provider: "whatsapp",
+              enabled: false,
+              config: {
+                phone_number_id: phoneId.trim(),
+                waba_id: wabaId.trim(),
+                api_version: apiVersion.trim(),
+              },
+            };
+
       const result = await api<Connection>("/integrations", {
         method: "POST",
-        body: JSON.stringify({
-          label: label.trim(),
-          provider: "whatsapp",
-          enabled: false,
-          config: {
-            phone_number_id: phoneId.trim(),
-            waba_id: wabaId.trim(),
-            api_version: apiVersion.trim(),
-          },
-        }),
+        body: JSON.stringify(payload),
       });
-      toast.success("Connection created, disabled until credentials are added");
+
+      if (newType === "twilio_voice" && authToken.trim()) {
+        await api(`/integrations/${result.id}/secrets/auth_token`, {
+          method: "PUT",
+          body: JSON.stringify({ value: authToken.trim() }),
+        });
+
+        try {
+          const testRes = await api<{
+            valid: boolean;
+            account_type?: string;
+            phone_numbers_count?: number;
+            error?: string;
+          }>(`/integrations/${result.id}/test`, { method: "POST" });
+
+          if (testRes.valid) {
+            await api<Connection>(`/integrations/${result.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ enabled: true }),
+            });
+            if (testRes.account_type === "Trial") {
+              toast.warning(
+                "Twilio connection verified, but this is a Trial account. Media Streams are blocked on Trial accounts.",
+                { duration: 8000 },
+              );
+            } else {
+              toast.success(
+                `Twilio Voice connected! (${testRes.phone_numbers_count ?? 0} numbers found)`,
+              );
+            }
+          } else {
+            toast.warning(
+              `Twilio credentials saved, but verification failed: ${testRes.error || "Unknown"}`,
+            );
+          }
+        } catch {
+          toast.success("Twilio Voice connection and Auth Token saved");
+        }
+      } else {
+        toast.success("Connection created, disabled until credentials are added");
+      }
+
       setOpen(false);
+      setLabel("");
+      setAccountSid("");
+      setAuthToken("");
+      setPhoneId("");
+      setWabaId("");
       await reload();
       navigate(`/integrations/${result.id}`);
     } catch (cause) {
@@ -130,88 +192,137 @@ export function IntegrationsPage() {
         title="Integrations"
         description="Action-provider accounts. Model-provider keys stay in server environment."
         action={
-          hasActiveWhatsapp ? (
-            <Button
-              variant="outline"
-              disabled
-              title="Only one active WhatsApp connection is allowed. Disconnect or delete the existing connection to add another."
-            >
-              WhatsApp connected (Max 1)
-            </Button>
-          ) : (
+          <div className="flex items-center gap-2">
             <Sheet open={open} onOpenChange={setOpen}>
               <SheetTrigger asChild>
-                <Button>New WhatsApp connection</Button>
+                <Button>New connection</Button>
               </SheetTrigger>
-            <SheetContent>
-              <form onSubmit={create} className="flex h-full flex-col gap-6">
-                <SheetHeader>
-                  <SheetTitle>WhatsApp connection</SheetTitle>
-                  <SheetDescription>
-                    Enter Meta account identifiers. Connection starts disabled.
-                  </SheetDescription>
-                </SheetHeader>
-                <FieldGroup>
-                  <Field>
-                    <FieldLabel htmlFor="wa-label">Label</FieldLabel>
-                    <Input
-                      id="wa-label"
-                      value={label}
-                      onChange={(event) => setLabel(event.target.value)}
-                      required
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="wa-phone-id">
-                      Phone number ID
-                    </FieldLabel>
-                    <Input
-                      id="wa-phone-id"
-                      inputMode="numeric"
-                      pattern="[0-9]+"
-                      value={phoneId}
-                      onChange={(event) => setPhoneId(event.target.value)}
-                      required
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="wa-waba-id">WABA ID</FieldLabel>
-                    <Input
-                      id="wa-waba-id"
-                      inputMode="numeric"
-                      pattern="[0-9]+"
-                      value={wabaId}
-                      onChange={(event) => setWabaId(event.target.value)}
-                      required
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="wa-api-version">
-                      Meta API version
-                    </FieldLabel>
-                    <Input
-                      id="wa-api-version"
-                      pattern="v[0-9]+\.0"
-                      placeholder="vXX.0"
-                      value={apiVersion}
-                      onChange={(event) => setApiVersion(event.target.value)}
-                      required
-                    />
-                    <FieldDescription>
-                      Use the version enabled for your Meta app. No UI default
-                      is assumed.
-                    </FieldDescription>
-                  </Field>
-                </FieldGroup>
-                <SheetFooter className="mt-auto">
-                  <Button type="submit" disabled={busy}>
-                    {busy ? "Creating…" : "Create connection"}
-                  </Button>
-                </SheetFooter>
-              </form>
-            </SheetContent>
-          </Sheet>
-          )
+              <SheetContent>
+                <form onSubmit={create} className="flex h-full flex-col gap-6">
+                  <SheetHeader>
+                    <SheetTitle>New integration</SheetTitle>
+                    <SheetDescription>
+                      Connect Twilio Voice for calling or Meta for WhatsApp messaging.
+                    </SheetDescription>
+                  </SheetHeader>
+                  <FieldGroup>
+                    <Field>
+                      <FieldLabel>Integration provider</FieldLabel>
+                      <div className="flex items-center gap-4 py-1">
+                        <label className="flex items-center gap-2 text-sm cursor-pointer">
+                          <input
+                            type="radio"
+                            name="newType"
+                            value="twilio_voice"
+                            checked={newType === "twilio_voice"}
+                            onChange={() => setNewType("twilio_voice")}
+                          />
+                          <span>Twilio Voice</span>
+                        </label>
+                        <label className="flex items-center gap-2 text-sm cursor-pointer">
+                          <input
+                            type="radio"
+                            name="newType"
+                            value="whatsapp"
+                            checked={newType === "whatsapp"}
+                            disabled={hasActiveWhatsapp}
+                            onChange={() => setNewType("whatsapp")}
+                          />
+                          <span>WhatsApp {hasActiveWhatsapp ? "(Max 1)" : ""}</span>
+                        </label>
+                      </div>
+                    </Field>
+
+                    <Field>
+                      <FieldLabel htmlFor="conn-label">Label</FieldLabel>
+                      <Input
+                        id="conn-label"
+                        placeholder={newType === "twilio_voice" ? "Primary Twilio" : "Support WhatsApp"}
+                        value={label}
+                        onChange={(event) => setLabel(event.target.value)}
+                        required
+                      />
+                    </Field>
+
+                    {newType === "twilio_voice" ? (
+                      <>
+                        <Field>
+                          <FieldLabel htmlFor="twilio-sid">Account SID</FieldLabel>
+                          <Input
+                            id="twilio-sid"
+                            placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                            pattern="^AC[a-zA-Z0-9]{32}$"
+                            value={accountSid}
+                            onChange={(event) => setAccountSid(event.target.value)}
+                            required
+                          />
+                          <FieldDescription>
+                            Starts with AC followed by 32 hexadecimal characters.
+                          </FieldDescription>
+                        </Field>
+
+                        <Field>
+                          <FieldLabel htmlFor="twilio-auth-token">Auth Token</FieldLabel>
+                          <Input
+                            id="twilio-auth-token"
+                            type="password"
+                            placeholder="••••••••••••••••••••••••••••••••"
+                            value={authToken}
+                            onChange={(event) => setAuthToken(event.target.value)}
+                            required
+                          />
+                          <FieldDescription>
+                            Twilio Auth Token. Encrypted securely on the server with Fernet.
+                          </FieldDescription>
+                        </Field>
+                      </>
+                    ) : (
+                      <>
+                        <Field>
+                          <FieldLabel htmlFor="wa-phone-id">Phone number ID</FieldLabel>
+                          <Input
+                            id="wa-phone-id"
+                            inputMode="numeric"
+                            pattern="[0-9]+"
+                            value={phoneId}
+                            onChange={(event) => setPhoneId(event.target.value)}
+                            required
+                          />
+                        </Field>
+                        <Field>
+                          <FieldLabel htmlFor="wa-waba-id">WABA ID</FieldLabel>
+                          <Input
+                            id="wa-waba-id"
+                            inputMode="numeric"
+                            pattern="[0-9]+"
+                            value={wabaId}
+                            onChange={(event) => setWabaId(event.target.value)}
+                            required
+                          />
+                        </Field>
+                        <Field>
+                          <FieldLabel htmlFor="wa-api-version">API version</FieldLabel>
+                          <Input
+                            id="wa-api-version"
+                            placeholder="v23.0"
+                            pattern="^v[0-9]+\.0$"
+                            value={apiVersion}
+                            onChange={(event) => setApiVersion(event.target.value)}
+                            required
+                          />
+                        </Field>
+                      </>
+                    )}
+                  </FieldGroup>
+                  <SheetFooter>
+                    <Button type="submit" disabled={busy}>
+                      {busy ? "Creating…" : "Create connection"}
+                    </Button>
+                  </SheetFooter>
+                </form>
+              </SheetContent>
+            </Sheet>
+          </div>
         }
       />
       <section className="mb-8 rounded-lg border p-5">

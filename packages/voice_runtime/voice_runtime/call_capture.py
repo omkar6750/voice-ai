@@ -23,16 +23,19 @@ class CallCapture(BaseObserver):
         self.positions = {"input": 0, "output": 0}
         self.files = {}
         self.closed = False
+        self._has_direct_pcm = False
         for name in self.positions:
             wav = wave.open(str(directory / f"{name}.wav"), "wb")
             wav.setparams((1, 2, sample_rate, 0, "NONE", "not compressed"))
             wav.writeframes(b"")
             self.files[name] = wav
 
-    def pcm(self, direction: str, audio: bytes):
+    def pcm(self, direction: str, audio: bytes, *, direct: bool = True):
         """RX is timestamped at read completion; TX at successful write completion."""
+        if direct:
+            self._has_direct_pcm = True
         if len(audio) % 2:
-            raise ValueError("PCM must contain whole signed 16-bit samples")
+            audio = audio[:-1]
         samples = len(audio) // 2
         observed = round((self.clock() - self.started) * self.sample_rate)
         if direction == "input":
@@ -54,6 +57,21 @@ class CallCapture(BaseObserver):
         self.frames[edge] += 1
         count = self.frames[edge]
         audio = getattr(frame, "audio", None)
+
+        if not self._has_direct_pcm and audio:
+            from pipecat.frames.frames import InputAudioRawFrame, OutputAudioRawFrame
+            from pipecat.transports.base_input import BaseInputTransport
+            from pipecat.transports.base_output import BaseOutputTransport
+
+            if isinstance(frame, InputAudioRawFrame) and isinstance(
+                data.source, BaseInputTransport
+            ):
+                self.pcm("input", audio, direct=False)
+            elif isinstance(frame, OutputAudioRawFrame) and isinstance(
+                data.destination, BaseOutputTransport
+            ):
+                self.pcm("output", audio, direct=False)
+
         if audio is not None and count != 1 and count % 50:
             return
         detail = (

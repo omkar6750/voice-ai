@@ -69,6 +69,10 @@ class Call(Identity, Created, Base):
     answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     recording_path: Mapped[str | None] = mapped_column(String(500))
+    telephony_connection_id: Mapped[str | None] = mapped_column(
+        ForeignKey("integration_connections.id"), index=True
+    )
+    from_number: Mapped[str | None] = mapped_column(String(50))
 
 
 class Exchange(Identity, Created, Base):

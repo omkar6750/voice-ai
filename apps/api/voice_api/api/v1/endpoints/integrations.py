@@ -278,7 +278,10 @@ async def update_connection(
                 )
             ).all()
             secret_names = {s.name for s in secret_rows}
-            required = {"access_token"}
+            if connection.provider == "twilio_voice":
+                required = {"auth_token"}
+            else:
+                required = {"access_token"}
             missing = required - secret_names
             if missing:
                 raise HTTPException(
@@ -305,7 +308,7 @@ async def put_secret(
     _: None = Operator,
 ) -> None:
     await connection_or_404(session, connection_id)
-    if name not in {"access_token", "app_secret", "verify_token"}:
+    if name not in {"access_token", "app_secret", "verify_token", "auth_token"}:
         raise HTTPException(422, "Unsupported integration secret name")
     try:
         encrypted = CredentialVault.from_env().encrypt(body.value)
@@ -324,6 +327,41 @@ async def put_secret(
     else:
         row.ciphertext, row.key_id = encrypted.ciphertext, encrypted.key_id
     await session.commit()
+
+
+@router.post("/integrations/{connection_id}/test")
+async def test_connection_endpoint(
+    connection_id: str,
+    session: AsyncSession = Session,
+    _: None = Operator,
+) -> dict:
+    connection = await connection_or_404(session, connection_id)
+    if connection.provider == "twilio_voice":
+        from voice_api.services.twilio_service import (
+            resolve_twilio_credentials,
+            test_twilio_connection,
+        )
+
+        _, credentials = await resolve_twilio_credentials(
+            session, connection_id, require_enabled=False
+        )
+        return await test_twilio_connection(credentials)
+    raise HTTPException(422, f"Test connection not supported for {connection.provider}")
+
+
+@router.post("/integrations/{connection_id}/refresh-numbers")
+async def refresh_numbers_endpoint(
+    connection_id: str,
+    session: AsyncSession = Session,
+    _: None = Operator,
+) -> dict:
+    connection = await connection_or_404(session, connection_id)
+    if connection.provider != "twilio_voice":
+        raise HTTPException(422, "Only Twilio connections support phone number refresh")
+    from voice_api.services.twilio_service import sync_twilio_phone_numbers
+
+    result = await sync_twilio_phone_numbers(session, connection_id)
+    return result
 
 
 @router.post("/integrations/{connection_id}/rotate-secrets", status_code=204)

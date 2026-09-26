@@ -11,6 +11,7 @@ from voice_api.api.v1.endpoints.knowledge import router as knowledge_router
 from voice_api.api.v1.endpoints.providers import router as providers_router
 from voice_api.api.v1.endpoints.reconciliation import router as reconciliation_router
 from voice_api.api.v1.endpoints.runs import router as runs_router
+from voice_api.api.v1.endpoints.telephony import router as telephony_router
 from voice_api.api.v1.endpoints.tools import router as tools_router
 from voice_api.api.v1.endpoints.workspace import router as workspace_router
 
@@ -28,6 +29,7 @@ __all__ = [
     "providers_router",
     "reconciliation_router",
     "runs_router",
+    "telephony_router",
     "tools_router",
     "workspace_router",
 ]

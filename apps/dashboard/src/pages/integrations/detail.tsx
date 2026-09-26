@@ -7,6 +7,7 @@ import {
   Trash2,
   ExternalLink,
   Pencil,
+  Phone,
   RefreshCw,
   Wrench,
 } from "lucide-react";
@@ -97,7 +98,9 @@ function templateParameterNames(template: Template | null): string[] {
   }
   return indexes.length === 1 ? ["message"] : [];
 }
-const sections = ["Account", "Credentials", "Media", "Templates"] as const;
+
+const whatsappSections = ["Account", "Credentials", "Media", "Templates"] as const;
+const twilioSections = ["Account", "Credentials", "Phone Numbers"] as const;
 
 export function IntegrationDetailPage() {
   const { connectionId = "" } = useParams();
@@ -111,8 +114,11 @@ export function IntegrationDetailPage() {
     reload,
   } = useResource<Connection>(`/integrations/${connectionId}`);
 
+  const isTwilio = connection?.provider === "twilio_voice";
+  const sections = isTwilio ? twilioSections : whatsappSections;
+
   const section =
-    sections.find((item) => item.toLowerCase() === params.get("section")) ??
+    sections.find((item) => item.toLowerCase() === params.get("section")?.toLowerCase()) ??
     "Account";
 
   // Account editing state
@@ -123,6 +129,11 @@ export function IntegrationDetailPage() {
   const [phoneId, setPhoneId] = useState("");
   const [wabaId, setWabaId] = useState("");
   const [apiVersion, setApiVersion] = useState("");
+  const [accountSid, setAccountSid] = useState("");
+
+  // Twilio testing & sync state
+  const [testBusy, setTestBusy] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false);
 
   // Disconnect & Delete modal state
   const [disconnectOpen, setDisconnectOpen] = useState(false);
@@ -134,7 +145,11 @@ export function IntegrationDetailPage() {
     setDisconnectBusy(true);
     try {
       await api(`/integrations/${connectionId}/disconnect`, { method: "POST" });
-      toast.success("WhatsApp integration disconnected and credentials cleared");
+      toast.success(
+        isTwilio
+          ? "Twilio Voice integration disconnected and credentials cleared"
+          : "WhatsApp integration disconnected and credentials cleared",
+      );
       setDisconnectOpen(false);
       await reload();
     } catch (cause) {
@@ -148,13 +163,69 @@ export function IntegrationDetailPage() {
     setDeleteBusy(true);
     try {
       await api(`/integrations/${connectionId}`, { method: "DELETE" });
-      toast.success("Integration and associated tools deleted");
+      toast.success(
+        isTwilio
+          ? "Twilio Voice integration deleted"
+          : "Integration and associated tools deleted",
+      );
       setDeleteOpen(false);
       navigate("/integrations");
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : "Delete failed");
     } finally {
       setDeleteBusy(false);
+    }
+  }
+
+  async function handleTestConnection() {
+    setTestBusy(true);
+    try {
+      const res = await api<{
+        valid: boolean;
+        account_type?: string;
+        phone_numbers_count?: number;
+        error?: string;
+      }>(`/integrations/${connectionId}/test`, { method: "POST" });
+      if (res.valid) {
+        if (res.account_type === "Trial") {
+          toast.warning(
+            `Twilio connection verified, but account is Trial (${res.phone_numbers_count ?? 0} numbers). Media Streams are blocked on Trial accounts!`,
+            { duration: 8000 },
+          );
+        } else {
+          toast.success(
+            `Twilio connection verified! (${res.account_type ?? "Full"} account, ${res.phone_numbers_count ?? 0} numbers available)`,
+          );
+        }
+      } else {
+        toast.error(`Twilio verification failed: ${res.error || "Unknown error"}`);
+      }
+      await reload();
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "Connection test failed");
+    } finally {
+      setTestBusy(false);
+    }
+  }
+
+  async function handleRefreshNumbers() {
+    setSyncBusy(true);
+    try {
+      const res = await api<{
+        count: number;
+        phone_numbers: Array<{
+          phone_number: string;
+          friendly_name: string;
+          voice: boolean;
+          sid: string;
+        }>;
+      }>(`/integrations/${connectionId}/refresh-numbers`, { method: "POST" });
+      toast.success(`Synchronized ${res.count} phone numbers from Twilio`);
+      await reload();
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "Failed to refresh phone numbers");
+    } finally {
+      setSyncBusy(false);
     }
   }
 
@@ -180,9 +251,13 @@ export function IntegrationDetailPage() {
     if (!connection) return;
     setLabel(connection.label);
     setEnabled(connection.enabled);
-    setPhoneId(connection.config.phone_number_id);
-    setWabaId(connection.config.waba_id);
-    setApiVersion(connection.config.api_version);
+    if (connection.provider === "twilio_voice") {
+      setAccountSid(connection.config?.account_sid || "");
+    } else {
+      setPhoneId(connection.config?.phone_number_id || "");
+      setWabaId(connection.config?.waba_id || "");
+      setApiVersion(connection.config?.api_version || "");
+    }
     setEditOpen(true);
   }
 
@@ -191,16 +266,25 @@ export function IntegrationDetailPage() {
     if (!connection) return;
     setEditBusy(true);
     try {
+      const config =
+        connection.provider === "twilio_voice"
+          ? {
+              ...connection.config,
+              account_sid: accountSid.trim(),
+            }
+          : {
+              ...connection.config,
+              phone_number_id: phoneId.trim(),
+              waba_id: wabaId.trim(),
+              api_version: apiVersion.trim(),
+            };
+
       await api<Connection>(`/integrations/${connectionId}`, {
         method: "PATCH",
         body: JSON.stringify({
           label: label.trim(),
           enabled,
-          config: {
-            phone_number_id: phoneId.trim(),
-            waba_id: wabaId.trim(),
-            api_version: apiVersion.trim(),
-          },
+          config,
           expected_updated_at: connection.updated_at,
         }),
       });
@@ -290,7 +374,11 @@ export function IntegrationDetailPage() {
     <PageBody>
       <PageHeader
         title={connection?.label ?? "Integration"}
-        description="WhatsApp account settings, credentials, and media. Secrets stay write-only on the server."
+        description={
+          isTwilio
+            ? "Twilio Voice account settings, credentials, and synchronized phone numbers. Secrets stay write-only on the server."
+            : "WhatsApp account settings, credentials, and media. Secrets stay write-only on the server."
+        }
         action={
           <div className="flex items-center gap-2">
             <Button asChild variant="outline">
@@ -331,10 +419,40 @@ export function IntegrationDetailPage() {
                       Account Configuration
                     </h2>
                     <p className="text-xs text-muted-foreground">
-                      Meta WhatsApp Business account identifiers and status.
+                      {isTwilio
+                        ? "Twilio Programmable Voice account credentials and live status."
+                        : "Meta WhatsApp Business account identifiers and status."}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
+                    {isTwilio && (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={testBusy}
+                          onClick={() => void handleTestConnection()}
+                          className="gap-1.5"
+                        >
+                          <RefreshCw
+                            className={`size-3.5 ${testBusy ? "animate-spin" : ""}`}
+                          />
+                          {testBusy ? "Testing…" : "Test connection"}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={syncBusy}
+                          onClick={() => void handleRefreshNumbers()}
+                          className="gap-1.5"
+                        >
+                          <Phone
+                            className={`size-3.5 ${syncBusy ? "animate-spin" : ""}`}
+                          />
+                          {syncBusy ? "Syncing…" : "Sync numbers"}
+                        </Button>
+                      </>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"
@@ -383,51 +501,119 @@ export function IntegrationDetailPage() {
                         {!connection.enabled &&
                           !connection.deleted_at &&
                           !connection.secret_names.includes(
-                            "access_token",
+                            isTwilio ? "auth_token" : "access_token",
                           ) && (
                             <span className="text-xs text-amber-500">
-                              (Requires access_token credential)
+                              (Requires {isTwilio ? "auth_token" : "access_token"} credential)
                             </span>
                           )}
                       </div>
                     }
                   />
-                  <ReadOnlyValue
-                    label="Phone number ID"
-                    value={
-                      <code className="text-xs">
-                        {connection.config.phone_number_id}
-                      </code>
-                    }
-                  />
-                  <ReadOnlyValue
-                    label="WABA ID"
-                    value={
-                      <code className="text-xs">
-                        {connection.config.waba_id}
-                      </code>
-                    }
-                  />
-                  <ReadOnlyValue
-                    label="Meta API version"
-                    value={
-                      <Badge variant="outline">
-                        {connection.config.api_version}
-                      </Badge>
-                    }
-                  />
-                  <ReadOnlyValue
-                    label="Webhook callback URL"
-                    value={
-                      connection.webhook_url ? (
-                        <code className="break-all text-xs">{connection.webhook_url}</code>
-                      ) : (
-                        <span className="text-amber-500">
-                          Set VOICE_PUBLIC_BASE_URL before configuring Meta.
-                        </span>
-                      )
-                    }
-                  />
+
+                  {isTwilio ? (
+                    <>
+                      <ReadOnlyValue
+                        label="Account SID"
+                        value={
+                          <code className="text-xs">
+                            {connection.config.account_sid || "Not set"}
+                          </code>
+                        }
+                      />
+                      <ReadOnlyValue
+                        label="Account Type"
+                        value={
+                          connection.config.account_type === "Trial" ? (
+                            <div className="flex items-center gap-2">
+                              <Badge variant="destructive">Trial</Badge>
+                              <span className="text-xs text-amber-500">
+                                Twilio Media Streams are blocked on Trial accounts. Must upgrade to Full.
+                              </span>
+                            </div>
+                          ) : connection.config.account_type === "Full" ? (
+                            <Badge variant="outline" className="text-emerald-500 border-emerald-500/30">
+                              Full (Production)
+                            </Badge>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              Not verified (Click "Test connection")
+                            </span>
+                          )
+                        }
+                      />
+                      <ReadOnlyValue
+                        label="Phone numbers"
+                        value={
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium">
+                              {connection.config.phone_numbers?.length ?? 0} numbers configured
+                            </span>
+                            <Button
+                              variant="link"
+                              size="sm"
+                              className="h-auto p-0 text-xs"
+                              onClick={() => setParams({ section: "phone numbers" })}
+                            >
+                              View all
+                            </Button>
+                          </div>
+                        }
+                      />
+                      <ReadOnlyValue
+                        label="Telephony Webhook URL"
+                        value={
+                          connection.webhook_url ? (
+                            <code className="break-all text-xs">{connection.webhook_url}</code>
+                          ) : (
+                            <span className="text-amber-500">
+                              Set VOICE_PUBLIC_BASE_URL before dispatching Twilio calls.
+                            </span>
+                          )
+                        }
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <ReadOnlyValue
+                        label="Phone number ID"
+                        value={
+                          <code className="text-xs">
+                            {connection.config.phone_number_id}
+                          </code>
+                        }
+                      />
+                      <ReadOnlyValue
+                        label="WABA ID"
+                        value={
+                          <code className="text-xs">
+                            {connection.config.waba_id}
+                          </code>
+                        }
+                      />
+                      <ReadOnlyValue
+                        label="Meta API version"
+                        value={
+                          <Badge variant="outline">
+                            {connection.config.api_version}
+                          </Badge>
+                        }
+                      />
+                      <ReadOnlyValue
+                        label="Webhook callback URL"
+                        value={
+                          connection.webhook_url ? (
+                            <code className="break-all text-xs">{connection.webhook_url}</code>
+                          ) : (
+                            <span className="text-amber-500">
+                              Set VOICE_PUBLIC_BASE_URL before configuring Meta.
+                            </span>
+                          )
+                        }
+                      />
+                    </>
+                  )}
+
                   <ReadOnlyValue
                     label="Configured secrets"
                     value={
@@ -462,8 +648,9 @@ export function IntegrationDetailPage() {
                       <SheetHeader>
                         <SheetTitle>Edit Account Settings</SheetTitle>
                         <SheetDescription>
-                          Update Meta WhatsApp account identifiers and enable
-                          live dispatch.
+                          {isTwilio
+                            ? "Update Twilio Account SID and toggle call dispatch status."
+                            : "Update Meta WhatsApp account identifiers and enable live dispatch."}
                         </SheetDescription>
                       </SheetHeader>
 
@@ -495,54 +682,74 @@ export function IntegrationDetailPage() {
                             </NativeSelectOption>
                           </NativeSelect>
                           <FieldDescription>
-                            Must have `access_token` saved in Credentials
-                            to enable.
+                            Must have `{isTwilio ? "auth_token" : "access_token"}` saved in Credentials to enable.
                           </FieldDescription>
                         </Field>
 
-                        <Field>
-                          <FieldLabel htmlFor="edit-phone-id">
-                            Phone number ID
-                          </FieldLabel>
-                          <Input
-                            id="edit-phone-id"
-                            inputMode="numeric"
-                            pattern="[0-9]+"
-                            value={phoneId}
-                            onChange={(e) => setPhoneId(e.target.value)}
-                            required
-                          />
-                        </Field>
+                        {isTwilio ? (
+                          <Field>
+                            <FieldLabel htmlFor="edit-account-sid">
+                              Account SID
+                            </FieldLabel>
+                            <Input
+                              id="edit-account-sid"
+                              value={accountSid}
+                              onChange={(e) => setAccountSid(e.target.value)}
+                              pattern="^AC[a-fA-F0-9]{32}$"
+                              placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                              required
+                            />
+                            <FieldDescription>
+                              Twilio Account SID (34 chars, starts with AC).
+                            </FieldDescription>
+                          </Field>
+                        ) : (
+                          <>
+                            <Field>
+                              <FieldLabel htmlFor="edit-phone-id">
+                                Phone number ID
+                              </FieldLabel>
+                              <Input
+                                id="edit-phone-id"
+                                inputMode="numeric"
+                                pattern="[0-9]+"
+                                value={phoneId}
+                                onChange={(e) => setPhoneId(e.target.value)}
+                                required
+                              />
+                            </Field>
 
-                        <Field>
-                          <FieldLabel htmlFor="edit-waba-id">WABA ID</FieldLabel>
-                          <Input
-                            id="edit-waba-id"
-                            inputMode="numeric"
-                            pattern="[0-9]+"
-                            value={wabaId}
-                            onChange={(e) => setWabaId(e.target.value)}
-                            required
-                          />
-                        </Field>
+                            <Field>
+                              <FieldLabel htmlFor="edit-waba-id">WABA ID</FieldLabel>
+                              <Input
+                                id="edit-waba-id"
+                                inputMode="numeric"
+                                pattern="[0-9]+"
+                                value={wabaId}
+                                onChange={(e) => setWabaId(e.target.value)}
+                                required
+                              />
+                            </Field>
 
-                        <Field>
-                          <FieldLabel htmlFor="edit-api-version">
-                            Meta API version
-                          </FieldLabel>
-                          <Input
-                            id="edit-api-version"
-                            pattern="v[0-9]+\.0"
-                            placeholder="v23.0"
-                            value={apiVersion}
-                            onChange={(e) => setApiVersion(e.target.value)}
-                            required
-                          />
-                          <FieldDescription>
-                            Graph API version matching your Meta app (e.g.
-                            v23.0).
-                          </FieldDescription>
-                        </Field>
+                            <Field>
+                              <FieldLabel htmlFor="edit-api-version">
+                                Meta API version
+                              </FieldLabel>
+                              <Input
+                                id="edit-api-version"
+                                pattern="v[0-9]+\.0"
+                                placeholder="v23.0"
+                                value={apiVersion}
+                                onChange={(e) => setApiVersion(e.target.value)}
+                                required
+                              />
+                              <FieldDescription>
+                                Graph API version matching your Meta app (e.g.
+                                v23.0).
+                              </FieldDescription>
+                            </Field>
+                          </>
+                        )}
                       </FieldGroup>
 
                       <SheetFooter className="mt-auto">
@@ -566,14 +773,88 @@ export function IntegrationDetailPage() {
             {section === "Credentials" && (
               <SecretsPanel
                 connectionId={connectionId}
+                provider={connection.provider}
                 configured={connection.secret_names}
                 reload={reload}
               />
             )}
 
-            {section === "Media" && <MediaPanel connectionId={connectionId} />}
+            {section === "Phone Numbers" && isTwilio && (
+              <section className="flex flex-col gap-6">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-base font-semibold">Twilio Phone Numbers</h2>
+                    <p className="text-xs text-muted-foreground">
+                      Voice-capable incoming phone numbers synchronized from this Twilio account.
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={syncBusy}
+                    onClick={() => void handleRefreshNumbers()}
+                    className="gap-1.5"
+                  >
+                    <RefreshCw
+                      className={`size-3.5 ${syncBusy ? "animate-spin" : ""}`}
+                    />
+                    {syncBusy ? "Syncing…" : "Refresh from Twilio"}
+                  </Button>
+                </div>
 
-            {section === "Templates" && (
+                {(!connection.config.phone_numbers || connection.config.phone_numbers.length === 0) ? (
+                  <Card className="border-dashed">
+                    <CardHeader className="text-center">
+                      <CardTitle className="text-base">No Phone Numbers Synchronized</CardTitle>
+                      <CardDescription>
+                        Configure your <code>auth_token</code> under Credentials and click "Refresh from Twilio" to fetch your voice phone numbers.
+                      </CardDescription>
+                    </CardHeader>
+                  </Card>
+                ) : (
+                  <div className="rounded-lg border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Phone Number</TableHead>
+                          <TableHead>Friendly Name</TableHead>
+                          <TableHead>Voice Enabled</TableHead>
+                          <TableHead className="text-right">SID</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {connection.config.phone_numbers.map((pn: any) => (
+                          <TableRow key={pn.sid || pn.phone_number}>
+                            <TableCell className="font-mono text-sm font-medium">
+                              {pn.phone_number}
+                            </TableCell>
+                            <TableCell className="text-sm">
+                              {pn.friendly_name || "-"}
+                            </TableCell>
+                            <TableCell>
+                              {pn.voice ? (
+                                <Badge variant="secondary" className="text-emerald-500">
+                                  Voice
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline">Non-voice</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-xs text-muted-foreground">
+                              {pn.sid}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {section === "Media" && !isTwilio && <MediaPanel connectionId={connectionId} />}
+
+            {section === "Templates" && !isTwilio && (
               <section className="flex flex-col gap-6">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <div>
@@ -804,7 +1085,7 @@ export function IntegrationDetailPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-amber-500">
               <PowerOff className="size-5" />
-              Disconnect WhatsApp Integration
+              Disconnect {isTwilio ? "Twilio Voice" : "WhatsApp"} Integration
             </DialogTitle>
             <DialogDescription>
               Are you sure you want to disconnect{" "}
@@ -813,7 +1094,7 @@ export function IntegrationDetailPage() {
           </DialogHeader>
           <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs text-muted-foreground space-y-2">
             <p>
-              Disconnecting will immediately disable active message dispatch and
+              Disconnecting will immediately disable active {isTwilio ? "call" : "message"} dispatch and
               securely purge stored API access tokens and secrets.
             </p>
             <p>
@@ -848,7 +1129,7 @@ export function IntegrationDetailPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
               <AlertTriangle className="size-5" />
-              Delete WhatsApp Integration
+              Delete {isTwilio ? "Twilio Voice" : "WhatsApp"} Integration
             </DialogTitle>
             <DialogDescription>
               Are you sure you want to completely delete{" "}
@@ -857,21 +1138,34 @@ export function IntegrationDetailPage() {
           </DialogHeader>
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-xs text-destructive space-y-2">
             <p className="font-semibold uppercase tracking-wider">
-              Side Effects & Cascading Deletions:
+              Side Effects &amp; Cascading Deletions:
             </p>
             <ul className="list-inside list-disc space-y-1">
-              <li>
-                All generated WhatsApp tools (e.g. template and direct message tools)
-                will be permanently deleted from the Tools catalog.
-              </li>
-              <li>
-                These tools will be automatically unbound and removed from all agent
-                configurations and flow nodes.
-              </li>
-              <li>
-                Stored credentials, uploaded media, and webhook message logs for this
-                connection will be permanently destroyed.
-              </li>
+              {isTwilio ? (
+                <>
+                  <li>
+                    Stored credentials and telephony connection configuration will be permanently destroyed.
+                  </li>
+                  <li>
+                    Outbound calls can no longer be dispatched through this Twilio connection.
+                  </li>
+                </>
+              ) : (
+                <>
+                  <li>
+                    All generated WhatsApp tools (e.g. template and direct message tools)
+                    will be permanently deleted from the Tools catalog.
+                  </li>
+                  <li>
+                    These tools will be automatically unbound and removed from all agent
+                    configurations and flow nodes.
+                  </li>
+                  <li>
+                    Stored credentials, uploaded media, and webhook message logs for this
+                    connection will be permanently destroyed.
+                  </li>
+                </>
+              )}
             </ul>
           </div>
           <DialogFooter>
