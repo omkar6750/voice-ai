@@ -37,6 +37,13 @@ Session = Depends(get_session)
 Operator = Depends(require_operator)
 
 
+def webhook_url(connection_id: str) -> str | None:
+    base = get_settings().public_base_url
+    if not base:
+        return None
+    return f"{base.rstrip('/')}/api/v1/integrations/whatsapp/{connection_id}/webhook"
+
+
 def summary(connection: IntegrationConnection, *, secret_names: list[str]) -> dict:
     return {
         "id": connection.id,
@@ -47,6 +54,7 @@ def summary(connection: IntegrationConnection, *, secret_names: list[str]) -> di
         "secret_names": secret_names,
         "updated_at": connection.updated_at.isoformat() if connection.updated_at else None,
         "created_at": connection.created_at.isoformat() if connection.created_at else None,
+        "webhook_url": webhook_url(connection.id),
     }
 
 
@@ -385,6 +393,26 @@ async def generate_template_tool(
                 "description": "Template body text or follow-up note",
             }
 
+    for key, value in body.parameter_descriptions.items():
+        if key in properties and value.strip():
+            properties[key]["description"] = value.strip()
+
+    header_media_id = body.header_media_id
+    header_component = next(
+        (c for c in match.get("components", []) if c.get("type") == "HEADER"), None
+    )
+    if header_media_id:
+        media = await session.scalar(
+            select(IntegrationMedia).where(
+                IntegrationMedia.connection_id == connection_id,
+                IntegrationMedia.provider_media_id == header_media_id,
+                IntegrationMedia.availability == "available",
+            )
+        )
+        if media is None:
+            raise HTTPException(422, "Selected header media is not available for this integration")
+    if header_component and header_component.get("format") == "IMAGE" and not header_media_id:
+        raise HTTPException(422, "This template requires a selected header image")
     description = (
         body.description
         or f"Send approved WhatsApp template '{match.get('name')}' ({match.get('language')}) via {connection.label}."
@@ -395,6 +423,7 @@ async def generate_template_tool(
         "description": description,
         "kind": "registered",
         "handler": "send_whatsapp_template",
+        **({"header_media_id": header_media_id} if header_media_id else {}),
         "parameters": {
             "type": "object",
             "properties": properties,
@@ -426,11 +455,15 @@ async def generate_template_tool(
         session.add(version)
 
     await session.commit()
+    extracted_variables = sorted({key for key in properties if key not in {"caller_name", "to"}})
     return {
         "tool_id": tool.id,
         "tool_version_id": version.id,
         "name": tool.name,
+        "tool_name": tool.name,
         "version": version.version,
+        "version_number": version.version,
+        "extracted_variables": extracted_variables,
         "config": version.config,
     }
 

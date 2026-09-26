@@ -1,0 +1,404 @@
+"""Google Calendar OAuth and human callback scheduling endpoints."""
+
+from __future__ import annotations
+
+import hashlib
+from datetime import UTC, datetime, timedelta
+from secrets import token_urlsafe
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import RedirectResponse
+from loguru import logger
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from voice_api.api.deps import get_session, require_operator
+from voice_api.models import (
+    AgentVersion,
+    CalendarIntegration,
+    CalendarOAuthState,
+    Callback,
+    Contact,
+)
+from voice_api.models.common import new_id, now
+from voice_api.services.calendar_service import (
+    SCOPES,
+    SchedulingError,
+    _put_secret,
+    calendar_call,
+    generate_slots,
+    google_flow,
+    resolve_timeframe,
+    sign_slot,
+    verify_slot,
+)
+from voice_api.services.vault_service import CredentialVault
+from voice_runtime.contracts import AgentConfig
+
+router = APIRouter(tags=["calendar"])
+Session = Depends(get_session)
+Operator = Depends(require_operator)
+
+
+class CreateCalendar(BaseModel):
+    display_name: str = Field(min_length=1, max_length=120)
+    timezone: str = "UTC"
+
+
+class UpdateCalendar(BaseModel):
+    display_name: str = Field(min_length=1, max_length=120)
+    timezone: str | None = None
+
+
+class AvailabilityRequest(BaseModel):
+    agent_version_id: str
+    contact_id: str | None = None
+    timeframe: str
+    role: str
+    duration_minutes: int | None = Field(default=None, ge=5, le=120)
+
+
+class BookRequest(BaseModel):
+    agent_version_id: str
+    contact_id: str
+    slot_id: str
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+def _error(exc: Exception) -> HTTPException:
+    return HTTPException(422, str(exc))
+
+
+@router.get("/calendar-integrations")
+async def list_calendars(session: AsyncSession = Session, _: None = Operator) -> dict:
+    rows = (
+        await session.scalars(
+            select(CalendarIntegration).order_by(CalendarIntegration.display_name)
+        )
+    ).all()
+    return {
+        "integrations": [
+            {
+                "id": r.id,
+                "display_name": r.display_name,
+                "provider": r.provider,
+                "calendar_id": r.calendar_id,
+                "timezone": r.timezone,
+                "status": r.status,
+                "scopes": r.scopes,
+                "connected_at": r.connected_at.isoformat() if r.connected_at else None,
+                "last_error": r.last_error,
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.post("/calendar-integrations/google/connect")
+async def connect_calendar(
+    body: CreateCalendar, session: AsyncSession = Session, _: None = Operator
+) -> dict:
+    row = CalendarIntegration(
+        id=new_id(),
+        display_name=body.display_name,
+        timezone=body.timezone,
+        scopes=SCOPES,
+        status="pending",
+    )
+    session.add(row)
+    await session.flush()
+    raw_state = token_urlsafe(32)
+    code_verifier = token_urlsafe(64)
+    encrypted_verifier = CredentialVault.from_env().encrypt(code_verifier)
+    session.add(
+        CalendarOAuthState(
+            id=new_id(),
+            state_hash=hashlib.sha256(raw_state.encode()).hexdigest(),
+            calendar_integration_id=row.id,
+            expires_at=now() + timedelta(minutes=10),
+            pkce_verifier_ciphertext=encrypted_verifier.ciphertext,
+            pkce_verifier_key_id=encrypted_verifier.key_id,
+        )
+    )
+    try:
+        url, _ = google_flow(raw_state, code_verifier=code_verifier).authorization_url(
+            access_type="offline", include_granted_scopes="true", prompt="consent"
+        )
+    except SchedulingError as exc:
+        raise _error(exc) from exc
+    await session.commit()
+    return {"id": row.id, "authorization_url": url}
+
+
+@router.get("/calendar-integrations/google/callback")
+async def oauth_callback(
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    session: AsyncSession = Session,
+):
+    if error:
+        raise HTTPException(400, "Google authorization was denied")
+    if not code or not state:
+        raise HTTPException(400, "Missing OAuth callback parameters")
+    state_row = await session.scalar(
+        select(CalendarOAuthState)
+        .where(CalendarOAuthState.state_hash == hashlib.sha256(state.encode()).hexdigest())
+        .with_for_update()
+    )
+    if state_row is None or state_row.used_at is not None or state_row.expires_at <= now():
+        raise HTTPException(400, "Invalid or expired OAuth state")
+    integration = await session.get(
+        CalendarIntegration, state_row.calendar_integration_id, with_for_update=True
+    )
+    if integration is None:
+        raise HTTPException(404, "Calendar integration not found")
+    if not state_row.pkce_verifier_ciphertext or not state_row.pkce_verifier_key_id:
+        raise HTTPException(
+            400, "OAuth session is missing PKCE state. Please reconnect Google Calendar."
+        )
+    try:
+        code_verifier = CredentialVault.from_env().decrypt(
+            state_row.pkce_verifier_ciphertext, state_row.pkce_verifier_key_id
+        )
+        flow = google_flow(state, code_verifier=code_verifier)
+        flow.fetch_token(code=code)
+        credentials = flow.credentials
+        await _put_secret(session, integration.id, "access_token", credentials.token)
+        if credentials.refresh_token:
+            await _put_secret(session, integration.id, "refresh_token", credentials.refresh_token)
+        integration.status, integration.connected_at, integration.token_expires_at = (
+            "connected",
+            now(),
+            credentials.expiry,
+        )
+        integration.scopes = list(credentials.scopes or SCOPES)
+        integration.last_error = None
+        state_row.used_at = now()
+        state_row.pkce_verifier_ciphertext = None
+        state_row.pkce_verifier_key_id = None
+        await session.commit()
+    except Exception as exc:
+        integration.status, integration.last_error = "error", f"OAuth failed: {type(exc).__name__}"
+        logger.error(
+            "Google Calendar OAuth failed integration={} type={} error={} description={}",
+            integration.id,
+            type(exc).__name__,
+            getattr(exc, "error", None),
+            getattr(exc, "description", None),
+        )
+        await session.commit()
+        raise HTTPException(502, "Google authorization could not be completed") from exc
+    return RedirectResponse("/integrations?calendar=connected")
+
+
+@router.post("/calendar-integrations/{integration_id}/reconnect")
+async def reconnect(
+    integration_id: str, session: AsyncSession = Session, _: None = Operator
+) -> dict:
+    integration = await session.get(CalendarIntegration, integration_id)
+    if integration is None:
+        raise HTTPException(404, "Calendar integration not found")
+    raw_state = token_urlsafe(32)
+    code_verifier = token_urlsafe(64)
+    encrypted_verifier = CredentialVault.from_env().encrypt(code_verifier)
+    session.add(
+        CalendarOAuthState(
+            id=new_id(),
+            state_hash=hashlib.sha256(raw_state.encode()).hexdigest(),
+            calendar_integration_id=integration.id,
+            expires_at=now() + timedelta(minutes=10),
+            pkce_verifier_ciphertext=encrypted_verifier.ciphertext,
+            pkce_verifier_key_id=encrypted_verifier.key_id,
+        )
+    )
+    try:
+        url, _ = google_flow(raw_state, code_verifier=code_verifier).authorization_url(
+            access_type="offline", include_granted_scopes="true", prompt="consent"
+        )
+    except SchedulingError as exc:
+        raise _error(exc) from exc
+    await session.commit()
+    return {"authorization_url": url}
+
+
+@router.patch("/calendar-integrations/{integration_id}")
+async def rename_calendar(
+    integration_id: str, body: UpdateCalendar, session: AsyncSession = Session, _: None = Operator
+) -> dict:
+    row = await session.get(CalendarIntegration, integration_id, with_for_update=True)
+    if row is None:
+        raise HTTPException(404, "Calendar integration not found")
+    row.display_name = body.display_name.strip()
+    if body.timezone:
+        row.timezone = body.timezone
+    await session.commit()
+    return {
+        "id": row.id,
+        "display_name": row.display_name,
+        "timezone": row.timezone,
+        "status": row.status,
+    }
+
+
+@router.delete("/calendar-integrations/{integration_id}", status_code=204)
+async def disconnect(
+    integration_id: str, session: AsyncSession = Session, _: None = Operator
+) -> None:
+    row = await session.get(CalendarIntegration, integration_id, with_for_update=True)
+    if row is None:
+        raise HTTPException(404, "Calendar integration not found")
+    row.status, row.revoked_at = "disconnected", now()
+    await session.commit()
+
+
+@router.post("/callback-scheduling/availability")
+async def availability(
+    body: AvailabilityRequest, session: AsyncSession = Session, _: None = Operator
+) -> dict:
+    version = await session.get(AgentVersion, body.agent_version_id)
+    if version is None:
+        raise HTTPException(404, "Agent version not found")
+    config = AgentConfig.model_validate(version.config).callback_scheduling
+    role = next((r for r in config.roles if r.key == body.role), None)
+    if not config.enabled or role is None or not role.enabled:
+        raise HTTPException(422, "Callback role is not configured")
+    candidates = [p for p in config.bookable_people if p.enabled and body.role in p.roles]
+    slots = []
+    for person in candidates:
+        integration = await session.get(CalendarIntegration, person.calendar_integration_id)
+        if integration is None or integration.status != "connected":
+            continue
+        timezone = person.timezone or integration.timezone
+        try:
+            window = resolve_timeframe(body.timeframe, timezone)
+        except SchedulingError as exc:
+            raise _error(exc) from exc
+        try:
+            busy = await calendar_call(
+                session,
+                integration,
+                "freebusy",
+                start=window.start,
+                end=window.end,
+                timezone=timezone,
+            )
+        except SchedulingError:
+            continue
+        for start, end in generate_slots(
+            window,
+            busy,
+            duration_minutes=body.duration_minutes or config.slot_duration_minutes,
+            minimum_notice_minutes=config.minimum_notice_minutes,
+            limit=3,
+        ):
+            payload = {
+                "person": person.key,
+                "integration": integration.id,
+                "role": body.role,
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "timezone": timezone,
+                "window_start": window.start.isoformat(),
+                "window_end": window.end.isoformat(),
+                "timeframe": body.timeframe,
+                "expires_at": (datetime.now(UTC) + timedelta(minutes=10)).isoformat(),
+                "agent_version_id": body.agent_version_id,
+                "contact_id": body.contact_id,
+            }
+            slots.append(
+                {
+                    "slot_id": sign_slot(payload),
+                    "display": start.strftime("%A at %-I:%M %p"),
+                    "_sort": start,
+                }
+            )
+    slots.sort(key=lambda item: item["_sort"])
+    for item in slots:
+        item.pop("_sort", None)
+    return {
+        "status": "available" if slots else "no_availability",
+        "requested_timeframe": body.timeframe,
+        "slots": slots[:3],
+        "message": None if slots else "No callback slots are available in the requested window.",
+    }
+
+
+@router.post("/callback-scheduling/book")
+async def book(body: BookRequest, session: AsyncSession = Session, _: None = Operator) -> dict:
+    try:
+        payload = verify_slot(body.slot_id)
+    except SchedulingError as exc:
+        raise _error(exc) from exc
+    if (
+        payload.get("agent_version_id") != body.agent_version_id
+        or payload.get("contact_id") != body.contact_id
+    ):
+        raise HTTPException(409, "Callback slot does not belong to this conversation")
+    integration = await session.get(CalendarIntegration, payload["integration"])
+    contact = await session.get(Contact, body.contact_id)
+    if integration is None or integration.status != "connected" or contact is None:
+        raise HTTPException(409, "Calendar or contact is unavailable")
+    start, end = datetime.fromisoformat(payload["start"]), datetime.fromisoformat(payload["end"])
+    busy = await calendar_call(
+        session, integration, "freebusy", start=start, end=end, timezone=payload["timezone"]
+    )
+    if busy:
+        return {
+            "status": "slot_conflict",
+            "message": "That slot was just taken. Please check availability again.",
+        }
+    callback = Callback(
+        id=new_id(),
+        request_key=f"human:{new_id()}",
+        contact_id=body.contact_id,
+        agent_version_id=body.agent_version_id,
+        due_at=start,
+        timezone=payload["timezone"],
+        original_phrase=payload.get("timeframe", "callback"),
+        status="scheduled",
+        callback_mode="human",
+        requested_window_start=datetime.fromisoformat(payload["window_start"]),
+        requested_window_end=datetime.fromisoformat(payload["window_end"]),
+        scheduled_start=start,
+        scheduled_end=end,
+        role_key=payload["role"],
+        bookable_person_key=payload["person"],
+        calendar_integration_id=integration.id,
+        reason=body.reason,
+    )
+    session.add(callback)
+    await session.flush()
+    event = {
+        "summary": f"Callback — {contact.name}",
+        "description": f"Scheduled by Voice AI\nReason: {body.reason}\nContact: {contact.name}\nPhone: {contact.phone_number}\nCallback ID: {callback.id}",
+        "start": {"dateTime": start.isoformat(), "timeZone": payload["timezone"]},
+        "end": {"dateTime": end.isoformat(), "timeZone": payload["timezone"]},
+        "transparency": "opaque",
+        "extendedProperties": {"private": {"voice_ai_callback_id": callback.id}},
+    }
+    try:
+        created = await calendar_call(session, integration, "insert", event=event)
+    except Exception as exc:
+        await session.rollback()
+        raise HTTPException(502, "Google Calendar event could not be created") from exc
+    callback.calendar_event_id = created.get("id")
+    try:
+        await session.commit()
+    except Exception as exc:
+        await session.rollback()
+        if callback.calendar_event_id:
+            try:
+                await calendar_call(
+                    session, integration, "delete", event_id=callback.calendar_event_id
+                )
+            except Exception:
+                integration.last_error = "Calendar event created but callback persistence failed"
+                await session.commit()
+        raise HTTPException(500, "Callback could not be persisted after calendar booking") from exc
+    return {
+        "status": "confirmed",
+        "callback_id": callback.id,
+        "scheduled_time": start.strftime("%A at %-I:%M %p"),
+        "duration_minutes": int((end - start).total_seconds() / 60),
+    }

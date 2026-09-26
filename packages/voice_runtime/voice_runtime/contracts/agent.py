@@ -1,8 +1,9 @@
 """Agent-owned graphs, prompts, exact tool bindings, and runtime settings."""
 
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from .base import ConfigModel, Identifier
 from .cadence import ClassifierConfig, SummarizerConfig
@@ -78,6 +79,48 @@ class LanguageConfig(ConfigModel):
     persist_requested_language: bool = True
 
 
+class CallbackRoleConfig(ConfigModel):
+    key: Identifier
+    label: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    enabled: bool = True
+
+
+class BookablePersonConfig(ConfigModel):
+    key: Identifier
+    name: str = Field(min_length=1)
+    roles: list[Identifier] = Field(min_length=1)
+    calendar_integration_id: Identifier
+    timezone: str = "UTC"
+    enabled: bool = True
+
+    @field_validator("timezone")
+    @classmethod
+    def valid_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError("timezone must be a valid IANA timezone") from exc
+        return value
+
+
+class CallbackSchedulingConfig(ConfigModel):
+    enabled: bool = False
+    slot_duration_minutes: int = Field(default=15, ge=5, le=120)
+    minimum_notice_minutes: int = Field(default=0, ge=0, le=10080)
+    roles: list[CallbackRoleConfig] = Field(default_factory=list)
+    bookable_people: list[BookablePersonConfig] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def valid_roles(self):
+        keys = {role.key for role in self.roles}
+        if len(keys) != len(self.roles):
+            raise ValueError("callback role keys must be unique")
+        if any(role not in keys for person in self.bookable_people for role in person.roles):
+            raise ValueError("bookable person references an unknown callback role")
+        return self
+
+
 class AgentConfig(ConfigModel):
     name: str = Field(min_length=1)
     persona: str = ""
@@ -98,6 +141,7 @@ class AgentConfig(ConfigModel):
     call_limits: CallLimits = Field(default_factory=CallLimits)
     context: ContextConfig = Field(default_factory=ContextConfig)
     classifier: ClassifierConfig = Field(default_factory=ClassifierConfig)
+    callback_scheduling: CallbackSchedulingConfig = Field(default_factory=CallbackSchedulingConfig)
     pipeline_logs: Literal["inherit", "enabled", "disabled"] = "inherit"
 
     @model_validator(mode="after")

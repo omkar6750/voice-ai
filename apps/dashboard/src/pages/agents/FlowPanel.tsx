@@ -3,7 +3,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { ReadOnlyValue, StatusBadge } from "@/components/record-page";
 import { Button } from "@/components/ui/button";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { PromptEditor } from "./PromptEditor";
@@ -56,6 +56,8 @@ export function FlowPanel({
           {
             id,
             prompt: "",
+            role_prompt: null,
+            context_strategy: "append",
             transitions: [],
             tool_bindings: [],
             entry_actions: [],
@@ -175,7 +177,7 @@ export function FlowPanel({
           </Field>
           <PromptEditor
             id={`node-prompt-${node.id}`}
-            label="Node prompt"
+            label="Node instructions"
             value={node.prompt}
             onChange={(prompt) => updateNode({ ...node, prompt })}
             availableTools={node.tool_bindings}
@@ -183,6 +185,53 @@ export function FlowPanel({
             disabled={disabled}
           />
           <Field>
+            <FieldLabel htmlFor="context-strategy">Context strategy</FieldLabel>
+            <NativeSelect
+              id="context-strategy"
+              value={node.context_strategy ?? "append"}
+              onChange={(event) =>
+                updateNode({
+                  ...node,
+                  context_strategy: event.target.value as "append" | "reset",
+                })
+              }
+              disabled={disabled}
+            >
+              <option value="append">Append</option>
+              <option value="reset">Reset</option>
+            </NativeSelect>
+            <FieldDescription>
+              Append keeps the conversation context; Reset replaces task messages when entering this node.
+            </FieldDescription>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="role-override">Override agent role/system instruction</FieldLabel>
+            <NativeSelect
+              id="role-override"
+              value={node.role_prompt ? "true" : "false"}
+              onChange={(event) =>
+                updateNode({
+                  ...node,
+                  role_prompt: event.target.value === "true" ? node.role_prompt || "" : null,
+                })
+              }
+              disabled={disabled}
+            >
+              <option value="false">No — keep the active role instruction</option>
+              <option value="true">Yes — set a node role instruction</option>
+            </NativeSelect>
+          </Field>
+          {node.role_prompt !== null && node.role_prompt !== undefined && (
+            <PromptEditor
+              id={`node-role-prompt-${node.id}`}
+              label="Node role/system instruction"
+              value={node.role_prompt}
+              onChange={(role_prompt) => updateNode({ ...node, role_prompt })}
+              availableTools={node.tool_bindings}
+              registeredTools={registeredTools}
+              disabled={disabled}
+            />
+          )}          <Field>
             <FieldLabel htmlFor="terminal-node">Terminal node</FieldLabel>
             <NativeSelect
               id="terminal-node"

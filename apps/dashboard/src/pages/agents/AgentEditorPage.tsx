@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { useResource } from "@/lib/resources";
 import { AudioPanel } from "./AudioPanel";
+import { CallbackSchedulingPanel } from "./CallbackSchedulingPanel";
 import { ClassifierPanel } from "./ClassifierPanel";
 import { ContextPanel } from "./ContextPanel";
 import { FlowPanel } from "./FlowPanel";
@@ -39,6 +40,7 @@ const sections = [
   "Tools",
   "Knowledge",
   "Logging",
+  "Callback Scheduling",
 ] as const;
 
 
@@ -242,6 +244,9 @@ export function AgentEditorPage() {
                 change={setDraft}
                 disabled={disabled}
               />
+            )}
+            {section === "Callback Scheduling" && (
+              <CallbackSchedulingPanel config={draft} change={setDraft} disabled={disabled} />
             )}
             {section === "Logging" && (
               <section className="flex max-w-2xl flex-col gap-4">

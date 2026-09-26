@@ -32,15 +32,15 @@ def compile_flow(config: AgentConfig, tools: Mapping[str, Any] | None = None) ->
         raise ValueError(f"unresolved tool bindings: {sorted(referenced - resolved.keys())}")
     nodes = {}
     for node in config.flow.nodes:
-        prompt = node.prompt
-        if config.flow.prompt_composition == "global_plus_node":
-            prompt = "\n\n".join(
-                part for part in [config.persona, config.system_prompt, prompt] if part
-            )
+        role_message = node.role_prompt
+        if node.id == config.flow.initial_node and not role_message:
+            role_message = config.system_prompt
+        task_messages = [{"role": "user", "content": node.prompt}] if node.prompt else []
         nodes[node.id] = {
             "name": node.id,
-            "role_message": prompt,
-            "task_messages": [],
+            "role_message": role_message,
+            "task_messages": task_messages,
+            "context_strategy": node.context_strategy,
             "functions": [resolved[key] for key in node.tool_bindings],
             "respond_immediately": node.respond_immediately,
         }

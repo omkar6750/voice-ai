@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_operator
-from voice_api.models import Agent, AgentVersion, AgentVersionTool, ToolVersion
+from voice_api.models import Agent, AgentVersion, AgentVersionTool, CalendarIntegration, ToolVersion
 from voice_api.models.common import new_id
 from voice_api.schemas.agent import (
     ActivateAgentBody,
@@ -19,6 +19,24 @@ from voice_runtime.contracts import AgentConfig
 router = APIRouter(tags=["agents"])
 Session = Depends(get_session)
 Operator = Depends(require_operator)
+
+
+async def validate_callback_calendars(session: AsyncSession, config: AgentConfig) -> None:
+    scheduling = config.callback_scheduling
+    if not scheduling.enabled:
+        return
+    for person in scheduling.bookable_people:
+        integration = await session.get(CalendarIntegration, person.calendar_integration_id)
+        if integration is None:
+            raise HTTPException(
+                422, f"Bookable person '{person.name}' references a missing calendar integration"
+            )
+        if integration.provider != "google_calendar":
+            raise HTTPException(
+                422, f"Bookable person '{person.name}' references an unsupported calendar provider"
+            )
+        if integration.status != "connected":
+            raise HTTPException(422, f"Calendar for '{person.name}' is not connected")
 
 
 async def validate_agent_bindings(session: AsyncSession, version: AgentVersion) -> None:
@@ -49,7 +67,9 @@ async def agents(session: AsyncSession = Session, _: None = Operator) -> dict:
 async def create_agent(
     body: CreateBody, session: AsyncSession = Session, _: None = Operator
 ) -> dict:
-    config = AgentConfig.model_validate(body.config).model_dump(mode="json")
+    config_model = AgentConfig.model_validate(body.config)
+    await validate_callback_calendars(session, config_model)
+    config = config_model.model_dump(mode="json")
     agent = Agent(id=new_id(), name=body.name)
     version = AgentVersion(id=new_id(), agent_id=agent.id, version=1, config=config)
     session.add(agent)
@@ -98,7 +118,9 @@ async def update_agent_version(
         raise HTTPException(409, "Published versions are immutable")
     if row.revision != body.revision:
         raise HTTPException(409, "Draft changed by another operator")
-    row.config = AgentConfig.model_validate(body.config).model_dump(mode="json")
+    config_model = AgentConfig.model_validate(body.config)
+    await validate_callback_calendars(session, config_model)
+    row.config = config_model.model_dump(mode="json")
     row.note = body.note
     row.revision += 1
     await sync_bindings(session, row)
@@ -115,7 +137,8 @@ async def publish_agent(
         raise HTTPException(404, "Agent version not found")
     if row.status != "draft":
         raise HTTPException(409, "Version is already published")
-    AgentConfig.model_validate(row.config)
+    config = AgentConfig.model_validate(row.config)
+    await validate_callback_calendars(session, config)
     if row.revision != body.revision:
         raise HTTPException(409, "Draft changed; reload before publishing")
     await validate_agent_bindings(session, row)

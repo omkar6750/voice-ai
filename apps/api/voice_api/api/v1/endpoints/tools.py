@@ -161,6 +161,32 @@ async def tool_handlers(_: None = Operator) -> dict:
                 "category": "classification",
             },
             {
+                "name": "check_callback_availability",
+                "description": "Find available human callback slots within a caller-requested timeframe and configured role.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "timeframe": {"type": "string"},
+                        "role": {"type": "string"},
+                        "duration_minutes": {"type": "integer"},
+                    },
+                    "required": ["timeframe", "role"],
+                },
+                "runtime_supported": True,
+                "category": "cadence",
+            },
+            {
+                "name": "book_callback",
+                "description": "Book one slot returned by check_callback_availability on the selected employee calendar.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"slot_id": {"type": "string"}, "reason": {"type": "string"}},
+                    "required": ["slot_id", "reason"],
+                },
+                "runtime_supported": True,
+                "category": "cadence",
+            },
+            {
                 "name": "schedule_callback",
                 "description": "Schedule an automated or operator callback based on caller request or spoken phrases like 'call me back tomorrow'.",
                 "parameters": {

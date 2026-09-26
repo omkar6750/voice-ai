@@ -9,6 +9,7 @@ import {
   StatusBadge,
 } from "@/components/record-page";
 import { Button } from "@/components/ui/button";
+import { Pencil, Trash2 } from "lucide-react";
 import {
   Field,
   FieldDescription,
@@ -35,6 +36,8 @@ import {
 } from "@/components/ui/table";
 import { useResource } from "@/lib/resources";
 
+type CalendarIntegration = { id: string; display_name: string; provider: "google_calendar"; calendar_id: string; timezone: string; status: string; connected_at?: string | null; last_error?: string | null };
+
 export type Connection = {
   id: string;
   label: string;
@@ -44,6 +47,7 @@ export type Connection = {
   secret_names: string[];
   updated_at?: string;
   created_at?: string;
+  webhook_url?: string | null;
 };
 
 export function IntegrationsPage() {
@@ -52,12 +56,40 @@ export function IntegrationsPage() {
   const { data, loading, error, reload } = useResource<{
     connections: Connection[];
   }>("/integrations");
+  const calendars = useResource<{ integrations: CalendarIntegration[] }>("/calendar-integrations");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [label, setLabel] = useState("");
   const [phoneId, setPhoneId] = useState("");
   const [wabaId, setWabaId] = useState("");
   const [apiVersion, setApiVersion] = useState("");
+  const [calendarLabel, setCalendarLabel] = useState("My Google Calendar");
+  async function connectCalendar() {
+    try {
+      const result = await api<{ authorization_url: string }>("/calendar-integrations/google/connect", { method: "POST", body: JSON.stringify({ display_name: calendarLabel.trim() || "My Google Calendar", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" }) });
+      window.location.assign(result.authorization_url);
+    } catch (cause) { toast.error(cause instanceof Error ? cause.message : "Could not connect calendar"); }
+  }
+  async function renameCalendar(calendar: CalendarIntegration) {
+    const displayName = window.prompt("Calendar name", calendar.display_name)?.trim();
+    if (!displayName || displayName === calendar.display_name) return;
+    try {
+      await api(`/calendar-integrations/${calendar.id}`, { method: "PATCH", body: JSON.stringify({ display_name: displayName }) });
+      toast.success("Calendar name updated");
+      await calendars.reload();
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "Could not rename calendar integration");
+    }
+  }  async function discardCalendar(id: string) {
+    if (!window.confirm("Discard this Google Calendar integration?")) return;
+    try {
+      await api(`/calendar-integrations/${id}`, { method: "DELETE" });
+      toast.success("Calendar integration discarded");
+      await calendars.reload();
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "Could not discard calendar integration");
+    }
+  }
   async function create(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -167,6 +199,16 @@ export function IntegrationsPage() {
           </Sheet>
         }
       />
+      <section className="mb-8 rounded-lg border p-5">
+        <div className="flex items-end justify-between gap-4">
+          <div><h2 className="font-semibold">Calendar integrations</h2><p className="text-sm text-muted-foreground">Connect employee Google Calendars for human callback scheduling. OAuth tokens stay on the server.</p></div>
+          <div className="flex items-center gap-2"><Input aria-label="New calendar name" value={calendarLabel} onChange={(event) => setCalendarLabel(event.target.value)} placeholder="e.g. Omkar work calendar" /><Button onClick={() => void connectCalendar()}>Connect Google Calendar</Button></div>
+        </div>
+        <div className="mt-4 grid gap-2">
+          {calendars.data?.integrations.map((calendar) => <div key={calendar.id} className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2 text-sm"><div className="flex items-center gap-3"><span>{calendar.display_name} · {calendar.calendar_id}</span><StatusBadge value={calendar.status} /></div><div className="flex items-center gap-1"><Button variant="ghost" size="icon" aria-label={`Rename ${calendar.display_name}`} onClick={() => void renameCalendar(calendar)}><Pencil className="size-4" /></Button><Button variant="ghost" size="icon" aria-label={`Discard ${calendar.display_name}`} onClick={() => void discardCalendar(calendar.id)}><Trash2 className="size-4" /></Button></div></div>)}
+          {calendars.data?.integrations.length === 0 && <p className="text-sm text-muted-foreground">No Google Calendars connected.</p>}
+        </div>
+      </section>
       <LoadState
         loading={loading}
         error={error}

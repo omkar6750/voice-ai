@@ -64,7 +64,7 @@ def test_node_configuration_is_scoped_to_published_bindings(tmp_path):
     host = NativePipelineHost("run-1", tmp_path, object())
     host._snapshot = {
         "system_prompt": "Global",
-        "flow": {"prompt_composition": "node_only"},
+        "flow": {"initial_node": "greeting"},
         "_resolved": {
             "tools": {
                 "change_node": {
@@ -90,10 +90,14 @@ def test_node_configuration_is_scoped_to_published_bindings(tmp_path):
         }
     }
     node = host._node("greeting")
-    assert node["role_message"] == "Say hello"
+    assert node["role_message"] == "Global"
+    assert node["task_messages"] == [{"role": "user", "content": "Say hello"}]
     assert [tool.name for tool in node["functions"]] == ["change_node"]
-    host._snapshot["flow"]["prompt_composition"] = "global_plus_node"
-    assert host._node("greeting")["role_message"] == "Global\n\nSay hello"
+    host._nodes["greeting"]["role_prompt"] = "Node role"
+    host._nodes["greeting"]["context_strategy"] = "reset"
+    overridden = host._node("greeting")
+    assert overridden["role_message"] == "Node role"
+    assert overridden["context_strategy"].strategy.value == "reset"
 
 
 async def test_call_dispatch_leaves_claim_to_executor(monkeypatch):

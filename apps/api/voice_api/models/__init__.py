@@ -11,7 +11,14 @@ from .configuration import (
     WorkspaceSettings,
 )
 from .evidence import Call, Callback, ConversationMessage, Exchange, Run, ToolInvocation, TraceSpan
-from .integrations import IntegrationConnection, IntegrationMedia, IntegrationSecret
+from .integrations import (
+    CalendarIntegration,
+    CalendarIntegrationSecret,
+    CalendarOAuthState,
+    IntegrationConnection,
+    IntegrationMedia,
+    IntegrationSecret,
+)
 from .knowledge import AgentVersionKnowledge, KnowledgeBase, KnowledgeChunk, KnowledgeSource
 from .operations import FlowNodeVisit, ToolInvocationResult
 
@@ -20,6 +27,9 @@ __all__ = [
     "AgentVersion",
     "AgentVersionKnowledge",
     "AgentVersionTool",
+    "CalendarIntegration",
+    "CalendarIntegrationSecret",
+    "CalendarOAuthState",
     "Call",
     "Callback",
     "Classification",

@@ -155,6 +155,8 @@ async def launch(callback_id: str, body: LaunchCallback, session: AsyncSession =
     )
     if callback is None:
         raise HTTPException(404, "Callback not found")
+    if callback.callback_mode != "automatic":
+        raise HTTPException(409, "Human calendar callbacks are not dial-out callbacks")
     if callback.status != "scheduled" or callback.call_id is not None:
         raise HTTPException(409, "Callback already claimed; uncertain attempts never redial")
     now = datetime.now(UTC)

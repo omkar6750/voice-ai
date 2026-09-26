@@ -1,7 +1,6 @@
 import { ReadOnlyValue } from "@/components/record-page";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { NativeSelect } from "@/components/ui/native-select";
 import { PromptEditor } from "./PromptEditor";
 import type { AgentConfig } from "./types";
 
@@ -32,29 +31,6 @@ export function PromptsPanel({
             disabled={disabled}
           />
         </Field>
-        <Field>
-          <FieldLabel htmlFor="composition">Prompt composition</FieldLabel>
-          <NativeSelect
-            id="composition"
-            value={config.flow.prompt_composition}
-            onChange={(event) =>
-              change({
-                ...config,
-                flow: {
-                  ...config.flow,
-                  prompt_composition: event.target
-                    .value as AgentConfig["flow"]["prompt_composition"],
-                },
-              })
-            }
-            disabled={disabled}
-          >
-            <option value="node_only">
-              Node prompt replaces global prompt
-            </option>
-            <option value="global_plus_node">Global plus node prompt</option>
-          </NativeSelect>
-        </Field>
         <PromptEditor
           id="system-prompt"
           label="Global system prompt"
@@ -68,6 +44,7 @@ export function PromptsPanel({
           id="greeting"
           label="Greeting instruction"
           value={config.greeting}
+          placeholder="Example: Introduce yourself warmly and ask whether this is a good time to talk."
           onChange={(greeting) => change({ ...config, greeting })}
           availableTools={boundTools}
           registeredTools={registeredTools}

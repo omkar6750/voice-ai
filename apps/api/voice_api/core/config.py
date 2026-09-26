@@ -17,12 +17,18 @@ class Settings(BaseSettings):
     integration_keys: str | None = None
     integration_active_key: str | None = None
     operator_token: str | None = None
+    public_base_url: str | None = None
     gemini_api_key: str | None = None
     integration_media_dir: str = "data/integration-media"
     whatsapp_access_token: str | None = None
     whatsapp_phone_number_id: str | None = None
     whatsapp_template_name: str | None = "dialtone_followup"
     whatsapp_header_media_id: str | None = None
+    google_calendar_client_id: str | None = None
+    google_calendar_client_secret: str | None = None
+    google_calendar_redirect_uri: str = (
+        "http://localhost:8000/api/v1/calendar-integrations/google/callback"
+    )
 
     model_config = SettingsConfigDict(
         env_prefix="VOICE_",

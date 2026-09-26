@@ -41,6 +41,7 @@ scratch/
 *.ulaw
 *.sqlite
 *.db
+.worktrees/
 
 # Editors
 .DS_Store

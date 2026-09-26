@@ -3,7 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 
-const callPattern = /\b([a-z][a-z0-9_]*)\s*(?=\()/g;
+const toolPattern = /#([a-z][a-z0-9_]*)\b/g;
 
 export function PromptEditor({
   id,
@@ -12,6 +12,7 @@ export function PromptEditor({
   onChange,
   availableTools,
   registeredTools,
+  placeholder,
   disabled = false,
 }: {
   id: string;
@@ -20,19 +21,20 @@ export function PromptEditor({
   onChange: (next: string) => void;
   availableTools: string[];
   registeredTools: string[];
+  placeholder?: string;
   disabled?: boolean;
 }) {
   const mirror = useRef<HTMLPreElement>(null);
-  const references = [...value.matchAll(callPattern)].map((match) => match[1]);
+  const references = [...value.matchAll(toolPattern)].map((match) => match[1]);
   const unresolved = [
     ...new Set(references.filter((name) => !availableTools.includes(name))),
   ];
   const segments: { text: string; tool?: string }[] = [];
   let start = 0;
-  for (const match of value.matchAll(callPattern)) {
+  for (const match of value.matchAll(toolPattern)) {
     segments.push({ text: value.slice(start, match.index) });
-    segments.push({ text: match[1], tool: match[1] });
-    start = match.index + match[1].length;
+    segments.push({ text: match[0], tool: match[1] });
+    start = match.index + match[0].length;
   }
   segments.push({ text: value.slice(start) });
 
@@ -72,31 +74,34 @@ export function PromptEditor({
               mirror.current.scrollTop = event.currentTarget.scrollTop;
           }}
           disabled={disabled}
+          placeholder={placeholder}
           aria-invalid={unresolved.length > 0}
           spellCheck={false}
           className="relative min-h-48 resize-y whitespace-pre-wrap bg-transparent font-mono leading-6 text-transparent caret-foreground selection:bg-primary/20"
         />
       </div>
       <FieldDescription>
-        Tool calls use function syntax such as{" "}
-        <code>change_node(node='closing')</code>. Highlighted names match this
-        agent's bindings.
+        Tool references use the explicit <code>#tool_name</code> format. Only
+        tokens beginning with <code>#</code> are validated against bound tools.
       </FieldDescription>
       {unresolved.length > 0 && (
         <p className="text-xs text-destructive">
-          Unbound tool references: {unresolved.join(", ")}.{" "}
+          Unbound tool references: {unresolved.map((name) => `#${name}`).join(", ")}.{" "}
           {unresolved.some((name) => registeredTools.includes(name))
             ? "Bind published tool versions first."
             : "Check tool registry and spelling."}
         </p>
       )}
       {availableTools.length > 0 && (
+        <div className="flex flex-col gap-1">
+        <span className="text-xs font-medium text-muted-foreground">Bound tools</span>
         <div className="flex flex-wrap gap-1">
           {availableTools.map((name) => (
             <Badge key={name} variant="secondary">
               {name}
             </Badge>
           ))}
+        </div>
         </div>
       )}
     </Field>
@@ -105,6 +110,6 @@ export function PromptEditor({
 
 export function promptToolReferences(value: string) {
   return [
-    ...new Set([...value.matchAll(callPattern)].map((match) => match[1])),
+    ...new Set([...value.matchAll(toolPattern)].map((match) => match[1])),
   ];
 }

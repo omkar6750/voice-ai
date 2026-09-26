@@ -232,3 +232,17 @@ class Callback(Identity, Created, Base):
     status: Mapped[str] = mapped_column(String(30), default="scheduled")
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     call_id: Mapped[str | None] = mapped_column(ForeignKey("calls.id"), index=True)
+    callback_mode: Mapped[str] = mapped_column(
+        String(20), default="automatic", server_default="automatic"
+    )
+    requested_window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    requested_window_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    scheduled_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    scheduled_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    role_key: Mapped[str | None] = mapped_column(String(100))
+    bookable_person_key: Mapped[str | None] = mapped_column(String(120))
+    calendar_integration_id: Mapped[str | None] = mapped_column(
+        ForeignKey("calendar_integrations.id"), index=True
+    )
+    calendar_event_id: Mapped[str | None] = mapped_column(String(255))
+    reason: Mapped[str | None] = mapped_column(Text)

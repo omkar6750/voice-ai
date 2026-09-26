@@ -3,6 +3,8 @@ export type ToolBinding = { tool_id: string; tool_version_id: string };
 export type FlowNode = {
   id: string;
   prompt: string;
+  role_prompt?: string | null;
+  context_strategy?: "append" | "reset";
   transitions: string[];
   tool_bindings: string[];
   entry_actions: string[];
@@ -10,6 +12,18 @@ export type FlowNode = {
   respond_immediately: boolean;
   terminal: boolean;
 };
+export type CallbackRole = { key: string; label: string; description: string; enabled: boolean };
+export type BookablePerson = { key: string; name: string; roles: string[]; calendar_integration_id: string; timezone: string; enabled: boolean };
+export type CallbackSchedulingConfig = { enabled: boolean; slot_duration_minutes: number; minimum_notice_minutes: number; roles: CallbackRole[]; bookable_people: BookablePerson[] };
+export function normalizeCallbackScheduling(value?: (Omit<Partial<CallbackSchedulingConfig>, "roles" | "bookable_people"> & { roles?: Array<Partial<CallbackRole> & { key: string; label: string }>; bookable_people?: Array<Partial<BookablePerson> & { key: string; name: string }> }) | null): CallbackSchedulingConfig {
+  return {
+    enabled: value?.enabled ?? false,
+    slot_duration_minutes: value?.slot_duration_minutes ?? 15,
+    minimum_notice_minutes: value?.minimum_notice_minutes ?? 0,
+    roles: (value?.roles ?? []).map((role) => ({ key: role.key, label: role.label, description: role.description ?? "", enabled: role.enabled ?? true })),
+    bookable_people: (value?.bookable_people ?? []).map((person) => ({ key: person.key, name: person.name, roles: person.roles ?? [], calendar_integration_id: person.calendar_integration_id ?? "", timezone: person.timezone ?? "UTC", enabled: person.enabled ?? true })),
+  };
+}
 export type AgentConfig = {
   name: string;
   persona: string;
@@ -25,7 +39,8 @@ export type AgentConfig = {
   flow: {
     initial_node: string;
     nodes: FlowNode[];
-    prompt_composition: "node_only" | "global_plus_node";
+    /** @deprecated retained for old saved versions. */
+    prompt_composition?: "node_only" | "global_plus_node";
   };
   tool_bindings: Record<string, ToolBinding>;
   background_hooks: string[];
@@ -81,6 +96,13 @@ export type AgentConfig = {
     summarizer: SummarizerConfig;
   };
   classifier: ClassifierConfig;
+  callback_scheduling: {
+    enabled: boolean;
+    slot_duration_minutes: number;
+    minimum_notice_minutes: number;
+    roles: { key: string; label: string; description: string }[];
+    bookable_people: { key: string; name: string; roles: string[]; calendar_integration_id: string; timezone: string; enabled: boolean }[];
+  };
   pipeline_logs: "inherit" | "enabled" | "disabled";
 };
 

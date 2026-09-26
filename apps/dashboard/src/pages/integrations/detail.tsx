@@ -56,13 +56,36 @@ import { MediaPanel } from "./MediaPanel";
 import { SecretsPanel } from "./SecretsPanel";
 import type { Connection } from "./index";
 
+type TemplateComponent = {
+  type: string;
+  text?: string;
+  format?: string;
+};
+
+type Media = {
+  provider_media_id: string;
+  filename: string;
+  mime_type: string;
+  availability: string;
+};
+
 type Template = {
   name: string;
   status?: string;
   language?: string;
   category?: string;
+  components?: TemplateComponent[];
 };
 
+function templateParameterNames(template: Template | null): string[] {
+  const body = template?.components?.find((item) => item.type === "BODY");
+  const matches = [...(body?.text?.matchAll(/\\{\\{(\\d+)\\}\\}/g) ?? [])];
+  const indexes = [...new Set(matches.map((match) => match[1]))];
+  if (indexes.length > 1) {
+    return indexes.map((index) => (index === "1" ? "caller_name" : `param_${index}`));
+  }
+  return indexes.length === 1 ? ["message"] : [];
+}
 const sections = ["Account", "Credentials", "Media", "Templates"] as const;
 
 export function IntegrationDetailPage() {
@@ -100,7 +123,12 @@ export function IntegrationDetailPage() {
   const [toolSheetOpen, setToolSheetOpen] = useState(false);
   const [toolName, setToolName] = useState("");
   const [toolDesc, setToolDesc] = useState("");
+  const [parameterDescriptions, setParameterDescriptions] = useState<Record<string, string>>({});
+  const [headerMediaId, setHeaderMediaId] = useState("");
   const [toolBusy, setToolBusy] = useState(false);
+  const { data: mediaData } = useResource<{ media: Media[] }>(
+    `/integrations/${connectionId}/media`,
+  );
 
   function openEditSheet() {
     if (!connection) return;
@@ -282,10 +310,10 @@ export function IntegrationDetailPage() {
                         />
                         {!connection.enabled &&
                           !connection.secret_names.includes(
-                            "system_user_token",
+                            "access_token",
                           ) && (
                             <span className="text-xs text-amber-500">
-                              (Requires system_user_token credential)
+                              (Requires access_token credential)
                             </span>
                           )}
                       </div>
@@ -313,6 +341,18 @@ export function IntegrationDetailPage() {
                       <Badge variant="outline">
                         {connection.config.api_version}
                       </Badge>
+                    }
+                  />
+                  <ReadOnlyValue
+                    label="Webhook callback URL"
+                    value={
+                      connection.webhook_url ? (
+                        <code className="break-all text-xs">{connection.webhook_url}</code>
+                      ) : (
+                        <span className="text-amber-500">
+                          Set VOICE_PUBLIC_BASE_URL before configuring Meta.
+                        </span>
+                      )
                     }
                   />
                   <ReadOnlyValue
@@ -382,7 +422,7 @@ export function IntegrationDetailPage() {
                             </NativeSelectOption>
                           </NativeSelect>
                           <FieldDescription>
-                            Must have `system_user_token` saved in Credentials
+                            Must have `access_token` saved in Credentials
                             to enable.
                           </FieldDescription>
                         </Field>
@@ -595,7 +635,38 @@ export function IntegrationDetailPage() {
                             className="bg-muted"
                           />
                         </Field>
+                        <Field>
+                          <FieldLabel htmlFor="header-media">Header image</FieldLabel>
+                          <NativeSelect id="header-media" value={headerMediaId} onChange={(e) => setHeaderMediaId(e.target.value)}>
+                            <NativeSelectOption value="">No image</NativeSelectOption>
+                            {mediaData?.media.filter((item) => item.availability === "available").map((item) => (
+                              <NativeSelectOption key={item.provider_media_id} value={item.provider_media_id}>
+                                {item.filename} ({item.mime_type})
+                              </NativeSelectOption>
+                            ))}
+                          </NativeSelect>
+                          <FieldDescription>
+                            Required for templates with an image header. The selected media ID is pinned to this tool version.
+                          </FieldDescription>
+                        </Field>
 
+                        {templateParameterNames(selectedTemplate).map((name) => (
+                          <Field key={name}>
+                            <FieldLabel htmlFor={`parameter-${name}`}>
+                              {name} description
+                            </FieldLabel>
+                            <Textarea
+                              id={`parameter-${name}`}
+                              value={parameterDescriptions[name] ?? ""}
+                              onChange={(e) => setParameterDescriptions((current) => ({ ...current, [name]: e.target.value }))}
+                              rows={2}
+                              required
+                            />
+                            <FieldDescription>
+                              Helps the agent provide the correct value for this template variable.
+                            </FieldDescription>
+                          </Field>
+                        ))}
                         <Field>
                           <FieldLabel htmlFor="tool-name">Tool Name</FieldLabel>
                           <Input

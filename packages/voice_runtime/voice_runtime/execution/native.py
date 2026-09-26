@@ -18,7 +18,7 @@ import httpx
 from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.flows import FlowManager, NodeConfig
+from pipecat.flows import ContextStrategy, ContextStrategyConfig, FlowManager, NodeConfig
 from pipecat.flows.types import FlowsFunctionSchema
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -285,6 +285,12 @@ class TracedFlowManager(FlowManager):
             async def result_callback(result, *, properties=None):
                 nonlocal final_result, final_sent
                 is_final = properties is None or properties.is_final
+                connection_id = None
+                provider_message_id = None
+                if isinstance(result, dict):
+                    result = dict(result)
+                    connection_id = result.pop("_connection_id", None)
+                    provider_message_id = result.pop("_provider_message_id", None)
                 self.tracker.tool_result(invocation_id, result, is_final=is_final)
                 if (
                     name == "change_node"
@@ -302,6 +308,8 @@ class TracedFlowManager(FlowManager):
                         if isinstance(result, dict) and result.get("status") == "error"
                         else "completed",
                         result,
+                        connection_id=connection_id,
+                        provider_message_id=provider_message_id,
                     )
 
             try:
@@ -332,9 +340,25 @@ class NativePipelineHost:
     def _node(self, key: str) -> NodeConfig:
         node = self._nodes[key]
         flow = self._snapshot["flow"]
-        prompt = node["prompt"]
-        if flow["prompt_composition"] == "global_plus_node":
-            prompt = self._snapshot["system_prompt"] + "\n\n" + prompt
+        role_message = node.get("role_prompt")
+        if key == flow.get("initial_node") and not role_message:
+            role_message = self._snapshot.get("system_prompt", "")
+        if "initial_node" not in flow and not role_message:
+            # Compatibility for pre-Pipecat snapshots used by older evidence tests.
+            role_message = node.get("prompt", "")
+        task_messages = []
+        if node.get("prompt"):
+            task_messages.append({"role": "user", "content": node["prompt"]})
+        if node.get("terminal"):
+            task_messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Deliver the terminal response now. Do not restart the conversation, "
+                        "greet the caller, ask discovery questions, or continue the flow."
+                    ),
+                }
+            )
         bindings = self._snapshot["_resolved"]["tools"]
         functions = []
         for name in node["tool_bindings"]:
@@ -351,11 +375,78 @@ class NativePipelineHost:
             )
         return NodeConfig(
             name=key,
-            role_message=prompt,
-            task_messages=[],
+            role_message=role_message or "",
+            task_messages=task_messages,
             functions=functions,
             respond_immediately=node["respond_immediately"],
+            context_strategy=ContextStrategyConfig(
+                strategy=ContextStrategy(node.get("context_strategy", "append"))
+            ),
         )
+
+    async def _whatsapp_runtime_config(self) -> tuple[str, str, str | None, str, str | None]:
+        """Return token, phone number, matching DB connection, and API version."""
+        access_token = getattr(self.settings, "whatsapp_access_token", None) or os.getenv(
+            "VOICE_WHATSAPP_ACCESS_TOKEN", ""
+        )
+        phone_number_id = getattr(self.settings, "whatsapp_phone_number_id", None) or os.getenv(
+            "VOICE_WHATSAPP_PHONE_NUMBER_ID", ""
+        )
+        connection_id = None
+        api_version = "v21.0"
+        header_media_id = None
+        if phone_number_id:
+            try:
+                from sqlalchemy import select
+                from voice_api.db.session import SessionFactory
+                from voice_api.models import (
+                    IntegrationConnection,
+                    IntegrationMedia,
+                    IntegrationSecret,
+                )
+                from voice_api.services.vault_service import CredentialVault
+
+                async with SessionFactory() as session:
+                    rows = (
+                        await session.scalars(
+                            select(IntegrationConnection).where(
+                                IntegrationConnection.provider == "whatsapp",
+                                IntegrationConnection.enabled.is_(True),
+                            )
+                        )
+                    ).all()
+                    for row in rows:
+                        if str(row.config.get("phone_number_id", "")) == str(phone_number_id):
+                            connection_id = str(row.id)
+                            api_version = str(row.config.get("api_version") or api_version)
+                            latest_media = await session.scalar(
+                                select(IntegrationMedia)
+                                .where(IntegrationMedia.connection_id == row.id)
+                                .order_by(IntegrationMedia.uploaded_at.desc())
+                            )
+                            header_media_id = (
+                                latest_media.provider_media_id if latest_media else None
+                            )
+                            if not access_token:
+                                secret = await session.scalar(
+                                    select(IntegrationSecret).where(
+                                        IntegrationSecret.connection_id == row.id,
+                                        IntegrationSecret.name == "access_token",
+                                    )
+                                )
+                                if secret is not None:
+                                    try:
+                                        access_token = CredentialVault.from_env().decrypt(
+                                            secret.ciphertext, secret.key_id
+                                        )
+                                    except Exception as exc:
+                                        logger.warning(
+                                            "Could not decrypt stored WhatsApp token: {}", exc
+                                        )
+                            break
+            except Exception as exc:
+                logger.warning("Could not resolve WhatsApp integration metadata: {}", exc)
+        return access_token, phone_number_id, connection_id, api_version, header_media_id
 
     def _handler(self, name: str):
         async def handle(args: dict, _manager: FlowManager):
@@ -424,12 +515,13 @@ class NativePipelineHost:
                 if not text:
                     return {"status": "error", "error": "Message text cannot be empty"}
 
-                access_token = getattr(self.settings, "whatsapp_access_token", None) or os.getenv(
-                    "VOICE_WHATSAPP_ACCESS_TOKEN", ""
-                )
-                phone_number_id = getattr(
-                    self.settings, "whatsapp_phone_number_id", None
-                ) or os.getenv("VOICE_WHATSAPP_PHONE_NUMBER_ID", "")
+                (
+                    access_token,
+                    phone_number_id,
+                    connection_id,
+                    api_version,
+                    _db_header_media_id,
+                ) = await self._whatsapp_runtime_config()
                 if not access_token or not phone_number_id:
                     logger.warning(
                         "WhatsApp credentials not configured on runtime; failing tool cleanly"
@@ -450,7 +542,7 @@ class NativePipelineHost:
                     logger.info("WHATSAPP sending direct message to {}", recipient)
                     async with httpx.AsyncClient(timeout=10) as client:
                         resp = await client.post(
-                            f"https://graph.facebook.com/v21.0/{phone_number_id}/messages",
+                            f"https://graph.facebook.com/{api_version}/{phone_number_id}/messages",
                             json=payload,
                             headers={"Authorization": f"Bearer {access_token}"},
                         )
@@ -465,7 +557,12 @@ class NativePipelineHost:
                         data = resp.json()
                         msg_id = (data.get("messages") or [{}])[0].get("id", "unknown")
                         logger.info("WhatsApp direct message sent successfully: msg_id={}", msg_id)
-                        return {"status": "ok", "message_id": msg_id}
+                        return {
+                            "status": "ok",
+                            "message_id": msg_id,
+                            "_connection_id": connection_id,
+                            "_provider_message_id": msg_id,
+                        }
                 except Exception as exc:
                     logger.error("WhatsApp direct message exception: {}", exc)
                     return {"status": "error", "error": f"WhatsApp request failed: {exc}"}
@@ -473,12 +570,13 @@ class NativePipelineHost:
             if name in ("send_whatsapp_template", "send_followup") or name.startswith(
                 "whatsapp_template_"
             ):
-                access_token = getattr(self.settings, "whatsapp_access_token", None) or os.getenv(
-                    "VOICE_WHATSAPP_ACCESS_TOKEN", ""
-                )
-                phone_number_id = getattr(
-                    self.settings, "whatsapp_phone_number_id", None
-                ) or os.getenv("VOICE_WHATSAPP_PHONE_NUMBER_ID", "")
+                (
+                    access_token,
+                    phone_number_id,
+                    connection_id,
+                    api_version,
+                    db_header_media_id,
+                ) = await self._whatsapp_runtime_config()
                 if not access_token or not phone_number_id:
                     logger.warning(
                         "WhatsApp credentials not configured on runtime; failing tool cleanly"
@@ -515,9 +613,18 @@ class NativePipelineHost:
                         or getattr(self.settings, "whatsapp_template_name", None)
                         or os.getenv("VOICE_WHATSAPP_TEMPLATE_NAME", "dialtone_followup")
                     )
-                header_media_id = getattr(
-                    self.settings, "whatsapp_header_media_id", None
-                ) or os.getenv("VOICE_WHATSAPP_HEADER_MEDIA_ID", "")
+                tool_definition = (
+                    self._snapshot.get("_resolved", {})
+                    .get("tools", {})
+                    .get(name, {})
+                    .get("definition", {})
+                )
+                configured_media_id = tool_definition.get("header_media_id")
+                header_media_id = configured_media_id or (
+                    getattr(self.settings, "whatsapp_header_media_id", None)
+                    or os.getenv("VOICE_WHATSAPP_HEADER_MEDIA_ID", "")
+                    or db_header_media_id
+                )
 
                 summary = f"Thank you for speaking with Northstar Software Studio, {caller_name}! We have prepared your custom development overview and pricing catalog."
                 if name == "send_followup" and args.get("message"):
@@ -569,7 +676,7 @@ class NativePipelineHost:
                     logger.info("WHATSAPP sending template '{}' to {}", template_name, recipient)
                     async with httpx.AsyncClient(timeout=10) as client:
                         resp = await client.post(
-                            f"https://graph.facebook.com/v21.0/{phone_number_id}/messages",
+                            f"https://graph.facebook.com/{api_version}/{phone_number_id}/messages",
                             json=payload,
                             headers={"Authorization": f"Bearer {access_token}"},
                         )
@@ -584,7 +691,12 @@ class NativePipelineHost:
                         data = resp.json()
                         msg_id = (data.get("messages") or [{}])[0].get("id", "unknown")
                         logger.info("WhatsApp template sent successfully: msg_id={}", msg_id)
-                        return {"status": "ok", "message_id": msg_id}
+                        return {
+                            "status": "ok",
+                            "message_id": msg_id,
+                            "_connection_id": connection_id,
+                            "_provider_message_id": msg_id,
+                        }
                 except Exception as exc:
                     logger.error("WhatsApp dispatch exception: {}", exc)
                     return {"status": "error", "error": f"WhatsApp request failed: {exc}"}
@@ -634,6 +746,46 @@ class NativePipelineHost:
                 logger.info("LLM CLASSIFY RESULT: {}", res)
                 return trim_classifier_result(res)
 
+            if name in ("check_callback_availability", "book_callback"):
+                endpoint = (
+                    "http://localhost:8000/api/v1/callback-scheduling/availability"
+                    if name == "check_callback_availability"
+                    else "http://localhost:8000/api/v1/callback-scheduling/book"
+                )
+                contact = (
+                    self._snapshot.get("_resolved", {}).get("contact")
+                    or self._snapshot.get("contact_snapshot")
+                    or {}
+                )
+                payload = {
+                    "agent_version_id": self._snapshot.get("agent_version_id"),
+                    "contact_id": contact.get("id") or self._snapshot.get("contact_id"),
+                }
+                if name == "check_callback_availability":
+                    payload.update(
+                        {"timeframe": args.get("timeframe", ""), "role": args.get("role", "")}
+                    )
+                    if args.get("duration_minutes") is not None:
+                        payload["duration_minutes"] = args["duration_minutes"]
+                else:
+                    payload.update(
+                        {
+                            "slot_id": args.get("slot_id", ""),
+                            "reason": args.get("reason", "Customer requested callback"),
+                        }
+                    )
+                token = getattr(self.settings, "operator_token", None) or os.getenv(
+                    "VOICE_OPERATOR_TOKEN", ""
+                )
+                try:
+                    async with httpx.AsyncClient(timeout=20) as client:
+                        response = await client.post(
+                            endpoint, json=payload, headers={"Authorization": f"Bearer {token}"}
+                        )
+                    return response.json()
+                except Exception as exc:
+                    logger.error("human callback tool failed: {}", exc)
+                    return {"status": "error", "error": "Callback scheduling service unavailable"}
             if name == "schedule_callback":
                 raw_time = (
                     args.get("time")
