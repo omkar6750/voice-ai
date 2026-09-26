@@ -29,6 +29,15 @@ import { isActive, stamp } from "./model";
 import { StatusBadge } from "./status";
 import type { RunSummary } from "./types";
 
+function formatProvider(provider?: string) {
+  if (!provider) return "SIM7600";
+  const lower = provider.toLowerCase();
+  if (lower === "dashboard" || lower === "browser") return "Dashboard";
+  if (lower === "twilio" || lower === "twilio_voice") return "Twilio";
+  if (lower === "sim7600") return "SIM7600";
+  return provider;
+}
+
 export function RunsPage() {
   const api = useApi();
   const [runs, setRuns] = useState<RunSummary[]>([]);
@@ -164,7 +173,7 @@ export function RunsPage() {
               <TableRow>
                 <TableHead>Run</TableHead>
                 <TableHead>Contact</TableHead>
-                <TableHead>Channel</TableHead>
+                <TableHead>Provider</TableHead>
                 <TableHead>Started</TableHead>
                 <TableHead>State</TableHead>
               </TableRow>
@@ -192,7 +201,11 @@ export function RunsPage() {
                       )}
                     </div>
                   </TableCell>
-                  <TableCell className="capitalize">{run.channel}</TableCell>
+                  <TableCell>
+                    <span className="inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium">
+                      {formatProvider(run.transport_provider ?? run.channel)}
+                    </span>
+                  </TableCell>
                   <TableCell className="whitespace-nowrap text-muted-foreground">
                     {stamp(run.started_at ?? run.created_at)}
                   </TableCell>

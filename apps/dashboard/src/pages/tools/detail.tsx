@@ -23,8 +23,8 @@ type ToolVersion = {
     kind: string;
     handler?: string | null;
     http?: { url: string; method: string } | null;
-    parameters: Record<string, unknown>;
-    wait: { mode: string; acknowledgement?: string | null };
+    parameters?: Record<string, unknown> | null;
+    wait?: { mode: string; acknowledgement?: string | null } | null;
   };
 };
 
@@ -94,14 +94,24 @@ export function ToolDetailPage() {
               />
               <ReadOnlyValue
                 label="Wait mode"
-                value={version.config.wait.mode}
+                value={version.config.wait?.mode || "inline"}
               />
+              {version.config.wait?.acknowledgement && (
+                <ReadOnlyValue
+                  label="Wait acknowledgement"
+                  value={version.config.wait.acknowledgement}
+                />
+              )}
               <ReadOnlyValue
                 label="Input schema"
                 value={
-                  <code className="break-all text-xs">
-                    {JSON.stringify(version.config.parameters)}
-                  </code>
+                  version.config.parameters ? (
+                    <code className="break-all text-xs">
+                      {JSON.stringify(version.config.parameters)}
+                    </code>
+                  ) : (
+                    "None"
+                  )
                 }
               />
               <div className="flex gap-2">

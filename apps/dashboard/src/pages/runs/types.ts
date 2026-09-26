@@ -1,6 +1,7 @@
 export type RunSummary = {
   id: string;
   channel: "phone" | "browser";
+  transport_provider?: string;
   agent_version_id: string;
   contact_id: string | null;
   contact_name?: string | null;

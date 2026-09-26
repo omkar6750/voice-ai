@@ -87,8 +87,52 @@ export function AgentEditorPage() {
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
+  const boundKeys = Object.keys(draft?.tool_bindings ?? {});
+  const unboundToolReferences: string[] = [];
+  if (draft) {
+    draft.background_hooks?.forEach((h) => {
+      if (!boundKeys.includes(h) && !unboundToolReferences.includes(h)) unboundToolReferences.push(h);
+    });
+    draft.flow?.nodes?.forEach((node) => {
+      node.tool_bindings?.forEach((t) => {
+        if (!boundKeys.includes(t) && !unboundToolReferences.includes(t)) unboundToolReferences.push(t);
+      });
+      node.entry_actions?.forEach((t) => {
+        if (!boundKeys.includes(t) && !unboundToolReferences.includes(t)) unboundToolReferences.push(t);
+      });
+      node.exit_actions?.forEach((t) => {
+        if (!boundKeys.includes(t) && !unboundToolReferences.includes(t)) unboundToolReferences.push(t);
+      });
+    });
+  }
+
+  function cleanUnboundReferences() {
+    if (!draft) return;
+    const bound = Object.keys(draft.tool_bindings);
+    setDraft({
+      ...draft,
+      background_hooks: (draft.background_hooks ?? []).filter((h) => bound.includes(h)),
+      flow: {
+        ...draft.flow,
+        nodes: draft.flow.nodes.map((n) => ({
+          ...n,
+          tool_bindings: n.tool_bindings.filter((t) => bound.includes(t)),
+          entry_actions: n.entry_actions.filter((t) => bound.includes(t)),
+          exit_actions: n.exit_actions.filter((t) => bound.includes(t)),
+        })),
+      },
+    });
+    toast.success("Removed unbound tool references from flow nodes");
+  }
+
   async function save() {
     if (!stored || !draft || stored.status !== "draft") return;
+    if (unboundToolReferences.length > 0) {
+      toast.error(
+        `Cannot save draft: flow references unbound tools [${unboundToolReferences.join(", ")}]. Remove them or bind them in Tools first.`
+      );
+      return;
+    }
     setBusy(true);
     try {
       await api(`/agent-versions/${stored.id}`, {
@@ -167,6 +211,26 @@ export function AgentEditorPage() {
                 Provider catalog unavailable: {providers.error}. Stored values
                 remain visible.
               </p>
+            )}
+            {unboundToolReferences.length > 0 && !disabled && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm">
+                <div>
+                  <strong className="text-destructive">Unbound tool references detected:</strong>{" "}
+                  <span className="font-mono text-xs">{unboundToolReferences.join(", ")}</span>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    These tools are assigned to flow nodes or hooks but not bound under Tools. Saving will fail until resolved.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={cleanUnboundReferences}
+                  className="border-destructive/40 text-destructive hover:bg-destructive/20"
+                >
+                  Clean unbound references
+                </Button>
+              </div>
             )}
             <nav
               aria-label="Version configuration"

@@ -10,7 +10,16 @@ from .configuration import (
     ToolVersion,
     WorkspaceSettings,
 )
-from .evidence import Call, Callback, ConversationMessage, Exchange, Run, ToolInvocation, TraceSpan
+from .evidence import (
+    BrowserSession,
+    Call,
+    Callback,
+    ConversationMessage,
+    Exchange,
+    Run,
+    ToolInvocation,
+    TraceSpan,
+)
 from .integrations import (
     CalendarIntegration,
     CalendarIntegrationSecret,
@@ -28,6 +37,7 @@ __all__ = [
     "AgentVersion",
     "AgentVersionKnowledge",
     "AgentVersionTool",
+    "BrowserSession",
     "CalendarIntegration",
     "CalendarIntegrationSecret",
     "CalendarOAuthState",

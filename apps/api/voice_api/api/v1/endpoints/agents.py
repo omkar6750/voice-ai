@@ -65,11 +65,24 @@ async def validate_agent_bindings(session: AsyncSession, version: AgentVersion) 
 @router.get("/agents")
 async def agents(session: AsyncSession = Session, _: None = Operator) -> dict:
     rows = (await session.scalars(select(Agent).order_by(Agent.name))).all()
-    return {
-        "agents": [
-            {"id": x.id, "name": x.name, "active_version_id": x.active_version_id} for x in rows
-        ]
-    }
+    results = []
+    for x in rows:
+        latest = await session.scalar(
+            select(AgentVersion)
+            .where(AgentVersion.agent_id == x.id)
+            .order_by(AgentVersion.version.desc())
+        )
+        results.append(
+            {
+                "id": x.id,
+                "name": x.name,
+                "active_version_id": x.active_version_id,
+                "published_version_id": x.active_version_id,
+                "latest_version_id": latest.id if latest else None,
+                "latest_version_status": latest.status if latest else None,
+            }
+        )
+    return {"agents": results}
 
 
 @router.post("/agents", status_code=201)

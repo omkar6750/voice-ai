@@ -1,6 +1,7 @@
 from voice_api.api.v1.endpoints.agents import router as agents_router
 from voice_api.api.v1.endpoints.analysis import router as analysis_router
 from voice_api.api.v1.endpoints.artifacts import router as artifacts_router
+from voice_api.api.v1.endpoints.browser_sessions import router as browser_sessions_router
 from voice_api.api.v1.endpoints.callbacks import router as callbacks_router
 from voice_api.api.v1.endpoints.calls import router as calls_router
 from voice_api.api.v1.endpoints.contacts import router as contacts_router
@@ -19,6 +20,7 @@ __all__ = [
     "agents_router",
     "analysis_router",
     "artifacts_router",
+    "browser_sessions_router",
     "callbacks_router",
     "calls_router",
     "contacts_router",

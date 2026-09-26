@@ -88,6 +88,8 @@ async def queue_call(
     config, digest = await resolve(session, version, logging_override)
     run = Run(
         id=new_id(),
+        channel="phone",
+        transport_provider=provider,
         status="queued",
         agent_version_id=version.id,
         endpoint_id=resolved_endpoint_id,

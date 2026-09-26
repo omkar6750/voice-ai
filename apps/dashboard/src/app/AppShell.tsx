@@ -5,6 +5,7 @@ import {
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { AppRoutes } from "./AppRoutes";
 import { QuickDial } from "./QuickDial";
+import { TestAgentModal } from "./TestAgentModal";
 import {
   Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList,
   BreadcrumbPage, BreadcrumbSeparator,
@@ -97,7 +98,10 @@ export function AppShell({ disconnect }: { disconnect: () => void }) {
         <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
           <SidebarTrigger />
           <LocationTrail />
-          <div className="ml-auto"><QuickDial /></div>
+          <div className="ml-auto flex items-center gap-2">
+            <TestAgentModal />
+            <QuickDial />
+          </div>
         </header>
         <main className="min-w-0 flex-1"><AppRoutes /></main>
       </SidebarInset>

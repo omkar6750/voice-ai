@@ -68,11 +68,26 @@ async def request_browser_run(
 @router.get("/runs")
 async def list_runs(session: AsyncSession = Session, _: None = Operator) -> dict:
     rows = (await session.scalars(select(Run).order_by(Run.created_at.desc()))).all()
+    run_ids = [r.id for r in rows]
+    calls = (
+        (await session.scalars(select(Call).where(Call.run_id.in_(run_ids)))).all()
+        if run_ids
+        else []
+    )
+    call_provider_by_run = {
+        c.run_id: c.provider
+        for c in calls
+        if hasattr(c, "run_id") and c.run_id and hasattr(c, "provider")
+    }
+
     return {
         "runs": [
             {
                 "id": r.id,
                 "channel": r.channel,
+                "transport_provider": r.transport_provider
+                or call_provider_by_run.get(r.id)
+                or ("dashboard" if r.channel == "browser" else "sim7600"),
                 "agent_version_id": r.agent_version_id,
                 "contact_id": r.contact_id,
                 "contact_name": r.contact_snapshot.get("name") if r.contact_snapshot else None,
@@ -97,6 +112,8 @@ async def get_run(run_id: str, session: AsyncSession = Session, _: None = Operat
     return {
         "id": run.id,
         "channel": run.channel,
+        "transport_provider": run.transport_provider
+        or (call.provider if call else ("dashboard" if run.channel == "browser" else "sim7600")),
         "agent_version_id": run.agent_version_id,
         "contact_id": run.contact_id,
         "endpoint_id": run.endpoint_id,

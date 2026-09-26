@@ -5,6 +5,7 @@ from voice_api.models import (  # noqa: F401
     AgentVersion,
     AgentVersionKnowledge,
     AgentVersionTool,
+    BrowserSession,
     Call,
     Callback,
     Classification,

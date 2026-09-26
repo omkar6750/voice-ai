@@ -5,6 +5,12 @@ from voice_api.schemas.agent import (
     ExpectedRevision,
     RevisionBody,
 )
+from voice_api.schemas.browser_session import (
+    BrowserSessionResponse,
+    CreateBrowserSessionRequest,
+    WebRTCOfferRequest,
+    WebRTCPatchRequest,
+)
 from voice_api.schemas.call import StartCallBody
 from voice_api.schemas.contact import ContactBody
 from voice_api.schemas.execution import Claim, EndpointBody, EndpointConfig, Progress
@@ -20,10 +26,12 @@ __all__ = [
     "ActivateAgentBody",
     "BaseCreate",
     "BindToolBody",
+    "BrowserSessionResponse",
     "Claim",
     "ConnectionBody",
     "ContactBody",
     "CreateBody",
+    "CreateBrowserSessionRequest",
     "EndpointBody",
     "EndpointConfig",
     "ExpectedRevision",
@@ -35,5 +43,7 @@ __all__ = [
     "SecretBody",
     "SourceCreate",
     "StartCallBody",
+    "WebRTCOfferRequest",
+    "WebRTCPatchRequest",
     "WhatsAppConfig",
 ]

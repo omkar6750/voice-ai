@@ -3,6 +3,7 @@ from voice_api.api.v1.endpoints import (
     agents_router,
     analysis_router,
     artifacts_router,
+    browser_sessions_router,
     callbacks_router,
     calls_router,
     contacts_router,
@@ -40,3 +41,4 @@ api_router.include_router(knowledge_router)
 api_router.include_router(integrations_router)
 api_router.include_router(calendar_router)
 api_router.include_router(telephony_router)
+api_router.include_router(browser_sessions_router)

@@ -369,7 +369,6 @@ export function FlowPanel({
         <div>
           <h3 className="mb-2 text-sm font-semibold">
             Tools available in this node
-
           </h3>
           <div className="flex flex-wrap gap-2">
             {boundTools.length ? (
@@ -394,6 +393,30 @@ export function FlowPanel({
               </p>
             )}
           </div>
+          {node.tool_bindings.some((name) => !boundTools.includes(name)) && (
+            <div className="mt-3 flex flex-col gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 p-3">
+              <span className="text-xs font-medium text-destructive">
+                Unbound tool bindings on this node (click to remove):
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {node.tool_bindings
+                  .filter((name) => !boundTools.includes(name))
+                  .map((name) => (
+                    <Button
+                      key={name}
+                      type="button"
+                      size="sm"
+                      variant="destructive"
+                      disabled={disabled}
+                      onClick={() => toggleIn("tool_bindings", name)}
+                      title={`Click to remove unbound tool ${name}`}
+                    >
+                      ✕ {name} (Unbound)
+                    </Button>
+                  ))}
+              </div>
+            </div>
+          )}
         </div>
         <div>
           <ReadOnlyValue

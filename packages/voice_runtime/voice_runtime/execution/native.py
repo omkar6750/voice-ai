@@ -883,6 +883,99 @@ class NativePipelineHost:
                     logger.error("schedule_callback failed to persist: {}", exc)
                     return {"status": "error", "error": f"Failed to persist callback: {exc}"}
 
+            if (
+                name == "query_knowledge_base"
+                or name.startswith("query_knowledge_base_")
+                or name.startswith("query_kb_")
+                or ("knowledge" in name and "query" in name)
+            ):
+                query_text = (
+                    args.get("query")
+                    or args.get("question")
+                    or args.get("search")
+                    or args.get("topic")
+                    or ""
+                ).strip()
+                if not query_text:
+                    return {"status": "error", "error": "Missing search query parameter"}
+
+                kb_ids = []
+                assigned_kbs = self._snapshot.get("_resolved", {}).get("knowledge") or []
+                for k in assigned_kbs:
+                    if k.get("id"):
+                        kb_ids.append(k["id"])
+                if not kb_ids and self._snapshot.get("knowledge_base_ids"):
+                    kb_ids = list(self._snapshot["knowledge_base_ids"])
+
+                if not kb_ids:
+                    try:
+                        from sqlalchemy import select
+                        from voice_api.db.session import SessionFactory
+                        from voice_api.models import KnowledgeBase
+
+                        async with SessionFactory() as db_session:
+                            all_rows = (await db_session.scalars(select(KnowledgeBase.id))).all()
+                            kb_ids = list(all_rows)
+                    except Exception as exc:
+                        logger.warning("Failed to look up knowledge bases in DB: {}", exc)
+
+                if not kb_ids:
+                    return {
+                        "status": "not_found",
+                        "hits": [],
+                        "context": "No knowledge bases are linked to this agent.",
+                    }
+
+                all_hits = []
+                try:
+                    from voice_api.db.session import SessionFactory
+                    from voice_api.knowledge.embeddings import GeminiEmbedder
+                    from voice_api.services.knowledge_service import search
+
+                    from voice_runtime.contracts.knowledge import RetrievalConfig
+
+                    gemini_key = getattr(self.settings, "gemini_api_key", None) or os.getenv(
+                        "GEMINI_API_KEY", ""
+                    )
+                    retrieval_cfg = RetrievalConfig.model_validate(
+                        self._snapshot.get("retrieval", {})
+                    )
+
+                    async with SessionFactory() as db_session, httpx.AsyncClient() as http_client:
+                        embedder = GeminiEmbedder(gemini_key, http_client) if gemini_key else None
+                        for kb_id in kb_ids:
+                            hits = await search(db_session, kb_id, query_text, retrieval_cfg, embedder)
+                            all_hits.extend(hits)
+                except Exception as exc:
+                    logger.error("RAG search failed for query '{}': {}", query_text, exc)
+                    return {"status": "error", "error": f"Knowledge search failed: {exc}"}
+
+                all_hits.sort(key=lambda h: h.score, reverse=True)
+                top_hits = all_hits[:5]
+                if not top_hits:
+                    return {
+                        "status": "not_found",
+                        "hits": [],
+                        "context": "No relevant information found in knowledge base.",
+                    }
+
+                context_excerpts = "\n\n".join(
+                    f"[{h.title}]\n{h.content}" for h in top_hits[:3]
+                )
+                return {
+                    "status": "ok",
+                    "hits_count": len(top_hits),
+                    "context": context_excerpts,
+                    "results": [
+                        {
+                            "title": h.title,
+                            "content": h.content,
+                            "score": round(h.score, 4),
+                        }
+                        for h in top_hits
+                    ],
+                }
+
             return {"status": "error", "error": "Tool adapter is not connected to live runtime"}
 
         return handle

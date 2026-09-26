@@ -187,6 +187,22 @@ async def tool_handlers(_: None = Operator) -> dict:
                 "runtime_supported": True,
                 "category": "cadence",
             },
+            {
+                "name": "query_knowledge_base",
+                "description": "Search the agent's attached knowledge base(s) using hybrid RAG vector search to retrieve accurate information about company offerings, technical specifications, and pricing.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Natural language search query or customer question to retrieve relevant knowledge excerpts for",
+                        },
+                    },
+                    "required": ["query"],
+                },
+                "runtime_supported": True,
+                "category": "knowledge",
+            },
         ],
         "http_policy": {
             "allowed_methods": ["GET", "POST", "PUT", "PATCH", "DELETE"],
@@ -230,18 +246,21 @@ async def tool_versions(tool_id: str, session: AsyncSession = Session, _: None =
             select(ToolVersion).where(ToolVersion.tool_id == tool_id).order_by(ToolVersion.version)
         )
     ).all()
-    return {
-        "versions": [
+    versions = []
+    for row in rows:
+        cfg = dict(row.config or {})
+        if "wait" not in cfg or not cfg["wait"]:
+            cfg["wait"] = {"mode": "inline"}
+        versions.append(
             {
                 "id": row.id,
                 "version": row.version,
                 "revision": row.revision,
                 "status": row.status,
-                "config": row.config,
+                "config": cfg,
             }
-            for row in rows
-        ]
-    }
+        )
+    return {"versions": versions}
 
 
 @router.patch("/tool-versions/{version_id}")

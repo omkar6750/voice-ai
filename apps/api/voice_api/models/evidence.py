@@ -36,6 +36,7 @@ class Run(Identity, Created, Base):
     snapshot_schema_version: Mapped[int | None]
     final_state: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True))
     channel: Mapped[str] = mapped_column(String(20), default="phone", server_default="phone")
+    transport_provider: Mapped[str | None] = mapped_column(String(40), nullable=True)
     contact_id: Mapped[str | None] = mapped_column(ForeignKey("contacts.id"), index=True)
     status: Mapped[str] = mapped_column(String(30), default="queued")
     agent_version_id: Mapped[str] = mapped_column(ForeignKey("agent_versions.id"), index=True)
@@ -73,6 +74,22 @@ class Call(Identity, Created, Base):
         ForeignKey("integration_connections.id"), index=True
     )
     from_number: Mapped[str | None] = mapped_column(String(50))
+
+
+class BrowserSession(Identity, Created, Base):
+    __tablename__ = "browser_sessions"
+    __table_args__ = (UniqueConstraint("run_id"),)
+
+    # Missing legacy creation timestamps stay unknown; new rows use DB time.
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=now, server_default=func.now()
+    )
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"), index=True)
+    status: Mapped[str] = mapped_column(String(30), default="created")
+    connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    disconnected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    connection_id: Mapped[str | None] = mapped_column(String(255))
 
 
 class Exchange(Identity, Created, Base):
