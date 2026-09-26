@@ -179,7 +179,7 @@ async def search(
         raise ValueError("Vector search requires a configured embedding adapter")
     async with asyncio.timeout(config.timeout_secs):
         vector = (
-            normalize(await embedder.embed(query, query=True))
+            await embedder.embed(query, query=True)
             if config.vector_weight
             else [1.0] + [0.0] * 767
         )

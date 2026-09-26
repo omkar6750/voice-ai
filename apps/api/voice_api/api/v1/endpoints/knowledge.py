@@ -1,6 +1,7 @@
 """Mutable knowledge base control plane. Build work happens outside request transactions."""
 
 import asyncio
+import re
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
@@ -12,8 +13,8 @@ from voice_api.core.config import get_settings
 from voice_api.db.session import SessionFactory
 from voice_api.knowledge.embeddings import GeminiEmbedder
 from voice_api.knowledge.ingestion import MAX_UPLOAD_BYTES, extract_upload
-from voice_api.models import KnowledgeBase, KnowledgeChunk, KnowledgeSource
-from voice_api.models.common import new_id
+from voice_api.models import KnowledgeBase, KnowledgeChunk, KnowledgeSource, Tool, ToolVersion
+from voice_api.models.common import new_id, now
 from voice_api.schemas.knowledge import BaseCreate, SearchRequest, SourceCreate, ingestion_config
 from voice_api.services.knowledge_service import build_source, search
 from voice_runtime.contracts.knowledge import KnowledgeConfig
@@ -63,6 +64,46 @@ async def create_base(
 ) -> dict:
     row = KnowledgeBase(id=new_id(), name=body.name, config=body.config.model_dump(mode="json"))
     session.add(row)
+    await session.flush()
+
+    # Automatically register an agent-callable tool for this knowledge base
+    tool_slug = re.sub(r"[^a-z0-9_]+", "_", f"query_{body.name.lower()}").strip("_")
+    existing_tool = await session.scalar(select(Tool).where(Tool.name == tool_slug))
+    if not existing_tool:
+        tool = Tool(id=new_id(), name=tool_slug)
+        session.add(tool)
+        await session.flush()
+        tool_config = {
+            "kind": "registered",
+            "name": tool_slug,
+            "handler": "query_knowledge_base",
+            "description": f"Search the {body.name} using hybrid vector retrieval to answer customer inquiries.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": f"Natural language query or question about {body.name}",
+                    }
+                },
+                "required": ["query"],
+            },
+            "wait": {
+                "mode": "acknowledge_then_wait",
+                "acknowledgement": f"Let me check our {body.name} for that.",
+            },
+        }
+        version = ToolVersion(
+            id=new_id(),
+            tool_id=tool.id,
+            version=1,
+            revision=1,
+            status="published",
+            published_at=now(),
+            config=tool_config,
+        )
+        session.add(version)
+
     await session.commit()
     return {"id": row.id, "name": row.name, "config": row.config}
 
@@ -115,6 +156,39 @@ async def list_sources(
                 "error": row.error,
             }
             for row in rows
+        ]
+    }
+
+
+@router.get("/knowledge-bases/{base_id}/chunks")
+async def list_chunks(
+    base_id: str,
+    source_id: str | None = None,
+    session: AsyncSession = Session,
+    _: None = Operator,
+) -> dict:
+    await base_or_404(session, base_id)
+    stmt = (
+        select(KnowledgeChunk, KnowledgeSource.title)
+        .join(KnowledgeSource, KnowledgeSource.id == KnowledgeChunk.source_id)
+        .where(KnowledgeSource.knowledge_base_id == base_id)
+    )
+    if source_id:
+        stmt = stmt.where(KnowledgeChunk.source_id == source_id)
+    stmt = stmt.order_by(KnowledgeSource.title, KnowledgeChunk.ordinal)
+    rows = (await session.execute(stmt)).all()
+    return {
+        "chunks": [
+            {
+                "id": chunk.id,
+                "source_id": chunk.source_id,
+                "source_title": source_title,
+                "ordinal": chunk.ordinal,
+                "content": chunk.content,
+                "char_count": len(chunk.content),
+                "metadata": chunk.metadata_json,
+            }
+            for chunk, source_title in rows
         ]
     }
 

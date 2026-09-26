@@ -2,12 +2,13 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { LoadState, PageBody, PageHeader } from "@/components/record-page";
 import { Button } from "@/components/ui/button";
 import { useResource } from "@/lib/resources";
+import { ChunksPanel } from "./ChunksPanel";
 import { IngestionPanel } from "./IngestionPanel";
 import { SearchPanel } from "./SearchPanel";
 import { SourcesPanel } from "./SourcesPanel";
 import type { KnowledgeBase } from "./types";
 
-const sections = ["Sources", "Ingestion", "Search"] as const;
+const sections = ["Sources", "Chunks", "Search", "Ingestion"] as const;
 export function KnowledgeDetailPage() {
   const { baseId = "" } = useParams();
   const [params, setParams] = useSearchParams();
@@ -53,6 +54,7 @@ export function KnowledgeDetailPage() {
               ))}
             </nav>
             {section === "Sources" && <SourcesPanel baseId={baseId} />}
+            {section === "Chunks" && <ChunksPanel baseId={baseId} />}
             {section === "Ingestion" && (
               <IngestionPanel
                 key={JSON.stringify(base.config)}

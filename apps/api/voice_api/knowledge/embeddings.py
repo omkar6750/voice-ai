@@ -34,17 +34,23 @@ class GeminiEmbedder:
         self._client = client
 
     async def embed(self, text: str, *, query: bool = False, title: str = "") -> list[float]:
-        config = {
+        body: dict = {
+            "content": {"parts": [{"text": text}]},
             "taskType": "RETRIEVAL_QUERY" if query else "RETRIEVAL_DOCUMENT",
             "outputDimensionality": DIMENSIONS,
         }
         if title and not query:
-            config["title"] = title
+            body["title"] = title
         response = await self._client.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:embedContent",
             headers={"x-goog-api-key": self._api_key},
-            json={"content": {"parts": [{"text": text}]}, "embedContentConfig": config},
+            json=body,
             timeout=10,
         )
         response.raise_for_status()
-        return normalize(response.json()["embedding"]["values"])
+        data = response.json()
+        values = data.get("embedding", {}).get("values", [])
+        if not values or len(values) != DIMENSIONS:
+            raise ValueError(f"Expected {DIMENSIONS} finite embedding dimensions, received {len(values)}")
+        return normalize(values)
+
