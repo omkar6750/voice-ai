@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
+import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
 
@@ -57,10 +58,38 @@ export function ContactsPage() {
   const [business, setBusiness] = useState("");
   const [source, setSource] = useState("");
   const [language, setLanguage] = useState("");
+  const [metadataEntries, setMetadataEntries] = useState<
+    Array<{ key: string; value: string }>
+  >([]);
+
+  function addMetadataEntry() {
+    setMetadataEntries((prev) => [...prev, { key: "", value: "" }]);
+  }
+
+  function updateMetadataEntry(index: number, field: "key" | "value", val: string) {
+    setMetadataEntries((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: val };
+      return next;
+    });
+  }
+
+  function removeMetadataEntry(index: number) {
+    setMetadataEntries((prev) => prev.filter((_, i) => i !== index));
+  }
 
   async function create(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
+
+    const metadata_json: Record<string, string> = {};
+    for (const entry of metadataEntries) {
+      const k = entry.key.trim().toLowerCase().replace(/[^a-z0-9_.]+/g, "_");
+      if (k && entry.value.trim()) {
+        metadata_json[k] = entry.value.trim();
+      }
+    }
+
     try {
       await api("/contacts", {
         method: "POST",
@@ -71,6 +100,7 @@ export function ContactsPage() {
           business: business.trim() || null,
           source: source.trim() || null,
           language: language.trim() || null,
+          metadata_json,
         }),
       });
       toast.success("Contact created");
@@ -81,6 +111,7 @@ export function ContactsPage() {
       setBusiness("");
       setSource("");
       setLanguage("");
+      setMetadataEntries([]);
       await reload();
     } catch (cause) {
       toast.error(
@@ -182,6 +213,66 @@ export function ContactsPage() {
                       placeholder="Search language (e.g. en-US, hi-IN)..."
                     />
                   </Field>
+
+                  <div className="flex flex-col gap-2 rounded-lg border p-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-xs font-semibold">Custom Ad & Lead Metadata</span>
+                        <p className="text-[11px] text-muted-foreground">
+                          Key-values usable as prompt variables (e.g. campaign, ad_headline)
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={addMetadataEntry}
+                      >
+                        <Plus className="mr-1 size-3" />
+                        Add field
+                      </Button>
+                    </div>
+
+                    {metadataEntries.length === 0 ? (
+                      <p className="py-1 text-[11px] text-muted-foreground italic">
+                        No custom metadata. Click "Add field" to store ad or lead tags.
+                      </p>
+                    ) : (
+                      <div className="flex flex-col gap-2 pt-1">
+                        {metadataEntries.map((entry, idx) => (
+                          <div key={idx} className="flex items-center gap-2">
+                            <Input
+                              placeholder="Key (e.g. campaign)"
+                              value={entry.key}
+                              onChange={(e) =>
+                                updateMetadataEntry(idx, "key", e.target.value)
+                              }
+                              className="h-8 text-xs font-mono"
+                            />
+                            <Input
+                              placeholder="Value (e.g. spring_sale)"
+                              value={entry.value}
+                              onChange={(e) =>
+                                updateMetadataEntry(idx, "value", e.target.value)
+                              }
+                              className="h-8 text-xs"
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="size-8 text-muted-foreground hover:text-destructive"
+                              onClick={() => removeMetadataEntry(idx)}
+                              aria-label="Remove metadata entry"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </FieldGroup>
 
                 <SheetFooter className="border-t pt-3 mt-auto">

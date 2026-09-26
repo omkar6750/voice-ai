@@ -1,3 +1,5 @@
+from unittest.mock import AsyncMock, MagicMock
+
 import httpx
 import pytest
 from fastapi import FastAPI
@@ -176,3 +178,138 @@ def test_classifier_contracts_and_trimmer():
     assert "lead_temperature_cold" not in trimmed
     assert trimmed["service_fit"] == "strong_fit"
     assert trimmed["notes"] == "Fast caller"
+
+
+@pytest.mark.asyncio
+async def test_contacts_variables_endpoint(monkeypatch) -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    from voice_api.api.deps import get_session
+
+    monkeypatch.setattr(
+        "voice_api.core.security.get_settings", lambda: Settings(operator_token="test-token")
+    )
+    monkeypatch.setattr(
+        "voice_api.api.deps.get_settings", lambda: Settings(operator_token="test-token")
+    )
+
+    mock_session = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = [("campaign",), ("ad_headline",)]
+    mock_session.execute.return_value = mock_result
+
+    app.dependency_overrides[get_session] = lambda: mock_session
+    try:
+        headers = {"Authorization": "Bearer test-token"}
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            res = await client.get("/api/v1/contacts/variables", headers=headers)
+        assert res.status_code == 200
+        data = res.json()
+        assert "columns" in data
+        assert "metadata_keys" in data
+        assert "temporal" in data
+
+        # Check introspected columns
+        col_keys = [c["key"] for c in data["columns"]]
+        assert "name" in col_keys
+        assert "business" in col_keys
+        assert "source" in col_keys
+        assert "language" in col_keys
+        assert "timezone" in col_keys
+        # Verify blocked columns are NOT exposed
+        assert "id" not in col_keys
+        assert "phone_number" not in col_keys
+        assert "metadata_json" not in col_keys
+        assert "created_at" not in col_keys
+
+        # Check metadata keys
+        meta_keys = [m["key"] for m in data["metadata_keys"]]
+        assert "campaign" in meta_keys
+        assert "ad_headline" in meta_keys
+
+        # Check temporal keys
+        temp_keys = [t["key"] for t in data["temporal"]]
+        assert "greeting_phrase" in temp_keys
+        assert "local_time_12h" in temp_keys
+        assert "local_time_24h" in temp_keys
+        assert "country" in temp_keys
+        assert "country_code" in temp_keys
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+
+
+@pytest.mark.asyncio
+async def test_create_and_patch_contact_with_metadata(monkeypatch) -> None:
+    from voice_api.api.deps import get_session
+    from voice_api.models.configuration import Contact
+
+    monkeypatch.setattr(
+        "voice_api.core.security.get_settings", lambda: Settings(operator_token="test-token")
+    )
+    monkeypatch.setattr(
+        "voice_api.api.deps.get_settings", lambda: Settings(operator_token="test-token")
+    )
+
+    mock_session = AsyncMock()
+    mock_session.add = MagicMock()
+    mock_session.commit = AsyncMock()
+
+    # Test creating contact with custom metadata_json
+    app.dependency_overrides[get_session] = lambda: mock_session
+    try:
+        headers = {"Authorization": "Bearer test-token"}
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            res = await client.post(
+                "/api/v1/contacts",
+                headers=headers,
+                json={
+                    "name": "Alex Rivera",
+                    "phone_number": "+15551234567",
+                    "timezone": "America/New_York",
+                    "business": "Apex Growth",
+                    "source": "meta_lead_ad",
+                    "metadata_json": {
+                        "campaign": "summer_scale_2026",
+                        "budget": "10000",
+                        "ad_id": "meta-ad-9988",
+                    },
+                },
+            )
+        assert res.status_code == 201
+        assert "id" in res.json()
+        added_contact = mock_session.add.call_args[0][0]
+        assert isinstance(added_contact, Contact)
+        assert added_contact.metadata_json == {
+            "campaign": "summer_scale_2026",
+            "budget": "10000",
+            "ad_id": "meta-ad-9988",
+        }
+
+        # Test patching contact metadata_json
+        existing_contact = Contact(
+            id="c-test-id",
+            name="Alex Rivera",
+            phone_number="+15551234567",
+            metadata_json={"campaign": "old_campaign"},
+        )
+        mock_session.get.return_value = existing_contact
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            patch_res = await client.patch(
+                "/api/v1/contacts/c-test-id",
+                headers=headers,
+                json={
+                    "metadata_json": {
+                        "campaign": "updated_campaign_q4",
+                        "ad_headline": "Free Consultation",
+                    }
+                },
+            )
+        assert patch_res.status_code == 200
+        assert existing_contact.metadata_json == {
+            "campaign": "updated_campaign_q4",
+            "ad_headline": "Free Consultation",
+        }
+    finally:
+        app.dependency_overrides.pop(get_session, None)

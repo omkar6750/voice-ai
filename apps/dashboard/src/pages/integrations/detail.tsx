@@ -1,7 +1,10 @@
 import { useState, type FormEvent } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
+  AlertTriangle,
   CheckCircle2,
+  PowerOff,
+  Trash2,
   ExternalLink,
   Pencil,
   RefreshCw,
@@ -9,6 +12,14 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   LoadState,
   PageBody,
@@ -92,6 +103,7 @@ export function IntegrationDetailPage() {
   const { connectionId = "" } = useParams();
   const [params, setParams] = useSearchParams();
   const api = useApi();
+  const navigate = useNavigate();
   const {
     data: connection,
     loading,
@@ -111,6 +123,40 @@ export function IntegrationDetailPage() {
   const [phoneId, setPhoneId] = useState("");
   const [wabaId, setWabaId] = useState("");
   const [apiVersion, setApiVersion] = useState("");
+
+  // Disconnect & Delete modal state
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
+  const [disconnectBusy, setDisconnectBusy] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+
+  async function handleDisconnect() {
+    setDisconnectBusy(true);
+    try {
+      await api(`/integrations/${connectionId}/disconnect`, { method: "POST" });
+      toast.success("WhatsApp integration disconnected and credentials cleared");
+      setDisconnectOpen(false);
+      await reload();
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "Disconnect failed");
+    } finally {
+      setDisconnectBusy(false);
+    }
+  }
+
+  async function handleDelete() {
+    setDeleteBusy(true);
+    try {
+      await api(`/integrations/${connectionId}`, { method: "DELETE" });
+      toast.success("Integration and associated tools deleted");
+      setDeleteOpen(false);
+      navigate("/integrations");
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "Delete failed");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
 
   // Templates state
   const [templates, setTemplates] = useState<Template[] | null>(null);
@@ -288,15 +334,35 @@ export function IntegrationDetailPage() {
                       Meta WhatsApp Business account identifiers and status.
                     </p>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-1.5"
-                    onClick={openEditSheet}
-                  >
-                    <Pencil className="size-3.5" />
-                    Edit settings
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={openEditSheet}
+                    >
+                      <Pencil className="size-3.5" />
+                      Edit settings
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-amber-500 hover:text-amber-600 gap-1.5"
+                      onClick={() => setDisconnectOpen(true)}
+                    >
+                      <PowerOff className="size-3.5" />
+                      Disconnect
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-destructive hover:bg-destructive/10 hover:text-destructive gap-1.5"
+                      onClick={() => setDeleteOpen(true)}
+                    >
+                      <Trash2 className="size-3.5" />
+                      Delete
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="rounded-lg border bg-card p-4">
@@ -305,10 +371,17 @@ export function IntegrationDetailPage() {
                     label="Status"
                     value={
                       <div className="flex items-center gap-2">
-                        <StatusBadge
-                          value={connection.enabled ? "enabled" : "disabled"}
-                        />
+                        {connection.deleted_at ? (
+                          <Badge variant="secondary" className="text-muted-foreground">
+                            Disconnected
+                          </Badge>
+                        ) : (
+                          <StatusBadge
+                            value={connection.enabled ? "enabled" : "disabled"}
+                          />
+                        )}
                         {!connection.enabled &&
+                          !connection.deleted_at &&
                           !connection.secret_names.includes(
                             "access_token",
                           ) && (
@@ -725,6 +798,100 @@ export function IntegrationDetailPage() {
           </>
         )}
       </LoadState>
+      {/* Disconnect Modal */}
+      <Dialog open={disconnectOpen} onOpenChange={setDisconnectOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-500">
+              <PowerOff className="size-5" />
+              Disconnect WhatsApp Integration
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to disconnect{" "}
+              <strong>{connection?.label}</strong>?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs text-muted-foreground space-y-2">
+            <p>
+              Disconnecting will immediately disable active message dispatch and
+              securely purge stored API access tokens and secrets.
+            </p>
+            <p>
+              The connection record will be preserved with a{" "}
+              <strong>Disconnected</strong> status so past call run receipts
+              remain intact.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={disconnectBusy}
+              onClick={() => setDisconnectOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              className="bg-amber-600 hover:bg-amber-700"
+              disabled={disconnectBusy}
+              onClick={handleDisconnect}
+            >
+              {disconnectBusy ? "Disconnecting…" : "Disconnect"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Modal */}
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="size-5" />
+              Delete WhatsApp Integration
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to completely delete{" "}
+              <strong>{connection?.label}</strong>?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-xs text-destructive space-y-2">
+            <p className="font-semibold uppercase tracking-wider">
+              Side Effects & Cascading Deletions:
+            </p>
+            <ul className="list-inside list-disc space-y-1">
+              <li>
+                All generated WhatsApp tools (e.g. template and direct message tools)
+                will be permanently deleted from the Tools catalog.
+              </li>
+              <li>
+                These tools will be automatically unbound and removed from all agent
+                configurations and flow nodes.
+              </li>
+              <li>
+                Stored credentials, uploaded media, and webhook message logs for this
+                connection will be permanently destroyed.
+              </li>
+            </ul>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={deleteBusy}
+              onClick={() => setDeleteOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteBusy}
+              onClick={handleDelete}
+            >
+              {deleteBusy ? "Deleting…" : "Delete permanently"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageBody>
   );
 }

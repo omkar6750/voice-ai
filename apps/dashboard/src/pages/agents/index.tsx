@@ -1,10 +1,18 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus } from "lucide-react";
+import { AlertTriangle, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
 import { PageBody, PageHeader, LoadState } from "@/components/record-page";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Field,
   FieldDescription,
@@ -33,6 +41,15 @@ import { useResource } from "@/lib/resources";
 
 type Agent = { id: string; name: string; active_version_id: string | null };
 
+type AgentImpact = {
+  agent_id: string;
+  name: string;
+  versions_count: number;
+  runs_count: number;
+  can_delete: boolean;
+  warnings: string[];
+};
+
 export function AgentsPage() {
   const api = useApi();
   const navigate = useNavigate();
@@ -43,13 +60,18 @@ export function AgentsPage() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // Deletion state
+  const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
+  const [impact, setImpact] = useState<AgentImpact | null>(null);
+  const [loadingImpact, setLoadingImpact] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
   async function create(event: FormEvent) {
     event.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) return;
     setBusy(true);
     try {
-      // Minimal valid draft. Provider defaults come from the backend contract, not a UI registry.
       const result = await api<{ agent_id: string; version_id: string }>(
         "/agents",
         {
@@ -77,6 +99,41 @@ export function AgentsPage() {
       );
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function openDeleteModal(agent: Agent) {
+    setAgentToDelete(agent);
+    setLoadingImpact(true);
+    setImpact(null);
+    try {
+      const data = await api<AgentImpact>(`/agents/${agent.id}/impact`);
+      setImpact(data);
+    } catch (cause) {
+      toast.error(
+        cause instanceof Error ? cause.message : "Could not inspect agent impact",
+      );
+    } finally {
+      setLoadingImpact(false);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!agentToDelete) return;
+    setDeleting(true);
+    try {
+      await api(`/agents/${agentToDelete.id}?force=true`, {
+        method: "DELETE",
+      });
+      toast.success(`Agent "${agentToDelete.name}" deleted`);
+      setAgentToDelete(null);
+      await reload();
+    } catch (cause) {
+      toast.error(
+        cause instanceof Error ? cause.message : "Could not delete agent",
+      );
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -138,7 +195,7 @@ export function AgentsPage() {
             <TableRow>
               <TableHead>Agent</TableHead>
               <TableHead>Active version</TableHead>
-              <TableHead className="text-right">Open</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -151,15 +208,101 @@ export function AgentsPage() {
                     : "No active version"}
                 </TableCell>
                 <TableCell className="text-right">
-                  <Button variant="link" asChild>
-                    <Link to={`/agents/${agent.id}`}>Versions</Link>
-                  </Button>
+                  <div className="flex items-center justify-end gap-1">
+                    <Button variant="link" asChild>
+                      <Link to={`/agents/${agent.id}`}>Versions</Link>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-destructive hover:bg-destructive/10"
+                      onClick={() => openDeleteModal(agent)}
+                      title={`Delete ${agent.name}`}
+                    >
+                      <Trash2 className="size-4" />
+                      <span className="sr-only">Delete</span>
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </LoadState>
+
+      {/* Delete Agent Modal */}
+      <Dialog
+        open={Boolean(agentToDelete)}
+        onOpenChange={(isOpen) => {
+          if (!isOpen && !deleting) setAgentToDelete(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="size-5" />
+              Delete Agent
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to permanently delete{" "}
+              <strong>{agentToDelete?.name}</strong>?
+            </DialogDescription>
+          </DialogHeader>
+
+          {loadingImpact ? (
+            <div className="py-6 text-center text-sm text-muted-foreground">
+              Checking agent dependencies and call history…
+            </div>
+          ) : impact ? (
+            <div className="flex flex-col gap-3 rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-xs">
+              <div className="grid grid-cols-2 gap-2 font-medium">
+                <div>
+                  Versions to delete:{" "}
+                  <span className="font-bold text-foreground">
+                    {impact.versions_count}
+                  </span>
+                </div>
+                <div>
+                  Historical runs:{" "}
+                  <span className="font-bold text-foreground">
+                    {impact.runs_count}
+                  </span>
+                </div>
+              </div>
+
+              {impact.warnings.length > 0 && (
+                <div className="space-y-1.5 pt-1 text-destructive">
+                  <div className="font-semibold uppercase tracking-wider">
+                    Side Effects:
+                  </div>
+                  <ul className="list-inside list-disc space-y-1">
+                    {impact.warnings.map((w, idx) => (
+                      <li key={idx}>{w}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={deleting}
+              onClick={() => setAgentToDelete(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleting || loadingImpact}
+              onClick={confirmDelete}
+            >
+              {deleting ? "Deleting…" : "Delete permanently"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageBody>
   );
 }

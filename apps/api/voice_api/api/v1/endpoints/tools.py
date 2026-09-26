@@ -1,10 +1,10 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_operator
-from voice_api.models import Tool, ToolVersion
+from voice_api.models import Agent, AgentVersion, AgentVersionTool, Tool, ToolVersion
 from voice_api.models.common import new_id
 from voice_api.schemas.agent import CreateBody, ExpectedRevision, RevisionBody
 from voice_api.services.publication_service import clone_version
@@ -76,27 +76,8 @@ async def tool_handlers(_: None = Operator) -> dict:
                 "category": "messaging",
             },
             {
-                "name": "send_followup",
-                "description": "Send a customized follow-up WhatsApp message/template to the contact.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "caller_name": {
-                            "type": "string",
-                            "description": "Recipient name",
-                        },
-                        "message": {
-                            "type": "string",
-                            "description": "Follow-up message content",
-                        },
-                    },
-                },
-                "runtime_supported": True,
-                "category": "messaging",
-            },
-            {
                 "name": "check_whatsapp_window",
-                "description": "Verify whether an active 24-hour customer service window exists for direct freeform messaging.",
+                "description": "Verify whether an active 24-hour customer service window exists based on inbound messages.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -302,3 +283,107 @@ async def clone_tool(
     version_id: str, body: ExpectedRevision, session: AsyncSession = Session, _: None = Operator
 ) -> dict:
     return await clone_version(session, version_id, "tool", body.revision)
+
+
+@router.get("/tools/{tool_id}/impact")
+async def tool_deletion_impact(
+    tool_id: str, session: AsyncSession = Session, _: None = Operator
+) -> dict:
+    tool = await session.get(Tool, tool_id)
+    if tool is None:
+        raise HTTPException(404, "Tool not found")
+
+    is_system_tool = tool.name in {"change_node", "end_call"}
+
+    tv_ids = (
+        await session.scalars(select(ToolVersion.id).where(ToolVersion.tool_id == tool_id))
+    ).all()
+
+    bindings = (
+        (
+            await session.scalars(
+                select(AgentVersionTool).where(AgentVersionTool.tool_version_id.in_(tv_ids))
+            )
+        ).all()
+        if tv_ids
+        else []
+    )
+
+    bound_agents = []
+    seen = set()
+    for b in bindings:
+        ag_v = await session.get(AgentVersion, b.agent_version_id)
+        if ag_v:
+            key = (ag_v.agent_id, ag_v.version)
+            if key not in seen:
+                seen.add(key)
+                ag = await session.get(Agent, ag_v.agent_id)
+                bound_agents.append(
+                    {
+                        "agent_id": ag_v.agent_id,
+                        "agent_name": ag.name if ag else "Unknown Agent",
+                        "version": ag_v.version,
+                        "status": ag_v.status,
+                    }
+                )
+
+    return {
+        "tool_id": tool.id,
+        "tool_name": tool.name,
+        "is_system_tool": is_system_tool,
+        "can_delete": not is_system_tool,
+        "system_tool_reason": (
+            f"Tool '{tool.name}' is a core system-level tool critical for call transitions or hangup. It cannot be deleted."
+            if is_system_tool
+            else None
+        ),
+        "bound_agents": bound_agents,
+        "versions_count": len(tv_ids),
+    }
+
+
+@router.delete("/tools/{tool_id}")
+async def delete_tool(tool_id: str, session: AsyncSession = Session, _: None = Operator) -> dict:
+    tool = await session.get(Tool, tool_id)
+    if tool is None:
+        raise HTTPException(404, "Tool not found")
+    if tool.name in {"change_node", "end_call"}:
+        raise HTTPException(403, f"Tool '{tool.name}' is a core system tool and cannot be deleted")
+
+    await session.execute(text("SET LOCAL session_replication_role = 'replica';"))
+
+    tv_ids = (
+        await session.scalars(select(ToolVersion.id).where(ToolVersion.tool_id == tool_id))
+    ).all()
+
+    if tv_ids:
+        await session.execute(
+            delete(AgentVersionTool).where(AgentVersionTool.tool_version_id.in_(tv_ids))
+        )
+
+        agent_versions = (await session.scalars(select(AgentVersion))).all()
+        for av in agent_versions:
+            cfg = dict(av.config or {})
+            tb = dict(cfg.get("tool_bindings", {}))
+            changed = False
+            if tool.name in tb:
+                del tb[tool.name]
+                changed = True
+            flow = dict(cfg.get("flow", {}))
+            nodes = list(flow.get("nodes", []))
+            for n in nodes:
+                node_tools = n.get("tool_bindings", [])
+                if isinstance(node_tools, list) and tool.name in node_tools:
+                    n["tool_bindings"] = [x for x in node_tools if x != tool.name]
+                    changed = True
+            if changed:
+                cfg["tool_bindings"] = tb
+                flow["nodes"] = nodes
+                cfg["flow"] = flow
+                av.config = cfg
+
+        await session.execute(delete(ToolVersion).where(ToolVersion.tool_id == tool_id))
+
+    await session.execute(delete(Tool).where(Tool.id == tool_id))
+    await session.commit()
+    return {"status": "ok", "deleted_tool_id": tool_id, "tool_name": tool.name}

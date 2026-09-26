@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .common import JSONB, Base, Identity, Updated, now
+from .common import JSONB, Base, Created, Identity, Updated, now
 
 
 class IntegrationConnection(Identity, Updated, Base):
@@ -13,6 +13,19 @@ class IntegrationConnection(Identity, Updated, Base):
     provider: Mapped[str] = mapped_column(String(60))
     config: Mapped[dict] = mapped_column(JSONB, default=dict)
     enabled: Mapped[bool] = mapped_column(default=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class InboundWebhookMessage(Identity, Created, Base):
+    __tablename__ = "inbound_webhook_messages"
+    __table_args__ = ()
+    connection_id: Mapped[str | None] = mapped_column(
+        ForeignKey("integration_connections.id", ondelete="SET NULL"), index=True
+    )
+    sender_phone: Mapped[str] = mapped_column(String(40), index=True)
+    provider_message_id: Mapped[str | None] = mapped_column(String(255))
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 
 
 class IntegrationSecret(Identity, Base):

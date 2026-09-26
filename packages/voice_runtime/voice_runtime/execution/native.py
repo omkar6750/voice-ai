@@ -35,9 +35,10 @@ from pipecat.services.sarvam.tts import SarvamTTSService
 from pipecat.workers.runner import WorkerRunner
 
 from voice_runtime.call_capture import CallCapture
+from voice_runtime.execution.contact_context import sanitize_contact_variables
 from voice_runtime.execution.exchange import ExchangeTracker, bind_transcripts
 from voice_runtime.execution.observer import EvidenceObserver
-from voice_runtime.execution.whatsapp import shared_inbound_window
+from voice_runtime.execution.temporal import resolve_local_time_context
 from voice_runtime.telephony.base import CallState
 from voice_runtime.telephony.usb_audio import Sim7600UsbAudioBridge
 
@@ -472,22 +473,39 @@ class NativePipelineHost:
                     or contact.get("phone_e164")
                     or self._snapshot.get("target_snapshot", "")
                 )
-                try:
-                    recipient = re.sub(r"[^\d]", "", raw_phone)
-                except Exception:
-                    recipient = ""
+                recipient = re.sub(r"[^\d]", "", raw_phone or "")
                 if not recipient:
                     return {"status": "error", "error": "No valid phone number for contact"}
-                is_open = shared_inbound_window.allows_text(connection_id="", to=recipient)
+
+                cutoff = datetime.now(UTC) - timedelta(hours=24)
+                has_inbound = False
+                try:
+                    from sqlalchemy import select
+                    from voice_api.db.session import SessionFactory
+                    from voice_api.models import InboundWebhookMessage
+
+                    async with SessionFactory() as db_session:
+                        inbound_row = await db_session.scalar(
+                            select(InboundWebhookMessage)
+                            .where(
+                                InboundWebhookMessage.sender_phone == recipient,
+                                InboundWebhookMessage.received_at >= cutoff,
+                            )
+                            .order_by(InboundWebhookMessage.received_at.desc())
+                        )
+                        if inbound_row is not None:
+                            has_inbound = True
+                except Exception as exc:
+                    logger.warning("Failed checking inbound WhatsApp messages in DB: {}", exc)
+
                 return {
                     "status": "ok",
-                    "window_open": is_open,
+                    "window_open": has_inbound,
                     "recipient": recipient,
                     "reason": "Customer service window open"
-                    if is_open
-                    else "Window closed (24h elapsed; template required)",
+                    if has_inbound
+                    else "Window closed (no inbound message from contact in last 24 hours; template required)",
                 }
-
             if name == "send_whatsapp_message":
                 contact = (
                     self._snapshot.get("_resolved", {}).get("contact")
@@ -504,11 +522,32 @@ class NativePipelineHost:
                 if not recipient:
                     return {"status": "error", "error": "No valid phone number for contact"}
 
-                is_open = shared_inbound_window.allows_text(connection_id="", to=recipient)
-                if not is_open:
+                # Check if contact sent an inbound WhatsApp message within the last 24 hours
+                cutoff = datetime.now(UTC) - timedelta(hours=24)
+                has_inbound = False
+                try:
+                    from sqlalchemy import select
+                    from voice_api.db.session import SessionFactory
+                    from voice_api.models import InboundWebhookMessage
+
+                    async with SessionFactory() as db_session:
+                        inbound_row = await db_session.scalar(
+                            select(InboundWebhookMessage)
+                            .where(
+                                InboundWebhookMessage.sender_phone == recipient,
+                                InboundWebhookMessage.received_at >= cutoff,
+                            )
+                            .order_by(InboundWebhookMessage.received_at.desc())
+                        )
+                        if inbound_row is not None:
+                            has_inbound = True
+                except Exception as exc:
+                    logger.warning("Failed checking inbound WhatsApp messages in DB: {}", exc)
+
+                if not has_inbound:
                     return {
                         "status": "error",
-                        "error": "Customer service window is closed (24 hours elapsed since last customer inbound message). Meta requires an approved template outside this window.",
+                        "error": "Customer service window is closed (no inbound WhatsApp message received from contact in the last 24 hours). Meta requires an approved template outside this window.",
                     }
 
                 text = (args.get("text") or args.get("message") or "").strip()
@@ -567,9 +606,7 @@ class NativePipelineHost:
                     logger.error("WhatsApp direct message exception: {}", exc)
                     return {"status": "error", "error": f"WhatsApp request failed: {exc}"}
 
-            if name in ("send_whatsapp_template", "send_followup") or name.startswith(
-                "whatsapp_template_"
-            ):
+            if name.startswith("whatsapp_template_"):
                 (
                     access_token,
                     phone_number_id,
@@ -948,12 +985,26 @@ class NativePipelineHost:
                 min_volume=vad_config["min_volume"],
             ),
         )
+        contact = (
+            snapshot.get("_resolved", {}).get("contact") or snapshot.get("contact_snapshot") or {}
+        )
+        temporal = resolve_local_time_context(contact.get("timezone"))
+        allowed_vars = snapshot.get("contact_variables", [])
+        sanitized_contact = sanitize_contact_variables(contact, allowed_vars)
+
+        kickoff_greeting = snapshot.get("greeting")
+        if not kickoff_greeting:
+            name_phrase = f" to {sanitized_contact['name']}" if "name" in sanitized_contact else ""
+            kickoff_greeting = (
+                f"Start the phone conversation with a friendly '{temporal['greeting_phrase']}'{name_phrase}. "
+                f"Caller's local time is {temporal['local_time_12h']} ({temporal['local_time_24h']})."
+            )
+
         context = LLMContext(
             [
                 {
                     "role": "user",
-                    "content": snapshot["greeting"]
-                    or "Start the phone conversation with your friendly greeting.",
+                    "content": kickoff_greeting,
                 }
             ]
         )
@@ -1005,11 +1056,16 @@ class NativePipelineHost:
             bindings=snapshot["_resolved"]["tools"],
             observer=self.observer,
         )
-        contact = snapshot["_resolved"].get("contact", {})
-        self.flow.state["contact"] = contact
-        for variable in snapshot.get("contact_variables", []):
-            if variable in contact:
-                self.flow.state[variable] = contact[variable]
+        # Populate flow state with temporal context for dynamic prompts
+        self.flow.state.update(temporal)
+        # Populate flow state with selectively whitelisted contact variables
+        self.flow.state["contact"] = sanitized_contact
+        for variable, value in sanitized_contact.items():
+            self.flow.state[variable] = value
+        # Ensure any allowed variable that is missing on this contact safely defaults to ""
+        for variable in allowed_vars:
+            if variable not in self.flow.state:
+                self.flow.state[variable] = ""
 
         @self.worker.event_handler("on_pipeline_started")
         async def started(_worker, _frame):

@@ -8,6 +8,7 @@ import {
   PageHeader,
   StatusBadge,
 } from "@/components/record-page";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Pencil, Trash2 } from "lucide-react";
 import {
@@ -48,6 +49,7 @@ export type Connection = {
   updated_at?: string;
   created_at?: string;
   webhook_url?: string | null;
+  deleted_at?: string | null;
 };
 
 export function IntegrationsPage() {
@@ -58,6 +60,9 @@ export function IntegrationsPage() {
   }>("/integrations");
   const calendars = useResource<{ integrations: CalendarIntegration[] }>("/calendar-integrations");
   const [open, setOpen] = useState(false);
+  const hasActiveWhatsapp = Boolean(
+    data?.connections.some((c) => c.provider === "whatsapp" && !c.deleted_at),
+  );
   const [busy, setBusy] = useState(false);
   const [label, setLabel] = useState("");
   const [phoneId, setPhoneId] = useState("");
@@ -125,10 +130,19 @@ export function IntegrationsPage() {
         title="Integrations"
         description="Action-provider accounts. Model-provider keys stay in server environment."
         action={
-          <Sheet open={open} onOpenChange={setOpen}>
-            <SheetTrigger asChild>
-              <Button>New WhatsApp connection</Button>
-            </SheetTrigger>
+          hasActiveWhatsapp ? (
+            <Button
+              variant="outline"
+              disabled
+              title="Only one active WhatsApp connection is allowed. Disconnect or delete the existing connection to add another."
+            >
+              WhatsApp connected (Max 1)
+            </Button>
+          ) : (
+            <Sheet open={open} onOpenChange={setOpen}>
+              <SheetTrigger asChild>
+                <Button>New WhatsApp connection</Button>
+              </SheetTrigger>
             <SheetContent>
               <form onSubmit={create} className="flex h-full flex-col gap-6">
                 <SheetHeader>
@@ -197,6 +211,7 @@ export function IntegrationsPage() {
               </form>
             </SheetContent>
           </Sheet>
+          )
         }
       />
       <section className="mb-8 rounded-lg border p-5">
@@ -234,9 +249,15 @@ export function IntegrationsPage() {
                   {connection.label}
                 </TableCell>
                 <TableCell>
-                  <StatusBadge
-                    value={connection.enabled ? "enabled" : "disabled"}
-                  />
+                  {connection.deleted_at ? (
+                    <Badge variant="secondary" className="text-muted-foreground">
+                      Disconnected
+                    </Badge>
+                  ) : (
+                    <StatusBadge
+                      value={connection.enabled ? "enabled" : "disabled"}
+                    />
+                  )}
                 </TableCell>
                 <TableCell className="text-muted-foreground">
                   {connection.secret_names.join(", ") || "None"}

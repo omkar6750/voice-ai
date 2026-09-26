@@ -37,7 +37,9 @@ async def queue_call(
             "timezone": contact.timezone,
             "phone_number": contact.phone_number,
             "business": contact.business,
+            "source": contact.source,
             "language": contact.language,
+            "metadata_json": contact.metadata_json or {},
         },
     )
     session.add(run)

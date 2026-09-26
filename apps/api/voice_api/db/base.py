@@ -14,6 +14,7 @@ from voice_api.models import (  # noqa: F401
     ConversationMessage,
     Exchange,
     FlowNodeVisit,
+    InboundWebhookMessage,
     IntegrationConnection,
     IntegrationMedia,
     IntegrationSecret,

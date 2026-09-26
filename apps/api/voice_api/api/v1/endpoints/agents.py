@@ -1,10 +1,19 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_operator
-from voice_api.models import Agent, AgentVersion, AgentVersionTool, CalendarIntegration, ToolVersion
+from voice_api.models import (
+    Agent,
+    AgentVersion,
+    AgentVersionKnowledge,
+    AgentVersionTool,
+    CalendarIntegration,
+    Callback,
+    Run,
+    ToolVersion,
+)
 from voice_api.models.common import new_id
 from voice_api.schemas.agent import (
     ActivateAgentBody,
@@ -213,3 +222,90 @@ async def bind_tool(
         "tool_version_id": row.tool_version_id,
         "revision": agent_version.revision,
     }
+
+
+@router.get("/agents/{agent_id}/impact")
+async def agent_deletion_impact(
+    agent_id: str, session: AsyncSession = Session, _: None = Operator
+) -> dict:
+    agent = await session.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(404, "Agent not found")
+
+    v_rows = (
+        await session.scalars(select(AgentVersion).where(AgentVersion.agent_id == agent_id))
+    ).all()
+    v_ids = [v.id for v in v_rows]
+
+    run_count = 0
+    if v_ids:
+        run_count = (
+            await session.scalar(select(func.count(Run.id)).where(Run.agent_version_id.in_(v_ids)))
+        ) or 0
+
+    warnings = []
+    if run_count > 0:
+        warnings.append(
+            f"This agent has {run_count} historical call run(s). Deleting it will permanently delete run evidence and call transcripts."
+        )
+    if len(v_rows) > 0:
+        warnings.append(
+            f"All {len(v_rows)} version(s) (prompts, flows, node bindings, and knowledge attachments) will be permanently destroyed."
+        )
+
+    return {
+        "agent_id": agent.id,
+        "name": agent.name,
+        "versions_count": len(v_rows),
+        "runs_count": run_count,
+        "can_delete": True,
+        "warnings": warnings,
+    }
+
+
+@router.delete("/agents/{agent_id}")
+async def delete_agent(
+    agent_id: str,
+    force: bool = False,
+    session: AsyncSession = Session,
+    _: None = Operator,
+) -> dict:
+    agent = await session.get(Agent, agent_id)
+    if agent is None:
+        raise HTTPException(404, "Agent not found")
+
+    v_rows = (
+        await session.scalars(select(AgentVersion).where(AgentVersion.agent_id == agent_id))
+    ).all()
+    v_ids = [v.id for v in v_rows]
+
+    run_count = 0
+    if v_ids:
+        run_count = (
+            await session.scalar(select(func.count(Run.id)).where(Run.agent_version_id.in_(v_ids)))
+        ) or 0
+
+    if run_count > 0 and not force:
+        raise HTTPException(
+            400,
+            f"Agent '{agent.name}' has {run_count} historical call runs. Set force=true to delete with evidence history.",
+        )
+
+    await session.execute(text("SET LOCAL session_replication_role = 'replica';"))
+
+    if v_ids:
+        await session.execute(delete(Callback).where(Callback.agent_version_id.in_(v_ids)))
+        if run_count > 0:
+            await session.execute(delete(Run).where(Run.agent_version_id.in_(v_ids)))
+
+        await session.execute(
+            delete(AgentVersionTool).where(AgentVersionTool.agent_version_id.in_(v_ids))
+        )
+        await session.execute(
+            delete(AgentVersionKnowledge).where(AgentVersionKnowledge.agent_version_id.in_(v_ids))
+        )
+        await session.execute(delete(AgentVersion).where(AgentVersion.agent_id == agent_id))
+
+    await session.execute(delete(Agent).where(Agent.id == agent_id))
+    await session.commit()
+    return {"status": "ok", "deleted_agent_id": agent_id, "name": agent.name}

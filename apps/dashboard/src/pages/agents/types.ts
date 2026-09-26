@@ -1,3 +1,8 @@
+import type { components } from "@/generated/api";
+
+export type ContactVariablesResponse = components["schemas"]["ContactVariablesResponse"];
+export type VariableDescriptor = components["schemas"]["VariableDescriptor"];
+
 // Shape mirrors voice_runtime.contracts.AgentConfig. Preserve untouched keys on every edit.
 export type ToolBinding = { tool_id: string; tool_version_id: string };
 export type FlowNode = {

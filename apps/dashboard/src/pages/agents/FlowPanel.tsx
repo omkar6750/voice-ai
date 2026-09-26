@@ -7,19 +7,28 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { PromptEditor } from "./PromptEditor";
-import type { AgentConfig, FlowNode } from "./types";
+import type { AgentConfig, ContactVariablesResponse, FlowNode } from "./types";
 
 export function FlowPanel({
   config,
   change,
   registeredTools,
+  variablesCatalog,
   disabled,
 }: {
   config: AgentConfig;
   change: (next: AgentConfig) => void;
   registeredTools: string[];
+  variablesCatalog?: ContactVariablesResponse | null;
   disabled: boolean;
 }) {
+  const temporalKeys = (variablesCatalog?.temporal ?? []).map((t) => t.key);
+  const contactVariables = config.contact_variables ?? [];
+  const availableVariables = [
+    ...temporalKeys,
+    ...contactVariables,
+    ...contactVariables.map((v) => `contact.${v}`),
+  ];
   const [selectedId, setSelectedId] = useState(config.flow.initial_node);
   const [newId, setNewId] = useState("");
   const node =
@@ -182,6 +191,7 @@ export function FlowPanel({
             onChange={(prompt) => updateNode({ ...node, prompt })}
             availableTools={node.tool_bindings}
             registeredTools={registeredTools}
+            availableVariables={availableVariables}
             disabled={disabled}
           />
           <Field>
@@ -229,6 +239,7 @@ export function FlowPanel({
               onChange={(role_prompt) => updateNode({ ...node, role_prompt })}
               availableTools={node.tool_bindings}
               registeredTools={registeredTools}
+              availableVariables={availableVariables}
               disabled={disabled}
             />
           )}          <Field>

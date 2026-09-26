@@ -14,6 +14,7 @@ class ContactBody(ConfigModel):
     business: str | None = None
     source: str | None = None
     language: str | None = None
+    metadata_json: dict | None = None
 
     @field_validator("phone_number")
     @classmethod
@@ -62,3 +63,16 @@ class ContactPatchBody(ConfigModel):
             except (ValueError, ZoneInfoNotFoundError):
                 raise ValueError("Use a valid IANA timezone or leave unknown") from None
         return value
+
+
+class VariableDescriptor(ConfigModel):
+    key: str = Field(..., description="Template variable token (e.g. business or campaign)")
+    label: str = Field(..., description="Human-readable label for UI badge")
+    source: str = Field(..., description="Origin of the variable: column, metadata, or temporal")
+    description: str | None = Field(default=None, description="Help text or sample values")
+
+
+class ContactVariablesResponse(ConfigModel):
+    columns: list[VariableDescriptor] = Field(default_factory=list)
+    metadata_keys: list[VariableDescriptor] = Field(default_factory=list)
+    temporal: list[VariableDescriptor] = Field(default_factory=list)

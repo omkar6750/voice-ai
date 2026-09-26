@@ -1,6 +1,19 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
+import { AlertTriangle, Lock, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { useApi } from "@/app/api";
 import { LoadState, PageBody, PageHeader } from "@/components/record-page";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -12,8 +25,66 @@ import {
 import { useResource } from "@/lib/resources";
 
 type Tool = { id: string; name: string };
+
+type ToolImpact = {
+  tool_id: string;
+  tool_name: string;
+  is_system_tool: boolean;
+  can_delete: boolean;
+  system_tool_reason: string | null;
+  bound_agents: Array<{
+    agent_id: string;
+    agent_name: string;
+    version: number;
+    status: string;
+  }>;
+  versions_count: number;
+};
+
 export function ToolsPage() {
-  const { data, loading, error } = useResource<{ tools: Tool[] }>("/tools");
+  const api = useApi();
+  const { data, loading, error, reload } = useResource<{ tools: Tool[] }>("/tools");
+
+  const [toolToDelete, setToolToDelete] = useState<Tool | null>(null);
+  const [impact, setImpact] = useState<ToolImpact | null>(null);
+  const [loadingImpact, setLoadingImpact] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function openDeleteModal(tool: Tool) {
+    setToolToDelete(tool);
+    setLoadingImpact(true);
+    setImpact(null);
+    try {
+      const data = await api<ToolImpact>(`/tools/${tool.id}/impact`);
+      setImpact(data);
+    } catch (cause) {
+      toast.error(
+        cause instanceof Error ? cause.message : "Could not inspect tool impact",
+      );
+    } finally {
+      setLoadingImpact(false);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!toolToDelete) return;
+    setDeleting(true);
+    try {
+      await api(`/tools/${toolToDelete.id}`, {
+        method: "DELETE",
+      });
+      toast.success(`Tool "${toolToDelete.name}" deleted`);
+      setToolToDelete(null);
+      await reload();
+    } catch (cause) {
+      toast.error(
+        cause instanceof Error ? cause.message : "Could not delete tool",
+      );
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <PageBody>
       <PageHeader
@@ -31,28 +102,133 @@ export function ToolsPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Tool</TableHead>
-              <TableHead className="text-right">Versions</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data?.tools.map((tool) => (
-              <TableRow key={tool.id}>
-                <TableCell className="font-medium">{tool.name}</TableCell>
-                <TableCell className="text-right">
-                  <Button asChild variant="link">
-                    <Link to={`/tools/${tool.id}`}>View versions</Link>
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
+            {data?.tools.map((tool) => {
+              const isSystemTool =
+                tool.name === "change_node" || tool.name === "end_call";
+              return (
+                <TableRow key={tool.id}>
+                  <TableCell className="font-medium">
+                    <span className="font-mono text-sm">{tool.name}</span>
+                  </TableCell>
+                  <TableCell>
+                    {isSystemTool ? (
+                      <Badge variant="secondary" className="gap-1 font-normal text-xs">
+                        <Lock className="size-3 text-muted-foreground" />
+                        Core System Tool
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-xs font-normal">
+                        Registered Tool
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <Button asChild variant="link">
+                        <Link to={`/tools/${tool.id}`}>Versions</Link>
+                      </Button>
+                      {!isSystemTool && (
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="text-destructive hover:bg-destructive/10"
+                          onClick={() => openDeleteModal(tool)}
+                          title={`Delete ${tool.name}`}
+                        >
+                          <Trash2 className="size-4" />
+                          <span className="sr-only">Delete</span>
+                        </Button>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </LoadState>
-      <p className="text-xs text-muted-foreground">
-        New registered handlers need a backend handler catalog. HTTP tool
-        authoring needs destination allowlist feedback. Both are deferred, not
-        represented as working controls.
-      </p>
+
+      {/* Delete Tool Modal */}
+      <Dialog
+        open={Boolean(toolToDelete)}
+        onOpenChange={(isOpen) => {
+          if (!isOpen && !deleting) setToolToDelete(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="size-5" />
+              Delete Tool
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to permanently delete{" "}
+              <strong>{toolToDelete?.name}</strong>?
+            </DialogDescription>
+          </DialogHeader>
+
+          {loadingImpact ? (
+            <div className="py-6 text-center text-sm text-muted-foreground">
+              Checking tool dependencies across agents…
+            </div>
+          ) : impact ? (
+            <div className="flex flex-col gap-3 rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-xs">
+              <div>
+                Versions to delete:{" "}
+                <span className="font-bold text-foreground">
+                  {impact.versions_count}
+                </span>
+              </div>
+
+              {impact.bound_agents.length > 0 ? (
+                <div className="space-y-1.5 pt-1 text-destructive">
+                  <div className="font-semibold uppercase tracking-wider">
+                    Bound Agents Affected:
+                  </div>
+                  <ul className="list-inside list-disc space-y-1">
+                    {impact.bound_agents.map((ag, idx) => (
+                      <li key={idx}>
+                        <strong>{ag.agent_name}</strong> (v{ag.version} -{" "}
+                        {ag.status})
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-muted-foreground">
+                    Deleting this tool will automatically remove its binding
+                    and node assignment from these agents.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-muted-foreground">
+                  This tool is not currently bound to any active agents.
+                </p>
+              )}
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={deleting}
+              onClick={() => setToolToDelete(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleting || loadingImpact}
+              onClick={confirmDelete}
+            >
+              {deleting ? "Deleting…" : "Delete tool"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageBody>
   );
 }

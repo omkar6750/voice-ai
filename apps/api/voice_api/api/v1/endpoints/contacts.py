@@ -1,13 +1,71 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_operator
 from voice_api.models import Call, Callback, Contact, ContactFact, Run
-from voice_api.schemas.contact import ContactBody, ContactPatchBody
+from voice_api.schemas.contact import (
+    ContactBody,
+    ContactPatchBody,
+    ContactVariablesResponse,
+    VariableDescriptor,
+)
 
 router = APIRouter(tags=["contacts"])
 Session = Depends(get_session)
 Operator = Depends(require_operator)
+
+BLOCKED_CONTACT_FIELDS = {"id", "phone_number", "metadata_json", "created_at"}
+
+TEMPORAL_VARIABLE_DESCRIPTORS = [
+    VariableDescriptor(
+        key="greeting_phrase",
+        label="Greeting phrase",
+        source="temporal",
+        description="Good morning / afternoon / evening based on contact timezone",
+    ),
+    VariableDescriptor(
+        key="signoff_phrase",
+        label="Signoff phrase",
+        source="temporal",
+        description="Parting phrase matching contact local time",
+    ),
+    VariableDescriptor(
+        key="local_time_12h",
+        label="Local time (12h)",
+        source="temporal",
+        description="e.g. 2:30 PM in contact timezone",
+    ),
+    VariableDescriptor(
+        key="local_time_24h",
+        label="Local time (24h)",
+        source="temporal",
+        description="e.g. 14:30 in contact timezone",
+    ),
+    VariableDescriptor(
+        key="daypart",
+        label="Daypart",
+        source="temporal",
+        description="morning, afternoon, evening, or night",
+    ),
+    VariableDescriptor(
+        key="day_of_week",
+        label="Day of week",
+        source="temporal",
+        description="e.g. Monday in contact timezone",
+    ),
+    VariableDescriptor(
+        key="country",
+        label="Country name",
+        source="temporal",
+        description="e.g. India, United States, United Kingdom (derived from contact timezone)",
+    ),
+    VariableDescriptor(
+        key="country_code",
+        label="Country code (ISO)",
+        source="temporal",
+        description="e.g. IN, US, GB (derived from contact timezone)",
+    ),
+]
 
 
 def contact_summary(contact: Contact) -> dict:
@@ -30,11 +88,63 @@ async def contacts(session: AsyncSession = Session, _: None = Operator) -> dict:
     return {"contacts": [contact_summary(x) for x in rows]}
 
 
+@router.get("/contacts/variables", response_model=ContactVariablesResponse)
+async def get_contact_variables(
+    session: AsyncSession = Session, _: None = Operator
+) -> ContactVariablesResponse:
+    # 1. Introspect columns on Contact table
+    columns: list[VariableDescriptor] = []
+    for col in Contact.__table__.columns:
+        if col.name not in BLOCKED_CONTACT_FIELDS:
+            columns.append(
+                VariableDescriptor(
+                    key=col.name,
+                    label=col.name.replace("_", " ").title(),
+                    source="column",
+                    description=f"Contact {col.name.replace('_', ' ')} from database",
+                )
+            )
+
+    # 2. Distinct keys stored in JSONB metadata
+    metadata_keys: list[VariableDescriptor] = []
+    try:
+        result = await session.execute(
+            text(
+                "SELECT DISTINCT jsonb_object_keys(metadata_json) AS key "
+                "FROM contacts "
+                "WHERE metadata_json IS NOT NULL AND metadata_json != '{}'::jsonb "
+                "ORDER BY key"
+            )
+        )
+        for row in result.fetchall():
+            key = str(row[0])
+            metadata_keys.append(
+                VariableDescriptor(
+                    key=key,
+                    label=key.replace("_", " ").title(),
+                    source="metadata",
+                    description=f"Ad / lead metadata field '{key}'",
+                )
+            )
+    except Exception:
+        # Fallback if DB table is empty or non-postgres dialect in tests
+        pass
+
+    return ContactVariablesResponse(
+        columns=columns,
+        metadata_keys=metadata_keys,
+        temporal=TEMPORAL_VARIABLE_DESCRIPTORS,
+    )
+
+
 @router.post("/contacts", status_code=201)
 async def create_contact(
     body: ContactBody, session: AsyncSession = Session, _: None = Operator
 ) -> dict:
-    row = Contact(**body.model_dump())
+    data = body.model_dump()
+    if data.get("metadata_json") is None:
+        data["metadata_json"] = {}
+    row = Contact(**data)
     session.add(row)
     await session.commit()
     return {"id": row.id}

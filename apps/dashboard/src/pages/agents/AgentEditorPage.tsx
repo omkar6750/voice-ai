@@ -26,6 +26,7 @@ import { ToolsPanel } from "./ToolsPanel";
 import type {
   AgentConfig,
   AgentVersion,
+  ContactVariablesResponse,
   ProviderCatalog,
   ToolSummary,
 } from "./types";
@@ -53,6 +54,7 @@ export function AgentEditorPage() {
   );
   const providers = useResource<ProviderCatalog>("/providers");
   const tools = useResource<{ tools: ToolSummary[] }>("/tools");
+  const variables = useResource<ContactVariablesResponse>("/contacts/variables");
   const stored = resource.data?.versions.find((item) => item.id === versionId);
   const [draft, setDraft] = useState<AgentConfig | null>(null);
   const [note, setNote] = useState("");
@@ -189,6 +191,7 @@ export function AgentEditorPage() {
                 change={setDraft}
                 boundTools={Object.keys(draft.tool_bindings)}
                 registeredTools={registeredTools}
+                variablesCatalog={variables.data}
                 disabled={disabled}
               />
             )}
@@ -197,6 +200,7 @@ export function AgentEditorPage() {
                 config={draft}
                 change={setDraft}
                 registeredTools={registeredTools}
+                variablesCatalog={variables.data}
                 disabled={disabled}
               />
             )}

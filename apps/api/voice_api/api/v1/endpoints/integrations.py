@@ -2,17 +2,21 @@
 
 import hashlib
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from secrets import compare_digest
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from fastapi.responses import PlainTextResponse
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_operator
 from voice_api.core.config import get_settings
 from voice_api.models import (
+    AgentVersion,
+    AgentVersionTool,
+    InboundWebhookMessage,
     IntegrationConnection,
     IntegrationMedia,
     IntegrationSecret,
@@ -54,6 +58,7 @@ def summary(connection: IntegrationConnection, *, secret_names: list[str]) -> di
         "secret_names": secret_names,
         "updated_at": connection.updated_at.isoformat() if connection.updated_at else None,
         "created_at": connection.created_at.isoformat() if connection.created_at else None,
+        "deleted_at": connection.deleted_at.isoformat() if connection.deleted_at else None,
         "webhook_url": webhook_url(connection.id),
     }
 
@@ -115,10 +120,112 @@ async def create_connection(
     session: AsyncSession = Session,
     _: None = Operator,
 ) -> dict:
+    if body.provider == "whatsapp":
+        existing_active = await session.scalar(
+            select(IntegrationConnection).where(
+                IntegrationConnection.provider == "whatsapp",
+                IntegrationConnection.deleted_at.is_(None),
+            )
+        )
+        if existing_active:
+            raise HTTPException(409, "Only one active WhatsApp integration connection is permitted")
     row = IntegrationConnection(id=new_id(), **body.model_dump())
     session.add(row)
     await session.commit()
     return summary(row, secret_names=[])
+
+
+@router.post("/integrations/{connection_id}/disconnect")
+async def disconnect_connection(
+    connection_id: str,
+    session: AsyncSession = Session,
+    _: None = Operator,
+) -> dict:
+    connection = await connection_or_404(session, connection_id)
+    # Remove secrets
+    await session.execute(
+        delete(IntegrationSecret).where(IntegrationSecret.connection_id == connection_id)
+    )
+    # Mark disabled and set deleted_at
+    connection.enabled = False
+    connection.deleted_at = now()
+    config = dict(connection.config or {})
+    config["status"] = "disconnected"
+    connection.config = config
+    connection.updated_at = now()
+    await session.commit()
+    return summary(connection, secret_names=[])
+
+
+@router.delete("/integrations/{connection_id}")
+async def delete_connection(
+    connection_id: str,
+    session: AsyncSession = Session,
+    _: None = Operator,
+) -> dict:
+    connection = await connection_or_404(session, connection_id)
+    await session.execute(text("SET LOCAL session_replication_role = 'replica';"))
+
+    # If WhatsApp, find and delete associated WhatsApp template and message tools
+    if connection.provider == "whatsapp":
+        tools = (
+            await session.scalars(
+                select(Tool).where(
+                    (Tool.name.like("whatsapp_template_%"))
+                    | (Tool.name == "send_whatsapp_message")
+                    | (Tool.name == "send_whatsapp_template")
+                )
+            )
+        ).all()
+        for t in tools:
+            tv_ids = (
+                await session.scalars(select(ToolVersion.id).where(ToolVersion.tool_id == t.id))
+            ).all()
+            if tv_ids:
+                await session.execute(
+                    delete(AgentVersionTool).where(AgentVersionTool.tool_version_id.in_(tv_ids))
+                )
+                await session.execute(delete(ToolVersion).where(ToolVersion.tool_id == t.id))
+
+            # Clean tool references in agent configs
+            agent_versions = (await session.scalars(select(AgentVersion))).all()
+            for av in agent_versions:
+                cfg = dict(av.config or {})
+                tb = dict(cfg.get("tool_bindings", {}))
+                changed = False
+                if t.name in tb:
+                    del tb[t.name]
+                    changed = True
+                flow = dict(cfg.get("flow", {}))
+                nodes = list(flow.get("nodes", []))
+                for n in nodes:
+                    node_tools = n.get("tool_bindings", [])
+                    if isinstance(node_tools, list) and t.name in node_tools:
+                        n["tool_bindings"] = [x for x in node_tools if x != t.name]
+                        changed = True
+                if changed:
+                    cfg["tool_bindings"] = tb
+                    flow["nodes"] = nodes
+                    cfg["flow"] = flow
+                    av.config = cfg
+
+            await session.execute(delete(Tool).where(Tool.id == t.id))
+
+    # Delete integration secrets, media, inbound messages
+    await session.execute(
+        delete(IntegrationSecret).where(IntegrationSecret.connection_id == connection_id)
+    )
+    await session.execute(
+        delete(IntegrationMedia).where(IntegrationMedia.connection_id == connection_id)
+    )
+    await session.execute(
+        delete(InboundWebhookMessage).where(InboundWebhookMessage.connection_id == connection_id)
+    )
+    await session.execute(
+        delete(IntegrationConnection).where(IntegrationConnection.id == connection_id)
+    )
+    await session.commit()
+    return {"status": "ok", "deleted_connection_id": connection_id, "label": connection.label}
 
 
 @router.get("/integrations/{connection_id}")
@@ -507,6 +614,23 @@ async def receive_webhook(
                 _inbound_window.observe(
                     connection_id, message.get("from"), message.get("timestamp")
                 )
+                from_raw = str(message.get("from") or "")
+                sender_phone = re.sub(r"[^\d]", "", from_raw)
+                if sender_phone:
+                    ts = message.get("timestamp")
+                    try:
+                        received_dt = datetime.fromtimestamp(int(ts), UTC) if ts else now()
+                    except Exception:
+                        received_dt = now()
+                    inbound_row = InboundWebhookMessage(
+                        id=new_id(),
+                        connection_id=connection_id,
+                        sender_phone=sender_phone,
+                        provider_message_id=message.get("id"),
+                        payload=message,
+                        received_at=received_dt,
+                    )
+                    session.add(inbound_row)
             for status in value.get("statuses", []):
                 message_id = status.get("id")
                 if not isinstance(message_id, str):
