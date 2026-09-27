@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import type { components } from "@/generated/api";
 import {
   LoadState,
   PageBody,
@@ -11,22 +12,10 @@ import {
 } from "@/components/record-page";
 import { Button } from "@/components/ui/button";
 import { useResource } from "@/lib/resources";
+import { ToolEditor } from "./ToolEditor";
 
-type ToolVersion = {
-  id: string;
-  version: number;
-  revision: number;
-  status: "draft" | "published";
-  config: {
-    name: string;
-    description: string;
-    kind: string;
-    handler?: string | null;
-    http?: { url: string; method: string } | null;
-    parameters?: Record<string, unknown> | null;
-    wait?: { mode: string; acknowledgement?: string | null } | null;
-  };
-};
+type ToolVersion = components["schemas"]["ToolVersionResponse"];
+type HandlerCatalog = components["schemas"]["ToolHandlerCatalog"];
 
 export function ToolDetailPage() {
   const { toolId = "" } = useParams();
@@ -34,18 +23,20 @@ export function ToolDetailPage() {
   const { data, loading, error, reload } = useResource<{
     versions: ToolVersion[];
   }>(`/tools/${toolId}/versions`);
+  const { data: handlers } = useResource<HandlerCatalog>("/tools/handlers");
   const [busy, setBusy] = useState<string | null>(null);
-  async function action(version: ToolVersion, kind: "clone" | "publish") {
+  const [editingVersionId, setEditingVersionId] = useState<string | null>(null);
+  async function clone(version: ToolVersion) {
     setBusy(version.id);
     try {
-      await api(`/tool-versions/${version.id}/${kind}`, {
+      await api(`/tool-versions/${version.id}/clone`, {
         method: "POST",
         body: JSON.stringify({ revision: version.revision }),
       });
-      toast.success(kind === "clone" ? "Draft cloned" : "Tool published");
+      toast.success("Draft cloned");
       await reload();
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "Action failed");
+      toast.error(cause instanceof Error ? cause.message : "Could not clone draft");
     } finally {
       setBusy(null);
     }
@@ -80,18 +71,28 @@ export function ToolDetailPage() {
                 {version.config.description || "No description"}
               </p>
               <ReadOnlyValue label="Kind" value={version.config.kind} />
-              <ReadOnlyValue
-                label="Handler"
-                value={version.config.handler || "Not applicable"}
-              />
-              <ReadOnlyValue
-                label="Endpoint"
-                value={version.config.http?.url || "Not applicable"}
-              />
-              <ReadOnlyValue
-                label="Method"
-                value={version.config.http?.method || "Not applicable"}
-              />
+              {version.config.kind === "registered" ? (
+                <>
+                  <ReadOnlyValue label="Execution" value="Registered backend handler" />
+                  <ReadOnlyValue label="Handler" value={version.config.handler ?? "Unconfigured"} />
+                  <ReadOnlyValue
+                    label="Provider"
+                    value={version.config.whatsapp ? "WhatsApp Cloud API" : "Native runtime"}
+                  />
+                  {version.config.whatsapp && (
+                    <ReadOnlyValue
+                      label="WhatsApp template"
+                      value={`${version.config.whatsapp.template_name} · ${version.config.whatsapp.language}`}
+                    />
+                  )}
+                </>
+              ) : (
+                <>
+                  <ReadOnlyValue label="Execution" value="HTTP request" />
+                  <ReadOnlyValue label="Endpoint" value={version.config.http?.url ?? "Unconfigured"} />
+                  <ReadOnlyValue label="Method" value={version.config.http?.method ?? "Unconfigured"} />
+                </>
+              )}
               <ReadOnlyValue
                 label="Wait mode"
                 value={version.config.wait?.mode || "inline"}
@@ -118,30 +119,40 @@ export function ToolDetailPage() {
                 {version.status === "draft" ? (
                   <Button
                     size="sm"
+                    variant={editingVersionId === version.id ? "secondary" : "default"}
                     disabled={busy === version.id}
-                    onClick={() => void action(version, "publish")}
+                    onClick={() => setEditingVersionId((current) => current === version.id ? null : version.id)}
                   >
-                    Publish
+                    {editingVersionId === version.id ? "Close editor" : "Edit draft"}
                   </Button>
                 ) : (
                   <Button
                     size="sm"
                     variant="outline"
                     disabled={busy === version.id}
-                    onClick={() => void action(version, "clone")}
+                    onClick={() => void clone(version)}
                   >
                     Clone draft
                   </Button>
                 )}
               </div>
+              {version.status === "draft" && editingVersionId === version.id && (
+                <ToolEditor
+                  version={version}
+                  handlers={handlers?.handlers ?? []}
+                  onSaved={async () => {
+                    setEditingVersionId(null);
+                    await reload();
+                  }}
+                />
+              )}
             </section>
           ))}
         </div>
       </LoadState>
       <p className="text-xs text-muted-foreground">
-        Tool draft field editor remains pending handler capabilities and
-        validated HTTP destination controls. Versions are never edited through a
-        raw JSON form.
+        Published versions are immutable. Editing always happens on a draft,
+        with the reviewed handler catalog or validated HTTP controls.
       </p>
     </PageBody>
   );

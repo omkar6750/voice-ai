@@ -7,7 +7,16 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { clock, consumingLlm, duration, resultsFor, stamp } from "./model";
+import {
+  clock,
+  classifierDeliveryFor,
+  classifierResultsFor,
+  consumingLlm,
+  deliveryFor,
+  duration,
+  resultsFor,
+  stamp,
+} from "./model";
 import type { RunDetail, Selection, Timeline } from "./types";
 
 function Value({
@@ -68,6 +77,40 @@ function Evidence({
             <Value label="Hash">{run.config_hash ?? "Not recorded"}</Value>
           </dl>
           {run.error && <Json label="Run error" value={run.error} />}
+          {timeline.diagnostics.length ? (
+            <section className="flex flex-col gap-2">
+              <h4 className="text-sm font-medium">Runtime diagnostics</h4>
+              {timeline.diagnostics.map((diagnostic) => (
+                <div
+                  key={diagnostic.diagnostic_id}
+                  className="rounded-md border p-3 text-xs"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium">
+                      {diagnostic.category.replaceAll("_", " ")}
+                    </span>
+                    <span className="capitalize text-muted-foreground">
+                      {diagnostic.severity}
+                    </span>
+                  </div>
+                  <p className="mt-1">{diagnostic.message}</p>
+                  <p className="mt-1 text-muted-foreground">
+                    {diagnostic.source}
+                    {diagnostic.code ? ` · ${diagnostic.code}` : ""}
+                    {diagnostic.http_status
+                      ? ` · HTTP ${diagnostic.http_status}`
+                      : ""}
+                    {diagnostic.uncertain ? " · outcome uncertain" : ""}
+                  </p>
+                  {diagnostic.detail && (
+                    <p className="mt-2 break-words text-muted-foreground">
+                      {diagnostic.detail}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </section>
+          ) : null}
           <Button
             variant="outline"
             onClick={() => onSelect({ kind: "prompt" })}
@@ -197,6 +240,7 @@ function Evidence({
   if (selection.kind === "span") {
     const span = timeline.spans.find((item) => item.id === selection.id);
     if (!span) return null;
+    const classifierResults = classifierResultsFor(timeline, span);
     return (
       <>
         <CardHeader>
@@ -209,6 +253,16 @@ function Evidence({
           <dl>
             <Value label="Provider">{span.provider ?? "Runtime"}</Value>
             <Value label="Model">{span.model ?? "Not recorded"}</Value>
+            <Value label="Output state">
+              {span.category === "llm"
+                ? `Generated text · ${span.output_state}`
+                : span.category === "tts"
+                  ? `Spoken text · ${span.output_state}`
+                  : span.output_state}
+            </Value>
+            <Value label="Interrupted by">
+              {span.interruption_id ?? "Not interrupted"}
+            </Value>
             <Value label="Started">{stamp(span.started_at)}</Value>
             <Value label="Ended">{stamp(span.ended_at)}</Value>
             <Value label="Duration">{duration(span.duration_ms)}</Value>
@@ -236,6 +290,28 @@ function Evidence({
             value={span.output}
           />
           <Json label="Attributes" value={span.attributes} />
+          {classifierResults.map((result) => {
+            const delivery = classifierDeliveryFor(timeline, result);
+            return (
+              <div key={result.id} className="flex flex-col gap-2 rounded-md border p-3">
+                <Value label="Classifier phase">
+                  {result.phase} · {result.node_key}
+                </Value>
+                <Value label="Classifier state">{result.status}</Value>
+                <Value label="Added to context">
+                  {stamp(delivery?.delivered_at)}
+                </Value>
+                <Value label="Context state">
+                  {delivery?.status ?? "Not recorded"}
+                </Value>
+                <Value label="Consumed by LLM">
+                  {delivery?.consuming_operation_id ?? "Not recorded"}
+                </Value>
+                <Json label="Classifier result" value={result.result} />
+                {result.error && <Json label="Classifier error" value={result.error} />}
+              </div>
+            );
+          })}
           {timeline.tools
             .filter((item) => item.llm_operation_id === span.id)
             .map((tool) => (
@@ -248,6 +324,40 @@ function Evidence({
                 Called {tool.binding_key}
               </Button>
             ))}
+        </CardContent>
+      </>
+    );
+  }
+  if (selection.kind === "interruption") {
+    const interruption = timeline.interruptions.find(
+      (item) => item.id === selection.id,
+    );
+    if (!interruption) return null;
+    return (
+      <>
+        <CardHeader>
+          <CardTitle>Barge-in / interruption</CardTitle>
+          <CardDescription>
+            {interruption.source} · {interruption.frame_type}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <dl>
+            <Value label="Reason">{interruption.reason}</Value>
+            <Value label="Occurred">{stamp(interruption.occurred_at)}</Value>
+            <Value label="Operations">
+              {interruption.interrupted_operation_ids.join(", ") ||
+                "None recorded"}
+            </Value>
+            <Value label="Tools">
+              {interruption.interrupted_tool_invocation_ids.join(", ") ||
+                "None recorded"}
+            </Value>
+          </dl>
+          <p className="text-xs text-muted-foreground">
+            Generated text, spoken text, and playback are separate spans; this
+            event links the work that was cancelled by the caller interruption.
+          </p>
         </CardContent>
       </>
     );
@@ -312,6 +422,7 @@ function Evidence({
       (item) => item.id === selection.id,
     );
     if (!result) return null;
+    const delivery = deliveryFor(timeline, result);
     const next = consumingLlm(timeline, result);
     return (
       <>
@@ -324,7 +435,18 @@ function Evidence({
         <CardContent className="flex flex-col gap-3">
           <dl>
             <Value label="Occurred">{stamp(result.occurred_at)}</Value>
-            <Value label="Consumed">{stamp(result.consumed_at)}</Value>
+            <Value label="Added to context">
+              {stamp(delivery?.delivered_at)}
+            </Value>
+            <Value label="Delivery state">
+              {delivery?.status ?? "Not recorded"}
+            </Value>
+            <Value label="Context message index">
+              {delivery?.context_message_index ?? "Not recorded"}
+            </Value>
+            <Value label="Consumed by LLM">
+              {stamp(delivery?.consumed_at ?? result.consumed_at)}
+            </Value>
             <Value label="Exchange">
               {timeline.exchanges.find(
                 (item) => item.id === result.consumed_exchange_id,
@@ -351,8 +473,7 @@ function Evidence({
                 First later LLM request · {clock(next.started_at)}
               </Button>
               <p className="text-xs text-muted-foreground">
-                Linked by exchange and timestamp, not an explicit
-                consuming-operation ID.
+                Linked to the exact consuming LLM operation from runtime evidence.
               </p>
             </>
           )}

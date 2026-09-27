@@ -43,14 +43,18 @@ class IntegrationMedia(Identity, Base):
     __table_args__ = (UniqueConstraint("connection_id", "provider_media_id"),)
     connection_id: Mapped[str] = mapped_column(ForeignKey("integration_connections.id"))
     provider_media_id: Mapped[str] = mapped_column(String(120))
+    display_name: Mapped[str] = mapped_column(String(255))
     filename: Mapped[str] = mapped_column(String(255))
+    media_type: Mapped[str] = mapped_column(String(30))
     mime_type: Mapped[str] = mapped_column(String(100))
     size_bytes: Mapped[int]
-    sha256: Mapped[str] = mapped_column(String(64))
+    sha256: Mapped[str | None] = mapped_column(String(64))
     source_path: Mapped[str | None] = mapped_column(Text)
-    availability: Mapped[str] = mapped_column(String(30), default="available")
+    source: Mapped[str] = mapped_column(String(30), default="uploaded")
+    status: Mapped[str] = mapped_column(String(30), default="available")
+    provider_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
-    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class CalendarIntegration(Identity, Updated, Base):

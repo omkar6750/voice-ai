@@ -3,12 +3,36 @@
 from .agent import AgentConfig, ContextConfig, FlowConfig, FlowNodeConfig, LanguageConfig
 from .base import ConfigModel
 from .cadence import CadenceConfig, ClassifierConfig, SummarizerConfig
+from .diagnostics import DiagnosticInput, DiagnosticPayload
 from .knowledge import KnowledgeConfig, RetrievalConfig
-from .providers import AudioConfig, CallLimits, LLMConfig, STTConfig, TTSConfig, VADConfig
-from .tools import HTTPToolConfig, RetryConfig, ToolBinding, ToolConfig, WaitConfig
+from .providers import (
+    RUNTIME_PROVIDER_CAPABILITIES,
+    AudioConfig,
+    CallLimits,
+    LLMConfig,
+    STTConfig,
+    TTSConfig,
+    VADConfig,
+    runtime_provider_capability,
+)
+from .registry import (
+    RegisteredHandlerSpec,
+    is_registered_handler,
+    registered_handler_names,
+    registered_handler_specs,
+)
+from .tools import (
+    HTTPToolConfig,
+    RetryConfig,
+    ToolBinding,
+    ToolConfig,
+    WaitConfig,
+    WhatsAppTemplateConfig,
+)
 from .workspace import WorkspaceConfig
 
 __all__ = [
+    "RUNTIME_PROVIDER_CAPABILITIES",
     "AgentConfig",
     "AudioConfig",
     "CadenceConfig",
@@ -16,12 +40,15 @@ __all__ = [
     "ClassifierConfig",
     "ConfigModel",
     "ContextConfig",
+    "DiagnosticInput",
+    "DiagnosticPayload",
     "FlowConfig",
     "FlowNodeConfig",
     "HTTPToolConfig",
     "KnowledgeConfig",
     "LLMConfig",
     "LanguageConfig",
+    "RegisteredHandlerSpec",
     "RetrievalConfig",
     "RetryConfig",
     "STTConfig",
@@ -31,5 +58,10 @@ __all__ = [
     "ToolConfig",
     "VADConfig",
     "WaitConfig",
+    "WhatsAppTemplateConfig",
     "WorkspaceConfig",
+    "is_registered_handler",
+    "registered_handler_names",
+    "registered_handler_specs",
+    "runtime_provider_capability",
 ]

@@ -4,8 +4,10 @@ import asyncio
 import time
 
 import httpx
+from voice_runtime.contracts import runtime_provider_capability
 
 from voice_api.core.config import Settings
+from voice_api.schemas.providers import ProviderCatalogResponse
 
 _TTL_SECONDS = 6 * 60 * 60
 _cache: dict[str, tuple[float, list[str]]] = {}
@@ -64,7 +66,7 @@ async def _models(provider: str, key: str) -> tuple[list[str], str]:
             return (cached[1], "stale") if cached else ([], "unavailable")
 
 
-async def get_provider_registry(settings: Settings) -> dict:
+async def get_provider_registry(settings: Settings) -> ProviderCatalogResponse:
     providers = []
     for name, key in (("groq", settings.groq_api_key), ("gemini", settings.gemini_api_key)):
         models, status = await _models(name, key) if key else ([], "unconfigured")
@@ -74,25 +76,25 @@ async def get_provider_registry(settings: Settings) -> dict:
                 "slots": ["llm"],
                 "models": models,
                 "models_by_slot": {"llm": models},
+                "fields": {
+                    "model": {
+                        "type": "string",
+                        "runtime_supported": True,
+                        "description": "Provider model identifier.",
+                    }
+                },
                 "status": status,
+                "runtime_status": "supported",
             }
         )
-    providers.extend(
-        [
+    for name, key in (("sarvam", settings.sarvam_api_key), ("cartesia", settings.cartesia_api_key)):
+        capability = runtime_provider_capability(name)
+        providers.append(
             {
-                "provider": "sarvam",
-                "slots": ["stt", "tts"],
-                "models": ["saaras:v3", "bulbul:v3"],
-                "models_by_slot": {"stt": ["saaras:v3"], "tts": ["bulbul:v3"]},
-                "status": "configured" if settings.sarvam_api_key else "unconfigured",
-            },
-            {
-                "provider": "cartesia",
-                "slots": ["tts"],
-                "models": ["sonic-3"],
-                "models_by_slot": {"tts": ["sonic-3"]},
-                "status": "configured" if settings.cartesia_api_key else "unconfigured",
-            },
-        ]
-    )
-    return {"providers": providers}
+                "provider": name,
+                "models": sorted({model for models in capability["models_by_slot"].values() for model in models}),
+                "status": "configured" if key else "unconfigured",
+                **capability,
+            }
+        )
+    return ProviderCatalogResponse.model_validate({"providers": providers})

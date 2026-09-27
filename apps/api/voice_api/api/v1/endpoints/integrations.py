@@ -7,7 +7,7 @@ from pathlib import Path
 from secrets import compare_digest
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,8 +27,12 @@ from voice_api.models import (
 from voice_api.models.common import new_id, now
 from voice_api.schemas.integrations import (
     ConnectionBody,
+    GeneratedTemplateToolResponse,
     GenerateTemplateToolBody,
     MediaImportBody,
+    MediaListResponse,
+    MediaResponse,
+    MediaUpdateBody,
     SecretBody,
     UpdateConnectionBody,
 )
@@ -61,6 +65,44 @@ def summary(connection: IntegrationConnection, *, secret_names: list[str]) -> di
         "deleted_at": connection.deleted_at.isoformat() if connection.deleted_at else None,
         "webhook_url": webhook_url(connection.id),
     }
+
+
+def media_response(row: IntegrationMedia) -> MediaResponse:
+    return MediaResponse(
+        id=row.id,
+        connection_id=row.connection_id,
+        provider_media_id=row.provider_media_id,
+        display_name=row.display_name,
+        filename=row.filename,
+        media_type=row.media_type,
+        mime_type=row.mime_type,
+        size_bytes=row.size_bytes,
+        sha256=row.sha256,
+        source=row.source,
+        status=row.status,
+        provider_metadata=row.provider_metadata,
+        uploaded_at=row.uploaded_at,
+        last_verified_at=row.last_verified_at,
+    )
+
+
+def media_type_for_mime(mime_type: str) -> str:
+    if mime_type.startswith("image/"):
+        return "image"
+    if mime_type.startswith("video/"):
+        return "video"
+    if mime_type.startswith("audio/"):
+        return "audio"
+    return "document"
+
+
+def safe_media_metadata(payload: dict[str, Any], *, provider_media_id: str) -> dict[str, Any]:
+    """Keep only non-secret, stable fields from Meta media responses."""
+
+    allowed = {"id", "mime_type", "sha256", "file_size", "messaging_product"}
+    result = {key: value for key, value in payload.items() if key in allowed}
+    result["id"] = provider_media_id
+    return result
 
 
 async def connection_or_404(session: AsyncSession, connection_id: str) -> IntegrationConnection:
@@ -386,12 +428,12 @@ async def rotate_secrets(
     await session.commit()
 
 
-@router.get("/integrations/{connection_id}/media")
+@router.get("/integrations/{connection_id}/media", response_model=MediaListResponse)
 async def list_media(
     connection_id: str,
     session: AsyncSession = Session,
     _: None = Operator,
-) -> dict:
+) -> MediaListResponse:
     await connection_or_404(session, connection_id)
     rows = (
         await session.scalars(
@@ -400,48 +442,72 @@ async def list_media(
             .order_by(IntegrationMedia.uploaded_at.desc())
         )
     ).all()
-    return {
-        "media": [
-            {
-                "id": row.id,
-                "provider_media_id": row.provider_media_id,
-                "filename": row.filename,
-                "mime_type": row.mime_type,
-                "size_bytes": row.size_bytes,
-                "sha256": row.sha256,
-                "availability": row.availability,
-            }
-            for row in rows
-        ]
-    }
+    return MediaListResponse(media=[media_response(row) for row in rows])
 
 
-@router.post("/integrations/{connection_id}/media/import", status_code=201)
+@router.post(
+    "/integrations/{connection_id}/media/import",
+    status_code=201,
+    response_model=MediaResponse,
+)
 async def import_media(
     connection_id: str,
     body: MediaImportBody,
     session: AsyncSession = Session,
     _: None = Operator,
-) -> dict:
-    await connection_or_404(session, connection_id)
-    row = IntegrationMedia(id=new_id(), connection_id=connection_id, **body.model_dump())
+) -> MediaResponse:
+    connection = await connection_or_404(session, connection_id)
+    if connection.provider != "whatsapp":
+        raise HTTPException(422, "Media catalog is available only for WhatsApp connections")
+    existing = await session.scalar(
+        select(IntegrationMedia).where(
+            IntegrationMedia.connection_id == connection_id,
+            IntegrationMedia.provider_media_id == body.provider_media_id,
+        )
+    )
+    if existing is not None:
+        raise HTTPException(409, "This provider media ID is already in the catalog")
+    row = IntegrationMedia(
+        id=new_id(),
+        connection_id=connection_id,
+        provider_media_id=body.provider_media_id,
+        display_name=body.display_name,
+        filename=body.original_filename or body.display_name,
+        media_type=body.media_type,
+        mime_type=body.mime_type,
+        size_bytes=body.size_bytes,
+        sha256=body.sha256,
+        source="imported",
+        status="unverified",
+        provider_metadata=safe_media_metadata(
+            body.provider_metadata, provider_media_id=body.provider_media_id
+        ),
+    )
     session.add(row)
     await session.commit()
-    return {"id": row.id, "availability": row.availability}
+    return media_response(row)
 
 
-@router.post("/integrations/{connection_id}/media/upload", status_code=201)
+@router.post(
+    "/integrations/{connection_id}/media/upload",
+    status_code=201,
+    response_model=MediaResponse,
+)
 async def upload_media(
     connection_id: str,
     file: UploadFile,
+    display_name: str | None = Form(default=None),
     session: AsyncSession = Session,
     _: None = Operator,
-) -> dict:
+) -> MediaResponse:
     connection = await connection_or_404(session, connection_id)
     content = await file.read()
     if not content or len(content) > 16 * 1024 * 1024:
         raise HTTPException(422, "Media must be between 1 byte and 16 MiB")
     filename = Path(file.filename or "upload").name
+    display_name = (display_name or filename).strip()
+    if not display_name or len(display_name) > 255:
+        raise HTTPException(422, "Display name must be between 1 and 255 characters")
     mime_type = file.content_type or "application/octet-stream"
     adapter = await whatsapp(session, connection)
     async with adapter:
@@ -459,14 +525,79 @@ async def upload_media(
         connection_id=connection_id,
         provider_media_id=provider_media_id,
         filename=filename,
+        display_name=display_name,
+        media_type=media_type_for_mime(mime_type),
         mime_type=mime_type,
         size_bytes=len(content),
         sha256=digest,
         source_path=str(source_path),
+        source="uploaded",
+        status="available",
+        provider_metadata=safe_media_metadata(provider, provider_media_id=provider_media_id),
+        last_verified_at=now(),
     )
     session.add(row)
     await session.commit()
-    return {"id": row.id, "provider_media_id": row.provider_media_id, "sha256": row.sha256}
+    return media_response(row)
+
+
+@router.patch(
+    "/integrations/{connection_id}/media/{media_id}", response_model=MediaResponse
+)
+async def update_media(
+    connection_id: str,
+    media_id: str,
+    body: MediaUpdateBody,
+    session: AsyncSession = Session,
+    _: None = Operator,
+) -> MediaResponse:
+    await connection_or_404(session, connection_id)
+    row = await session.scalar(
+        select(IntegrationMedia).where(
+            IntegrationMedia.id == media_id,
+            IntegrationMedia.connection_id == connection_id,
+        )
+    )
+    if row is None:
+        raise HTTPException(404, "Media record not found")
+    row.display_name = body.display_name.strip()
+    await session.commit()
+    return media_response(row)
+
+
+@router.post(
+    "/integrations/{connection_id}/media/{media_id}/verify", response_model=MediaResponse
+)
+async def verify_media(
+    connection_id: str,
+    media_id: str,
+    session: AsyncSession = Session,
+    _: None = Operator,
+) -> MediaResponse:
+    connection = await connection_or_404(session, connection_id)
+    row = await session.scalar(
+        select(IntegrationMedia).where(
+            IntegrationMedia.id == media_id,
+            IntegrationMedia.connection_id == connection_id,
+        )
+    )
+    if row is None:
+        raise HTTPException(404, "Media record not found")
+    adapter = await whatsapp(session, connection)
+    async with adapter:
+        provider = await adapter.check_media(row.provider_media_id)
+    row.status = "available"
+    row.last_verified_at = now()
+    row.provider_metadata = safe_media_metadata(provider, provider_media_id=row.provider_media_id)
+    if isinstance(provider.get("mime_type"), str):
+        row.mime_type = provider["mime_type"]
+        row.media_type = media_type_for_mime(row.mime_type)
+    if isinstance(provider.get("file_size"), int):
+        row.size_bytes = provider["file_size"]
+    if isinstance(provider.get("sha256"), str) and re.fullmatch(r"[a-f0-9]{64}", provider["sha256"]):
+        row.sha256 = provider["sha256"]
+    await session.commit()
+    return media_response(row)
 
 
 @router.get("/integrations/{connection_id}/templates")
@@ -481,13 +612,17 @@ async def templates(
         return {"templates": await adapter.template_catalog()}
 
 
-@router.post("/integrations/{connection_id}/generate-template-tool", status_code=201)
+@router.post(
+    "/integrations/{connection_id}/generate-template-tool",
+    status_code=201,
+    response_model=GeneratedTemplateToolResponse,
+)
 async def generate_template_tool(
     connection_id: str,
     body: GenerateTemplateToolBody,
     session: AsyncSession = Session,
     _: None = Operator,
-) -> dict:
+) -> GeneratedTemplateToolResponse:
     connection = await connection_or_404(session, connection_id)
     adapter = await whatsapp(session, connection)
     async with adapter:
@@ -550,25 +685,69 @@ async def generate_template_tool(
         media = await session.scalar(
             select(IntegrationMedia).where(
                 IntegrationMedia.connection_id == connection_id,
-                IntegrationMedia.provider_media_id == header_media_id,
-                IntegrationMedia.availability == "available",
+                IntegrationMedia.id == header_media_id,
+                IntegrationMedia.status == "available",
             )
         )
         if media is None:
             raise HTTPException(422, "Selected header media is not available for this integration")
-    if header_component and header_component.get("format") == "IMAGE" and not header_media_id:
-        raise HTTPException(422, "This template requires a selected header image")
+        expected_type = {
+            "IMAGE": "image",
+            "VIDEO": "video",
+            "DOCUMENT": "document",
+        }.get(str(header_component.get("format", "")).upper()) if header_component else None
+        if expected_type and media.media_type != expected_type:
+            raise HTTPException(
+                422,
+                f"Selected media is type '{media.media_type}', but this template requires '{expected_type}'",
+            )
+    if header_component and str(header_component.get("format", "")).upper() in {
+        "IMAGE",
+        "VIDEO",
+        "DOCUMENT",
+    } and not header_media_id:
+        raise HTTPException(422, "This template requires a matching header media record")
     description = (
         body.description
         or f"Send approved WhatsApp template '{match.get('name')}' ({match.get('language')}) via {connection.label}."
     )
+
+    parameter_mappings = dict(body.parameter_mappings)
+    if not parameter_mappings:
+        template_indexes = re.findall(r"\{\{(\d+)\}\}", body_component.get("text", "")) if body_component else []
+        if len(template_indexes) == 1:
+            parameter_mappings = {template_indexes[0]: "message"}
+        else:
+            parameter_mappings = {
+                index: ("caller_name" if index == "1" else f"param_{index}")
+                for index in sorted(set(template_indexes))
+            }
+
+    unknown_mapping_keys = set(parameter_mappings) - set(properties)
+    if unknown_mapping_keys:
+        raise HTTPException(
+            422,
+            f"Parameter mappings reference unknown template arguments: {sorted(unknown_mapping_keys)}",
+        )
+    unknown_argument_keys = set(parameter_mappings.values()) - set(properties)
+    if unknown_argument_keys:
+        raise HTTPException(
+            422,
+            f"Parameter mappings reference unknown tool arguments: {sorted(unknown_argument_keys)}",
+        )
 
     config = {
         "name": tool_name,
         "description": description,
         "kind": "registered",
         "handler": "send_whatsapp_template",
-        **({"header_media_id": header_media_id} if header_media_id else {}),
+        "whatsapp": {
+            "connection_id": connection_id,
+            "template_name": match.get("name"),
+            "language": match.get("language") or body.language,
+            "header_media_id": header_media_id,
+            "parameter_mappings": parameter_mappings,
+        },
         "parameters": {
             "type": "object",
             "properties": properties,
@@ -601,16 +780,16 @@ async def generate_template_tool(
 
     await session.commit()
     extracted_variables = sorted({key for key in properties if key not in {"caller_name", "to"}})
-    return {
-        "tool_id": tool.id,
-        "tool_version_id": version.id,
-        "name": tool.name,
-        "tool_name": tool.name,
-        "version": version.version,
-        "version_number": version.version,
-        "extracted_variables": extracted_variables,
-        "config": version.config,
-    }
+    return GeneratedTemplateToolResponse(
+        tool_id=tool.id,
+        tool_version_id=version.id,
+        name=tool.name,
+        tool_name=tool.name,
+        version=version.version,
+        version_number=version.version,
+        extracted_variables=extracted_variables,
+        config=version.config,
+    )
 
 
 @router.get("/integrations/whatsapp/{connection_id}/webhook")

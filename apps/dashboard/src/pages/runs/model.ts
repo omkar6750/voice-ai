@@ -1,4 +1,11 @@
-import type { Exchange, Span, Timeline, Tool, ToolResult } from "./types";
+import type {
+  Exchange,
+  Span,
+  Timeline,
+  Tool,
+  ToolContextDelivery,
+  ToolResult,
+} from "./types";
 
 export const isActive = (status: string) =>
   ["queued", "claimed", "running"].includes(status);
@@ -30,10 +37,55 @@ export function resultsFor(timeline: Timeline, tool: Tool): ToolResult[] {
     .sort((a, b) => a.sequence - b.sequence);
 }
 
+export function deliveryFor(
+  timeline: Timeline,
+  result: ToolResult,
+): ToolContextDelivery | null {
+  return (
+    timeline.tool_context_deliveries.find(
+      (delivery) => delivery.result_id === result.id,
+    ) ?? null
+  );
+}
+
+export function classifierResultsFor(timeline: Timeline, span: Span) {
+  return timeline.classifier_results.filter(
+    (result) => result.operation_id === span.id,
+  );
+}
+
+export function classifierDeliveryFor(
+  timeline: Timeline,
+  result: Timeline["classifier_results"][number],
+) {
+  return timeline.classifier_context_deliveries.find(
+    (delivery) => delivery.classifier_result_id === result.id,
+  );
+}
+
+export function spanDepth(timeline: Timeline, spanId: string): number {
+  let depth = 0;
+  const seen = new Set<string>();
+  let current = timeline.spans.find((span) => span.id === spanId);
+  while (current?.parent_id && !seen.has(current.id)) {
+    seen.add(current.id);
+    depth += 1;
+    current = timeline.spans.find((span) => span.id === current?.parent_id);
+  }
+  return depth;
+}
+
 export function consumingLlm(
   timeline: Timeline,
   result: ToolResult,
 ): Span | null {
+  const delivery = deliveryFor(timeline, result);
+  if (delivery?.consuming_span_id) {
+    return (
+      timeline.spans.find((span) => span.id === delivery.consuming_span_id) ??
+      null
+    );
+  }
   if (!result.consumed_at || !result.consumed_exchange_id) return null;
   return (
     timeline.spans

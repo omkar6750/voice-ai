@@ -30,7 +30,15 @@ from .integrations import (
     IntegrationSecret,
 )
 from .knowledge import AgentVersionKnowledge, KnowledgeBase, KnowledgeChunk, KnowledgeSource
-from .operations import FlowNodeVisit, ToolInvocationResult
+from .operations import (
+    ClassifierContextDelivery,
+    ClassifierResult,
+    FlowNodeVisit,
+    InterruptionEvent,
+    RunDiagnostic,
+    ToolContextDelivery,
+    ToolInvocationResult,
+)
 
 __all__ = [
     "Agent",
@@ -44,6 +52,8 @@ __all__ = [
     "Call",
     "Callback",
     "Classification",
+    "ClassifierContextDelivery",
+    "ClassifierResult",
     "Contact",
     "ContactFact",
     "ContextSummary",
@@ -54,13 +64,16 @@ __all__ = [
     "IntegrationConnection",
     "IntegrationMedia",
     "IntegrationSecret",
+    "InterruptionEvent",
     "KnowledgeBase",
     "KnowledgeChunk",
     "KnowledgeSource",
     "Run",
     "RunArtifact",
+    "RunDiagnostic",
     "RuntimeEndpoint",
     "Tool",
+    "ToolContextDelivery",
     "ToolInvocation",
     "ToolInvocationResult",
     "ToolVersion",

@@ -1,7 +1,11 @@
 """New live-call evidence must be accepted by the versioned ingestion contract."""
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
+import pytest
+import voice_runtime.execution.native as native_module
+from pipecat.processors.aggregators.llm_context import LLMContext
 from voice_api.api.v1.endpoints import calls
 from voice_api.schemas.call import StartCallBody
 from voice_runtime.contracts.evidence import EvidenceBatch
@@ -61,6 +65,110 @@ def test_flow_tools_and_provider_evidence_round_trip():
         "tool_ended",
         "tool_result_consumed",
     }
+
+
+def test_caller_barge_in_interrupts_active_generation_and_tools_once():
+    sink = MemorySink()
+    tracker = ExchangeTracker("run-1", sink)
+    tracker.begin("caller")
+    speech = tracker.start_operation("caller speech", "speech")
+    tracker.start_operation(
+        "transcription", "stt", parent_operation_id=speech["operation_id"]
+    )
+    llm = tracker.start_operation(
+        "inference", "llm", parent_operation_id=speech["operation_id"]
+    )
+    tts = tracker.start_operation(
+        "synthesis", "tts", parent_operation_id=llm["operation_id"]
+    )
+    playback = tracker.start_operation(
+        "serial playback", "playback", parent_operation_id=tts["operation_id"]
+    )
+    tool = tracker.start_tool(
+        "send_whatsapp_template", "tool-v1", "function-1", {}, llm["operation_id"]
+    )
+
+    interruption_id = tracker.interrupt(
+        source="caller", reason="caller_barge_in", frame_type="InterruptionFrame"
+    )
+    tracker.end_tool(tool, "cancelled", {"status": "cancelled"}, interruption_id=interruption_id)
+
+    records = EvidenceBatch(records=sink.records).records
+    interruption = next(record for record in records if record.kind == "interruption")
+    assert interruption.interruption_id == interruption_id
+    assert interruption.interrupted_operation_ids == [
+        llm["operation_id"],
+        tts["operation_id"],
+        playback["operation_id"],
+    ]
+    assert interruption.interrupted_tool_invocation_ids == [tool]
+    spans = [record for record in records if record.kind == "span"]
+    assert {span.status for span in spans} == {"interrupted"}
+    assert all(span.output_state == "interrupted" for span in spans)
+    ended_tool = next(record for record in records if record.kind == "tool_ended")
+    assert ended_tool.status == "cancelled"
+    assert ended_tool.interruption_id == interruption_id
+    assert len([record for record in records if record.kind == "interruption"]) == 1
+
+
+def test_classifier_result_is_delivered_and_consumed_by_next_llm():
+    sink = MemorySink()
+    tracker = ExchangeTracker("run-1", sink)
+    exchange = tracker.begin("greeting")
+    classifier = tracker.start_classifier(
+        phase="entry",
+        node_key="discovery",
+        classifier_type="llm",
+        provider="groq",
+        model="classifier-model",
+        transcript="Caller: hello",
+    )
+    result_id, message = tracker.finish_classifier(
+        classifier,
+        "completed",
+        {"lead_temperature": "warm"},
+    )
+    consuming = tracker.start_operation("inference", "llm", model="agent-model")
+    tracker.consume_classifier_results([message], exchange, consuming["operation_id"])
+    records = EvidenceBatch(records=sink.records).records
+    assert {record.kind for record in records} >= {
+        "classifier_result",
+        "classifier_context_updated",
+        "classifier_result_consumed",
+    }
+    assert any(record.result_id == result_id for record in records if record.kind == "classifier_result")
+
+
+@pytest.mark.asyncio
+async def test_configured_node_classifier_runs_once_and_returns_context_message(monkeypatch, tmp_path):
+    host = NativePipelineHost("run-1", tmp_path, SimpleNamespace(groq_api_key="test-key"))
+    host.context = LLMContext([{"role": "user", "content": "Caller: interested"}])
+    sink = MemorySink()
+    host.tracker = ExchangeTracker("run-1", sink)
+    host.tracker.begin("greeting")
+    host._snapshot = {
+        "classifier": {
+            "enabled": True,
+            "classifier_type": "llm",
+            "node_entries": ["greeting"],
+            "node_exits": [],
+            "model": {"provider": "groq", "model": "classifier-model"},
+            "prompt": "Classify the call",
+        }
+    }
+    monkeypatch.setattr(
+        native_module,
+        "run_llm_classification",
+        AsyncMock(return_value={"lead_temperature": "warm"}),
+    )
+
+    first = await host._run_node_classifier("entry", "greeting")
+    second = await host._run_node_classifier("entry", "greeting")
+
+    assert first is not None and second is not None
+    assert first[1]["role"] == "user"
+    assert first[0] != second[0]
+    assert sum(record["kind"] == "classifier_result" for record in sink.records) == 2
 
 
 def test_node_configuration_is_scoped_to_published_bindings(tmp_path):

@@ -183,20 +183,10 @@ export type AgentVersion = {
   note: string | null;
   config: AgentConfig;
 };
-export type ProviderVoice = { id: string; name: string; gender?: string };
-export type ProviderEntry = {
-  provider: string;
-  slots: string[];
-  models: string[];
-  models_by_slot?: Record<string, string[]>;
-  voices?: ProviderVoice[];
-  languages?: string[];
-  status?: string;
-  checked_at?: string | null;
-};
-export type ProviderCatalog = {
-  providers: ProviderEntry[];
-};
+export type ProviderCatalog = components["schemas"]["ProviderCatalogResponse"];
+export type ProviderEntry = components["schemas"]["ProviderEntryResponse"];
+export type ProviderField = components["schemas"]["ProviderField"];
+export type ProviderVoice = components["schemas"]["ProviderVoice"];
 export type ToolSummary = { id: string; name: string };
 export type ToolVersion = {
   id: string;

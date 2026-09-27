@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { AlertTriangle, Lock, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import type { components } from "@/generated/api";
 import { LoadState, PageBody, PageHeader } from "@/components/record-page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,22 +25,8 @@ import {
 } from "@/components/ui/table";
 import { useResource } from "@/lib/resources";
 
-type Tool = { id: string; name: string };
-
-type ToolImpact = {
-  tool_id: string;
-  tool_name: string;
-  is_system_tool: boolean;
-  can_delete: boolean;
-  system_tool_reason: string | null;
-  bound_agents: Array<{
-    agent_id: string;
-    agent_name: string;
-    version: number;
-    status: string;
-  }>;
-  versions_count: number;
-};
+type Tool = components["schemas"]["ToolSummaryResponse"];
+type ToolImpact = components["schemas"]["ToolImpactResponse"];
 
 export function ToolsPage() {
   const api = useApi();
@@ -185,13 +172,13 @@ export function ToolsPage() {
                 </span>
               </div>
 
-              {impact.bound_agents.length > 0 ? (
+              {(impact.bound_agents ?? []).length > 0 ? (
                 <div className="space-y-1.5 pt-1 text-destructive">
                   <div className="font-semibold uppercase tracking-wider">
                     Bound Agents Affected:
                   </div>
                   <ul className="list-inside list-disc space-y-1">
-                    {impact.bound_agents.map((ag, idx) => (
+                    {(impact.bound_agents ?? []).map((ag, idx) => (
                       <li key={idx}>
                         <strong>{ag.agent_name}</strong> (v{ag.version} -{" "}
                         {ag.status})

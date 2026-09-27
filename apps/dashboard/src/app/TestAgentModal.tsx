@@ -204,11 +204,13 @@ export function TestAgentModal() {
         undefined;
 
       const payload: {
+        agent_id?: string;
         agent_version_id?: string;
         contact_id?: string;
         phone_number?: string;
         contact_variables?: Record<string, string>;
       } = {
+        agent_id: selectedAgentId || undefined,
         agent_version_id: agentVersionId,
       };
 

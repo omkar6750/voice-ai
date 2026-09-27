@@ -62,6 +62,9 @@ class EvidenceObserver(BaseObserver):
         self.metrics: dict[str, dict] = {"llm": {}, "stt": {}, "tts": {}}
         self.function_operations: dict[str, str] = {}
         self.function_calls: list[dict] = []
+        self.last_speech_operation_id: str | None = None
+        self.last_tts_operation_id: str | None = None
+        self._seen_interruption_frames: set[int] = set()
         self._log = log_path.open("a", encoding="utf-8") if log_path else None
 
     def _mark(self, event: str, **details) -> None:
@@ -84,13 +87,18 @@ class EvidenceObserver(BaseObserver):
                     getattr(self.llm, "_settings", None), "system_instruction", None
                 ),
             }
-            self.tracker.consume_results(self.tracker.current)
+            exchange_id = self.tracker.current
             self.llm_operation = self.tracker.start_operation(
                 "inference",
                 "llm",
                 provider="groq",
                 model=self.models["llm"],
                 input_payload=payload,
+                parent_operation_id=self.last_speech_operation_id,
+            )
+            self.tracker.consume_results(exchange_id, self.llm_operation["operation_id"])
+            self.tracker.consume_classifier_results(
+                context.get_messages(), exchange_id, self.llm_operation["operation_id"]
             )
             self.llm_text, self.function_calls, self.metrics["llm"] = [], [], {}
             self._mark("llm_started")
@@ -102,7 +110,11 @@ class EvidenceObserver(BaseObserver):
                     provider=type(self.tts).__name__,
                     model=self.models["tts"],
                     input_payload={"text": data.frame.text},
+                    parent_operation_id=(
+                        self.llm_operation["operation_id"] if self.llm_operation else None
+                    ),
                 )
+                self.last_tts_operation_id = self.tts_operation["operation_id"]
                 self.tts_text, self.metrics["tts"] = [], {}
                 self._mark("tts_started")
             self.tts_text.append(data.frame.text)
@@ -143,6 +155,7 @@ class EvidenceObserver(BaseObserver):
                         "text": frame.text,
                         "language": str(frame.language) if frame.language else None,
                     },
+                    output_state="recorded" if frame.text else "empty",
                     **self.metrics["stt"],
                 )
                 self.stt_operation = None
@@ -153,35 +166,56 @@ class EvidenceObserver(BaseObserver):
                     self.tts_operation,
                     "completed",
                     output_payload={"text": "".join(self.tts_text)},
+                    output_state="recorded" if "".join(self.tts_text) else "empty",
                     **self.metrics["tts"],
                 )
                 self.tts_operation = None
                 self._mark("tts_stopped")
+        if isinstance(frame, InterruptionFrame):
+            frame_id = id(frame)
+            if frame_id not in self._seen_interruption_frames:
+                self._seen_interruption_frames.add(frame_id)
+                self.tracker.interrupt(
+                    source="caller",
+                    reason="caller_barge_in",
+                    frame_type=type(frame).__name__,
+                )
+                self.llm_operation = None
+                self.tts_operation = None
+                self.playback_operation = None
         if isinstance(frame, UserStartedSpeakingFrame) and self.speech_operation is None:
             self.speech_operation = self.tracker.start_operation("caller speech", "speech")
+            self.last_speech_operation_id = self.speech_operation["operation_id"]
             self.stt_operation = self.tracker.start_operation(
                 "transcription",
                 "stt",
                 provider="sarvam",
                 model=self.models["stt"],
+                parent_operation_id=self.speech_operation["operation_id"],
             )
             self.metrics["stt"] = {}
             self._mark("caller_started")
         elif isinstance(frame, UserStoppedSpeakingFrame) and self.speech_operation is not None:
-            self.tracker.finish_operation(self.speech_operation, "completed")
+            self.tracker.finish_operation(
+                self.speech_operation, "completed", output_state="not_applicable"
+            )
             self.speech_operation = None
             self._mark("caller_stopped")
         if isinstance(frame, BotStartedSpeakingFrame) and self.playback_operation is None:
-            self.playback_operation = self.tracker.start_operation("serial playback", "playback")
+            self.playback_operation = self.tracker.start_operation(
+                "serial playback",
+                "playback",
+                parent_operation_id=self.last_tts_operation_id,
+            )
             self._mark("playback_started")
         elif isinstance(frame, BotStoppedSpeakingFrame) and self.playback_operation is not None:
-            self.tracker.finish_operation(self.playback_operation, "completed")
+            self.tracker.finish_operation(
+                self.playback_operation, "completed", output_state="not_applicable"
+            )
             self.playback_operation = None
             self._mark("playback_stopped")
-        if isinstance(frame, InterruptionFrame) and self.playback_operation is not None:
-            self.tracker.finish_operation(self.playback_operation, "interrupted")
-            self.playback_operation = None
-            self._mark("playback_interrupted")
+        if isinstance(frame, InterruptionFrame):
+            self._mark("interrupted", reason="caller_barge_in")
 
     def _metrics(self, source, frame: MetricsFrame) -> None:
         category = (
@@ -218,6 +252,13 @@ class EvidenceObserver(BaseObserver):
             self.llm_operation,
             status,
             output_payload={"text": "".join(self.llm_text), "tool_calls": self.function_calls},
+            output_state=(
+                "interrupted"
+                if status in {"cancelled", "interrupted"}
+                else "recorded"
+                if self.llm_text
+                else "empty"
+            ),
             **metrics,
         )
         self.llm_operation = None

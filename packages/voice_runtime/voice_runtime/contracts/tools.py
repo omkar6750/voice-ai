@@ -29,6 +29,20 @@ class RetryConfig(ConfigModel):
     provider_idempotency_supported: bool = False
 
 
+class WhatsAppTemplateConfig(ConfigModel):
+    """Account-scoped WhatsApp template settings for a registered tool.
+
+    ``header_media_id`` is the local IntegrationMedia record ID.  The runtime
+    resolves it to Meta's provider media ID only when the tool executes.
+    """
+
+    connection_id: Identifier
+    template_name: str = Field(min_length=1, max_length=512)
+    language: str = Field(min_length=2, max_length=32)
+    header_media_id: Identifier | None = None
+    parameter_mappings: dict[str, Identifier] = Field(default_factory=dict)
+
+
 class HTTPToolConfig(ConfigModel):
     url: HttpUrl
     method: Literal["GET", "POST", "PUT", "PATCH", "DELETE"] = "POST"
@@ -55,6 +69,7 @@ class ToolConfig(ConfigModel):
     kind: Literal["registered", "http"] = "registered"
     handler: Identifier | None = None
     http: HTTPToolConfig | None = None
+    whatsapp: WhatsAppTemplateConfig | None = None
     parameters: dict[str, Any] = Field(default_factory=lambda: {"type": "object", "properties": {}})
     wait: WaitConfig = Field(default_factory=WaitConfig)
 
@@ -64,4 +79,10 @@ class ToolConfig(ConfigModel):
             raise ValueError("HTTP tools require http settings and no registered handler")
         if self.kind == "registered" and (not self.handler or self.http is not None):
             raise ValueError("registered tools require a reviewed handler and no HTTP settings")
+        if self.kind == "http" and self.whatsapp is not None:
+            raise ValueError("HTTP tools cannot contain WhatsApp settings")
+        if self.handler != "send_whatsapp_template" and self.whatsapp is not None:
+            raise ValueError("WhatsApp settings require the send_whatsapp_template handler")
+        if self.handler == "send_whatsapp_template" and self.whatsapp is None:
+            raise ValueError("send_whatsapp_template requires WhatsApp settings")
         return self

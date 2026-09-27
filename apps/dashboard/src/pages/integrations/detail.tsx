@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import type { components } from "@/generated/api";
 import {
   Dialog,
   DialogContent,
@@ -74,12 +75,7 @@ type TemplateComponent = {
   format?: string;
 };
 
-type Media = {
-  provider_media_id: string;
-  filename: string;
-  mime_type: string;
-  availability: string;
-};
+type Media = components["schemas"]["MediaResponse"];
 
 type Template = {
   name: string;
@@ -91,12 +87,21 @@ type Template = {
 
 function templateParameterNames(template: Template | null): string[] {
   const body = template?.components?.find((item) => item.type === "BODY");
-  const matches = [...(body?.text?.matchAll(/\\{\\{(\\d+)\\}\\}/g) ?? [])];
+  const matches = [...(body?.text?.matchAll(/\{\{(\d+)\}\}/g) ?? [])];
   const indexes = [...new Set(matches.map((match) => match[1]))];
   if (indexes.length > 1) {
     return indexes.map((index) => (index === "1" ? "caller_name" : `param_${index}`));
   }
   return indexes.length === 1 ? ["message"] : [];
+}
+
+function templateParameterMappings(template: Template | null): Record<string, string> {
+  const body = template?.components?.find((item) => item.type === "BODY");
+  const indexes = [...new Set([...(body?.text?.matchAll(/\{\{(\d+)\}\}/g) ?? [])].map((match) => match[1]))];
+  if (indexes.length === 1) return { [indexes[0]]: "message" };
+  return Object.fromEntries(
+    indexes.map((index) => [index, index === "1" ? "caller_name" : `param_${index}`]),
+  );
 }
 
 const whatsappSections = ["Account", "Credentials", "Media", "Templates"] as const;
@@ -243,7 +248,7 @@ export function IntegrationDetailPage() {
   const [parameterDescriptions, setParameterDescriptions] = useState<Record<string, string>>({});
   const [headerMediaId, setHeaderMediaId] = useState("");
   const [toolBusy, setToolBusy] = useState(false);
-  const { data: mediaData } = useResource<{ media: Media[] }>(
+  const { data: mediaData } = useResource<components["schemas"]["MediaListResponse"]>(
     `/integrations/${connectionId}/media`,
   );
 
@@ -323,6 +328,8 @@ export function IntegrationDetailPage() {
 
   function handleOpenToolSheet(template: Template) {
     setSelectedTemplate(template);
+    setHeaderMediaId("");
+    setParameterDescriptions({});
     const sanitizedName = `whatsapp_template_${template.name
       .toLowerCase()
       .replace(/[^a-z0-9_]/g, "_")}`;
@@ -338,21 +345,21 @@ export function IntegrationDetailPage() {
     if (!selectedTemplate) return;
     setToolBusy(true);
     try {
-      const result = await api<{
-        status: string;
-        tool_id: string;
-        tool_name: string;
-        version_number: number;
-        extracted_variables: string[];
-      }>(`/integrations/${connectionId}/generate-template-tool`, {
+      const result = await api<components["schemas"]["GeneratedTemplateToolResponse"]>(
+        `/integrations/${connectionId}/generate-template-tool`,
+        {
         method: "POST",
         body: JSON.stringify({
           template_name: selectedTemplate.name,
           language: selectedTemplate.language || "en_US",
           tool_name: toolName.trim() || undefined,
           description: toolDesc.trim() || undefined,
+          header_media_id: headerMediaId || undefined,
+          parameter_descriptions: parameterDescriptions,
+          parameter_mappings: templateParameterMappings(selectedTemplate),
         }),
-      });
+        },
+      );
       toast.success(
         `Tool "${result.tool_name}" (v${result.version_number}) created with parameters: ${
           result.extracted_variables.length > 0
@@ -993,14 +1000,14 @@ export function IntegrationDetailPage() {
                           <FieldLabel htmlFor="header-media">Header image</FieldLabel>
                           <NativeSelect id="header-media" value={headerMediaId} onChange={(e) => setHeaderMediaId(e.target.value)}>
                             <NativeSelectOption value="">No image</NativeSelectOption>
-                            {mediaData?.media.filter((item) => item.availability === "available").map((item) => (
-                              <NativeSelectOption key={item.provider_media_id} value={item.provider_media_id}>
-                                {item.filename} ({item.mime_type})
+                            {mediaData?.media.filter((item) => item.status === "available").map((item) => (
+                              <NativeSelectOption key={item.id} value={item.id}>
+                                {item.display_name} · {item.provider_media_id} ({item.mime_type})
                               </NativeSelectOption>
                             ))}
                           </NativeSelect>
                           <FieldDescription>
-                            Required for templates with an image header. The selected media ID is pinned to this tool version.
+                            Required for templates with an image header. The local catalog record is pinned to this tool version and resolved to Meta's provider ID at runtime.
                           </FieldDescription>
                         </Field>
 

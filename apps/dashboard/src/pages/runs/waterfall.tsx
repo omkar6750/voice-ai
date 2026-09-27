@@ -15,10 +15,14 @@ import {
 import { Marker, MarkerContent } from "@/components/ui/marker";
 import { cn } from "@/lib/utils";
 import {
+  classifierDeliveryFor,
+  classifierResultsFor,
   duration,
+  deliveryFor,
   exchangeSpans,
   exchangeTools,
   resultsFor,
+  spanDepth,
   timingWindow,
 } from "./model";
 import type { Selection, Span, Timeline, Tool } from "./types";
@@ -30,6 +34,7 @@ type Operation =
       start: string;
       end: string | null;
       label: string;
+      depth: number;
     }
   | {
       kind: "tool";
@@ -37,6 +42,7 @@ type Operation =
       start: string;
       end: string | null;
       label: string;
+      depth: number;
     };
 
 function Bar({
@@ -120,6 +126,7 @@ export function Waterfall({
             start: item.started_at,
             end: item.ended_at,
             label: item.name,
+            depth: spanDepth(timeline, item.id),
           })),
           ...tools.map((item) => ({
             kind: "tool" as const,
@@ -127,6 +134,9 @@ export function Waterfall({
             start: item.started_at,
             end: item.ended_at,
             label: item.binding_key,
+            depth: item.llm_operation_id
+              ? spanDepth(timeline, item.llm_operation_id) + 1
+              : 0,
           })),
         ].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
         const window = timingWindow(spans, tools);
@@ -160,6 +170,26 @@ export function Waterfall({
               </Button>
             </CollapsibleTrigger>
             <CollapsibleContent className="border-t px-3 py-2">
+              {timeline.interruptions
+                .filter((item) => item.exchange_id === exchange.id)
+                .map((interruption) => (
+                  <Button
+                    key={interruption.id}
+                    variant="ghost"
+                    size="sm"
+                    className="mb-1 w-full justify-start gap-2 border border-destructive/40 text-left text-xs text-destructive"
+                    onClick={() =>
+                      onSelect({ kind: "interruption", id: interruption.id })
+                    }
+                  >
+                    <Zap data-icon="inline-start" />
+                    Barge-in · {interruption.reason} · interrupted {" "}
+                    {interruption.interrupted_operation_ids.length} operations
+                    {interruption.interrupted_tool_invocation_ids.length
+                      ? ` · ${interruption.interrupted_tool_invocation_ids.length} tools`
+                      : ""}
+                  </Button>
+                ))}
               {visits.map((visit) => (
                 <Button
                   key={visit.id}
@@ -185,6 +215,8 @@ export function Waterfall({
                         className={cn(
                           "h-auto w-full justify-start gap-3 px-2 py-2 text-left",
                           chosen && "bg-accent",
+                          op.depth === 1 && "pl-6",
+                          op.depth >= 2 && "pl-10",
                         )}
                         onClick={() =>
                           onSelect({ kind: op.kind, id: op.item.id })
@@ -218,6 +250,22 @@ export function Waterfall({
                           kind={op.kind}
                         />
                       </div>
+                      {op.kind === "span" && op.item.category === "classifier" &&
+                        classifierResultsFor(timeline, op.item).map((result) => {
+                          const delivery = classifierDeliveryFor(timeline, result);
+                          return (
+                            <div
+                              key={result.id}
+                              className="pl-9 text-xs text-muted-foreground"
+                            >
+                              Classifier {result.phase} · {result.status} · context{" "}
+                              {delivery?.status ?? "not recorded"}
+                              {delivery?.consuming_operation_id
+                                ? ` · consumed by ${delivery.consuming_operation_id}`
+                                : ""}
+                            </div>
+                          );
+                        })}
                       {op.kind === "tool" &&
                         resultsFor(timeline, op.item).map((result) => (
                           <Button
@@ -228,10 +276,26 @@ export function Waterfall({
                             onClick={() =>
                               onSelect({ kind: "result", id: result.id })
                             }
-                          >
+                        >
                             Result {result.sequence}
                             {result.is_final ? " · final" : " · intermediate"}
-                            {result.consumed_exchange_id && (
+                            {deliveryFor(timeline, result) ? (
+                              <span className="ml-auto text-muted-foreground">
+                                {deliveryFor(timeline, result)?.status ===
+                                "consumed"
+                                  ? `Consumed by LLM${
+                                      deliveryFor(timeline, result)
+                                        ?.consuming_span_id
+                                        ? ` · ${deliveryFor(timeline, result)?.consuming_span_id}`
+                                        : ""
+                                    }`
+                                  : `Context ${deliveryFor(timeline, result)?.status}`}
+                                {deliveryFor(timeline, result)
+                                  ?.context_message_index != null
+                                  ? ` · message ${deliveryFor(timeline, result)?.context_message_index}`
+                                  : ""}
+                              </span>
+                            ) : result.consumed_exchange_id ? (
                               <span className="ml-auto text-muted-foreground">
                                 Consumed in exchange{" "}
                                 {timeline.exchanges.find(
@@ -239,7 +303,7 @@ export function Waterfall({
                                     item.id === result.consumed_exchange_id,
                                 )?.sequence ?? "?"}
                               </span>
-                            )}
+                            ) : null}
                           </Button>
                         ))}
                     </Fragment>

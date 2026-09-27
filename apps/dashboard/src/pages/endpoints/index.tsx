@@ -1,14 +1,23 @@
-import { useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { Link } from "react-router-dom";
-import { Activity, AlertTriangle, CheckCircle2, Plus, Radio, RefreshCw, XCircle } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Plus,
+  Radio,
+  RefreshCw,
+  XCircle,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
-import {
-  LoadState,
-  PageBody,
-  PageHeader,
-  StatusBadge,
-} from "@/components/record-page";
+import type { components } from "@/generated/api";
+import { LoadState, PageBody, PageHeader } from "@/components/record-page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,39 +46,24 @@ import {
 } from "@/components/ui/sheet";
 import { useResource } from "@/lib/resources";
 
-type EndpointRecord = {
-  id: string;
-  name: string;
-  config: {
-    provider: string;
-    at_port: string;
-    audio_port: string;
-    baudrate: number;
-    sample_rates: number[];
-  };
-  active_run_id: string | null;
-  status: {
-    checked_at: string | null;
-    alive: boolean;
-    sim_ready: boolean | null;
-    can_make_call: boolean | null;
-    radio_access: string;
-    rssi: number | null;
-    usb_audio_active: boolean | null;
-    last_error: string | null;
-  };
-  last_seen_at: string | null;
-  updated_at: string | null;
-};
-
-type EndpointsResponse = {
-  endpoints: EndpointRecord[];
-};
+type EndpointsResponse = components["schemas"]["RuntimeEndpointsResponse"];
+type EndpointStatus = components["schemas"]["EndpointStatus"];
+type EndpointProbeResponse = components["schemas"]["EndpointProbeResponse"];
 
 export function EndpointsPage() {
   const api = useApi();
   const { data, loading, error, reload } =
     useResource<EndpointsResponse>("/runtime-endpoints");
+  const [probeStatuses, setProbeStatuses] = useState<
+    Record<string, EndpointStatus>
+  >({});
+  const [monitoringIds, setMonitoringIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [probingEndpointId, setProbingEndpointId] = useState<string | null>(
+    null,
+  );
+  const probesInFlight = useRef(new Set<string>());
 
   const [registerOpen, setRegisterOpen] = useState(false);
   const [registerBusy, setRegisterBusy] = useState(false);
@@ -80,6 +74,82 @@ export function EndpointsPage() {
   const [atPort, setAtPort] = useState("COM16");
   const [audioPort, setAudioPort] = useState("COM17");
   const [baudrate, setBaudrate] = useState("115200");
+
+  const probeEndpoint = useCallback(
+    async (endpointId: string, manual: boolean) => {
+      if (probesInFlight.current.has(endpointId)) return false;
+      probesInFlight.current.add(endpointId);
+      if (manual) setProbingEndpointId(endpointId);
+      try {
+        const result = await api<EndpointProbeResponse>(
+          `/runtime-endpoints/${endpointId}/probe`,
+          { method: "POST" },
+        );
+        setProbeStatuses((current) => ({
+          ...current,
+          [endpointId]: result.status,
+        }));
+        if (!result.status.alive) {
+          setMonitoringIds((current) => {
+            const next = new Set(current);
+            next.delete(endpointId);
+            return next;
+          });
+          if (manual) {
+            toast.error(
+              result.status.last_error ??
+                "The modem did not respond to its AT check.",
+            );
+          } else {
+            toast.error(
+              "The modem connection was lost. Monitoring has stopped.",
+            );
+          }
+          return false;
+        }
+        if (manual) toast.success("Modem is online. Checking every 5 seconds.");
+        return true;
+      } catch (cause) {
+        setMonitoringIds((current) => {
+          const next = new Set(current);
+          next.delete(endpointId);
+          return next;
+        });
+        if (manual) {
+          toast.error(
+            cause instanceof Error
+              ? cause.message
+              : "Could not test modem connection",
+          );
+        } else {
+          toast.error(
+            "Modem monitoring stopped because the status request failed.",
+          );
+        }
+        return false;
+      } finally {
+        probesInFlight.current.delete(endpointId);
+        if (manual) setProbingEndpointId(null);
+      }
+    },
+    [api],
+  );
+
+  useEffect(() => {
+    if (monitoringIds.size === 0) return;
+    const timer = window.setInterval(() => {
+      for (const endpointId of monitoringIds)
+        void probeEndpoint(endpointId, false);
+    }, 5_000);
+    return () => window.clearInterval(timer);
+  }, [monitoringIds, probeEndpoint]);
+
+  async function startMonitoring(endpointId: string) {
+    const connected = await probeEndpoint(endpointId, true);
+    if (connected) {
+      setMonitoringIds((current) => new Set(current).add(endpointId));
+    }
+  }
 
   async function registerEndpoint(e: FormEvent) {
     e.preventDefault();
@@ -146,17 +216,23 @@ export function EndpointsPage() {
               </Button>
             </SheetTrigger>
             <SheetContent>
-              <form onSubmit={registerEndpoint} className="flex h-full flex-col gap-6">
+              <form
+                onSubmit={registerEndpoint}
+                className="flex h-full flex-col gap-6"
+              >
                 <SheetHeader>
                   <SheetTitle>Register Hardware Endpoint</SheetTitle>
                   <SheetDescription>
-                    Configure physical COM port bindings for a SIM7600 modem device.
+                    Configure physical COM port bindings for a SIM7600 modem
+                    device.
                   </SheetDescription>
                 </SheetHeader>
 
                 <FieldGroup>
                   <Field>
-                    <FieldLabel htmlFor="endpoint-name">Endpoint identifier</FieldLabel>
+                    <FieldLabel htmlFor="endpoint-name">
+                      Endpoint identifier
+                    </FieldLabel>
                     <Input
                       id="endpoint-name"
                       placeholder="e.g. sim7600-primary"
@@ -164,7 +240,9 @@ export function EndpointsPage() {
                       onChange={(e) => setName(e.target.value)}
                       required
                     />
-                    <FieldDescription>Unique descriptive hardware tag</FieldDescription>
+                    <FieldDescription>
+                      Unique descriptive hardware tag
+                    </FieldDescription>
                   </Field>
 
                   <Field>
@@ -176,7 +254,9 @@ export function EndpointsPage() {
                       onChange={(e) => setAtPort(e.target.value)}
                       required
                     />
-                    <FieldDescription>Serial port for modem control & dialing</FieldDescription>
+                    <FieldDescription>
+                      Serial port for modem control & dialing
+                    </FieldDescription>
                   </Field>
 
                   <Field>
@@ -188,7 +268,9 @@ export function EndpointsPage() {
                       onChange={(e) => setAudioPort(e.target.value)}
                       required
                     />
-                    <FieldDescription>Dedicated bidirectional PCM audio port</FieldDescription>
+                    <FieldDescription>
+                      Dedicated bidirectional PCM audio port
+                    </FieldDescription>
                   </Field>
 
                   <Field>
@@ -200,7 +282,9 @@ export function EndpointsPage() {
                       onChange={(e) => setBaudrate(e.target.value)}
                       required
                     />
-                    <FieldDescription>Standard SIM7600 baud rate: 115200</FieldDescription>
+                    <FieldDescription>
+                      Standard SIM7600 baud rate: 115200
+                    </FieldDescription>
                   </Field>
                 </FieldGroup>
 
@@ -232,105 +316,237 @@ export function EndpointsPage() {
         }
       >
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {data?.endpoints.map((ep) => (
-            <Card key={ep.id} className="flex flex-col justify-between">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="flex items-center gap-2 text-base font-semibold">
-                    <Radio className="size-4 text-primary" />
-                    {ep.name}
-                  </CardTitle>
-                  <Badge variant={ep.status.alive ? "default" : "secondary"}>
-                    {ep.status.alive ? "Alive" : "Offline"}
-                  </Badge>
-                </div>
-                <CardDescription className="text-xs">
-                  Provider: {ep.config.provider} · AT: {ep.config.at_port} · Audio: {ep.config.audio_port}
-                </CardDescription>
-              </CardHeader>
-
-              <CardContent className="space-y-4 pb-4 text-sm">
-                <div className="rounded-md border bg-muted/30 p-3 space-y-2 text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">SIM Card:</span>
-                    <span className="font-medium">
-                      {ep.status.sim_ready === true ? (
-                        <span className="flex items-center gap-1 text-emerald-600">
-                          <CheckCircle2 className="size-3" /> Ready
-                        </span>
-                      ) : ep.status.sim_ready === false ? (
-                        <span className="flex items-center gap-1 text-destructive">
-                          <XCircle className="size-3" /> Not Detected
-                        </span>
-                      ) : (
-                        "Unknown"
-                      )}
-                    </span>
+          {data?.endpoints.map((ep) => {
+            const status = probeStatuses[ep.id] ?? ep.status;
+            const checkedAt = status.checked_at
+              ? new Date(status.checked_at)
+              : null;
+            const signalDbm =
+              status.rssi != null ? 2 * status.rssi - 113 : null;
+            const monitoring = monitoringIds.has(ep.id);
+            const probing = probingEndpointId === ep.id;
+            return (
+              <Card key={ep.id} className="flex flex-col justify-between">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2 text-base font-semibold">
+                      <Radio className="size-4 text-primary" />
+                      {ep.name}
+                    </CardTitle>
+                    <Badge variant={status.alive ? "default" : "secondary"}>
+                      {status.alive ? "Online" : "Offline"}
+                    </Badge>
                   </div>
+                  <CardDescription className="text-xs">
+                    Provider: {ep.config.provider} · AT: {ep.config.at_port} ·
+                    Audio: {ep.config.audio_port}
+                  </CardDescription>
+                </CardHeader>
 
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Radio Network:</span>
-                    <span className="font-medium">
-                      {ep.status.radio_access !== "unknown" ? ep.status.radio_access : "Standby"}
-                    </span>
-                  </div>
-
-                  {ep.status.rssi !== null && (
+                <CardContent className="space-y-4 pb-4 text-sm">
+                  <div className="rounded-md border bg-muted/30 p-3 space-y-2 text-xs">
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">Signal (RSSI):</span>
-                      <span className="font-medium">{ep.status.rssi} dBm</span>
+                      <span className="text-muted-foreground">SIM Card:</span>
+                      <span className="font-medium">
+                        {status.sim_ready === true ? (
+                          <span className="flex items-center gap-1 text-emerald-600">
+                            <CheckCircle2 className="size-3" /> Ready
+                          </span>
+                        ) : status.sim_ready === false ? (
+                          <span className="flex items-center gap-1 text-destructive">
+                            <XCircle className="size-3" /> Not Ready
+                          </span>
+                        ) : (
+                          "Unknown"
+                        )}
+                      </span>
                     </div>
-                  )}
 
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Telephony Ready:</span>
-                    <span className="font-medium">
-                      {ep.status.can_make_call ? "Ready to Dial" : "No"}
-                    </span>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Operator:</span>
+                      <span className="font-medium">
+                        {status.operator ?? "Unknown"}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">
+                        Radio access:
+                      </span>
+                      <span className="font-medium">
+                        {status.radio_access !== "unknown"
+                          ? status.radio_access
+                          : "Unknown"}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">
+                        Voice network:
+                      </span>
+                      <span className="font-medium">
+                        {status.voice_registered === true
+                          ? "Registered"
+                          : status.voice_registered === false
+                            ? "Not registered"
+                            : "Unknown"}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">
+                        Data network:
+                      </span>
+                      <span className="font-medium">
+                        {status.data_registered === true
+                          ? status.packet_attached
+                            ? "Registered · attached"
+                            : "Registered · not attached"
+                          : status.data_registered === false
+                            ? "Not registered"
+                            : "Unknown"}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Roaming:</span>
+                      <span className="font-medium">
+                        {status.roaming === true
+                          ? "Yes"
+                          : status.roaming === false
+                            ? "No"
+                            : "Unknown"}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">
+                        Signal (RSSI):
+                      </span>
+                      <span className="font-medium">
+                        {status.rssi == null
+                          ? "Unknown"
+                          : `${status.rssi} / 31${signalDbm === null ? "" : ` (about ${signalDbm} dBm)`}`}
+                      </span>
+                    </div>
+
+                    {status.signal_quality != null && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">
+                          Signal quality:
+                        </span>
+                        <span className="font-medium">
+                          {status.signal_quality} / 7 BER
+                        </span>
+                      </div>
+                    )}
+
+                    {status.band && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Band:</span>
+                        <span className="font-medium">{status.band}</span>
+                      </div>
+                    )}
+
+                    {status.usb_audio_supported != null && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">
+                          USB audio:
+                        </span>
+                        <span className="font-medium">
+                          {status.usb_audio_supported
+                            ? status.usb_audio_active
+                              ? "Active"
+                              : "Available"
+                            : "Unsupported"}
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">
+                        Telephony Ready:
+                      </span>
+                      <span className="font-medium">
+                        {status.can_make_call ? "Ready to Dial" : "No"}
+                      </span>
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">Lease Status:</span>
-                  {ep.active_run_id ? (
-                    <Badge variant="destructive" asChild>
-                      <Link to={`/runs/${ep.active_run_id}`}>
-                        Occupied (Run #{ep.active_run_id.slice(0, 8)})
-                      </Link>
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-emerald-600">
-                      Available
-                    </Badge>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Lease Status:</span>
+                    {ep.active_run_id ? (
+                      <Badge variant="destructive" asChild>
+                        <Link to={`/runs/${ep.active_run_id}`}>
+                          Occupied (Run #{ep.active_run_id.slice(0, 8)})
+                        </Link>
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-emerald-600">
+                        Available
+                      </Badge>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <span className="text-muted-foreground">
+                      {monitoring
+                        ? "Monitoring every 5 seconds"
+                        : checkedAt
+                          ? `Checked ${checkedAt.toLocaleTimeString()}`
+                          : "Not tested yet"}
+                    </span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={
+                        probing || monitoring || Boolean(ep.active_run_id)
+                      }
+                      onClick={() => void startMonitoring(ep.id)}
+                    >
+                      <RefreshCw
+                        className={`mr-1.5 size-3.5 ${probing || monitoring ? "animate-spin" : ""}`}
+                      />
+                      {monitoring
+                        ? "Monitoring"
+                        : probing
+                          ? "Testing…"
+                          : ep.active_run_id
+                            ? "Modem in use"
+                            : "Test connection"}
+                    </Button>
+                  </div>
+
+                  {status.last_error && (
+                    <p className="flex items-center gap-1 text-xs text-destructive">
+                      <AlertTriangle className="size-3.5 shrink-0" />
+                      {status.last_error}
+                    </p>
                   )}
-                </div>
+                </CardContent>
 
-                {ep.status.last_error && (
-                  <p className="flex items-center gap-1 text-xs text-destructive">
-                    <AlertTriangle className="size-3.5 shrink-0" />
-                    {ep.status.last_error}
-                  </p>
-                )}
-              </CardContent>
-
-              <CardFooter className="border-t pt-3">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="w-full text-xs"
-                  disabled={recoverBusy === ep.id}
-                  onClick={() => void recoverEndpoint(ep.id)}
-                >
-                  <RefreshCw
-                    className={`mr-1.5 size-3.5 ${
-                      recoverBusy === ep.id ? "animate-spin" : ""
-                    }`}
-                  />
-                  {recoverBusy === ep.id ? "Recovering…" : "Reconcile / Recover Lease"}
-                </Button>
-              </CardFooter>
-            </Card>
-          ))}
+                <CardFooter className="border-t pt-3">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-full text-xs"
+                    disabled={recoverBusy === ep.id}
+                    onClick={() => void recoverEndpoint(ep.id)}
+                  >
+                    <RefreshCw
+                      className={`mr-1.5 size-3.5 ${
+                        recoverBusy === ep.id ? "animate-spin" : ""
+                      }`}
+                    />
+                    {recoverBusy === ep.id
+                      ? "Recovering…"
+                      : "Reconcile / Recover Lease"}
+                  </Button>
+                </CardFooter>
+              </Card>
+            );
+          })}
         </div>
       </LoadState>
     </PageBody>

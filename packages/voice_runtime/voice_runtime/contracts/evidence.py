@@ -46,6 +46,7 @@ class OperationStarted(Record):
     exchange_id: Id | None = None
     name: str = Field(min_length=1, max_length=120)
     category: str = Field(min_length=1, max_length=40)
+    parent_id: Id | None = None
     started_ns: TimestampNs
     provider: str | None = Field(default=None, max_length=60)
     model: str | None = Field(default=None, max_length=160)
@@ -60,6 +61,10 @@ class OperationEnded(OperationStarted):
     ended_ns: TimestampNs
     duration_ms: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     status: Literal["completed", "failed", "cancelled", "interrupted"]
+    output_state: Literal[
+        "recorded", "not_applicable", "not_recorded", "empty", "interrupted", "failed"
+    ] = "not_recorded"
+    interruption_id: Id | None = None
     output_payload: dict | list | None = None
     ttfb_ms: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     ttfa_ms: float | None = Field(default=None, ge=0, allow_inf_nan=False)
@@ -108,6 +113,7 @@ class ToolEnded(Record):
     result: JsonValue = None
     connection_id: Id | None = None
     provider_message_id: str | None = Field(default=None, max_length=255)
+    interruption_id: Id | None = None
 
 
 class ToolResultRecorded(Record):
@@ -118,10 +124,81 @@ class ToolResultRecorded(Record):
     is_final: bool
 
 
+class ToolResultContextUpdated(Record):
+    kind: Literal["tool_result_context_updated"]
+    delivery_id: Id
+    invocation_id: Id
+    result_id: Id
+    function_call_id: str | None = Field(default=None, max_length=255)
+    is_final: bool
+    context_message_index: int | None = Field(default=None, ge=0)
+
+
 class ToolResultConsumed(Record):
     kind: Literal["tool_result_consumed"]
     result_id: Id
     exchange_id: Id
+    invocation_id: Id | None = None
+    function_call_id: str | None = Field(default=None, max_length=255)
+    consuming_operation_id: Id | None = None
+
+
+class ClassifierResultRecorded(Record):
+    kind: Literal["classifier_result"]
+    result_id: Id
+    operation_id: Id
+    phase: Literal["entry", "exit"]
+    node_key: str = Field(min_length=1, max_length=120)
+    classifier_type: Literal["llm", "jev"]
+    status: Literal["completed", "failed"]
+    result: JsonValue = None
+    error: str | None = Field(default=None, max_length=500)
+    transcript_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ClassifierContextUpdated(Record):
+    kind: Literal["classifier_context_updated"]
+    delivery_id: Id
+    result_id: Id
+    operation_id: Id
+    phase: Literal["entry", "exit"]
+    node_key: str = Field(min_length=1, max_length=120)
+    context_message_index: int = Field(ge=0)
+
+
+class ClassifierResultConsumed(Record):
+    kind: Literal["classifier_result_consumed"]
+    result_id: Id
+    exchange_id: Id
+    consuming_operation_id: Id
+
+
+class InterruptionRecord(Record):
+    kind: Literal["interruption"]
+    interruption_id: Id
+    exchange_id: Id | None = None
+    source: Literal["caller", "system", "transport"]
+    reason: str = Field(min_length=1, max_length=255)
+    frame_type: str = Field(min_length=1, max_length=120)
+    interrupted_operation_ids: list[Id] = Field(default_factory=list)
+    interrupted_tool_invocation_ids: list[Id] = Field(default_factory=list)
+
+
+class DiagnosticRecord(Record):
+    kind: Literal["diagnostic"]
+    diagnostic_id: Id
+    severity: Literal["info", "warning", "error"]
+    category: str = Field(min_length=1, max_length=80)
+    source: Literal["provider", "modem", "transport", "call", "evidence", "runtime"]
+    code: str | None = Field(default=None, max_length=120)
+    message: str = Field(min_length=1, max_length=500)
+    detail: str | None = Field(default=None, max_length=2000)
+    retryable: bool = False
+    uncertain: bool = False
+    provider_request_id: str | None = Field(default=None, max_length=255)
+    http_status: int | None = Field(default=None, ge=100, le=599)
+    retry_after_seconds: float | None = Field(default=None, ge=0, le=86400)
+    metadata: dict[str, JsonValue] = Field(default_factory=dict)
 
 
 EvidenceRecord = Annotated[
@@ -135,7 +212,13 @@ EvidenceRecord = Annotated[
     | ToolStarted
     | ToolEnded
     | ToolResultRecorded
-    | ToolResultConsumed,
+    | ToolResultContextUpdated
+    | ToolResultConsumed
+    | ClassifierResultRecorded
+    | ClassifierContextUpdated
+    | ClassifierResultConsumed
+    | InterruptionRecord
+    | DiagnosticRecord,
     Field(discriminator="kind"),
 ]
 

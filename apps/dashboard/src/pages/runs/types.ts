@@ -1,3 +1,14 @@
+import type { components } from "../../generated/api";
+
+export type ToolContextDelivery =
+  components["schemas"]["ToolContextDeliveryResponse"];
+export type ClassifierResult =
+  components["schemas"]["ClassifierResultResponse"];
+export type ClassifierContextDelivery =
+  components["schemas"]["ClassifierContextDeliveryResponse"];
+export type Interruption = components["schemas"]["InterruptionResponse"];
+export type Diagnostic = components["schemas"]["DiagnosticResponse"];
+
 export type RunSummary = {
   id: string;
   channel: "phone" | "browser";
@@ -49,6 +60,8 @@ export type Span = {
   name: string;
   category: string;
   status: string;
+  output_state: string;
+  interruption_id: string | null;
   started_at: string;
   ended_at: string | null;
   duration_ms: number | null;
@@ -75,6 +88,7 @@ export type Tool = {
   function_call_id: string | null;
   binding_key: string;
   status: string;
+  interruption_id: string | null;
   arguments: unknown;
   result: unknown;
   started_at: string;
@@ -123,6 +137,11 @@ export type Timeline = {
   spans: Span[];
   tools: Tool[];
   tool_results: ToolResult[];
+  tool_context_deliveries: ToolContextDelivery[];
+  classifier_results: ClassifierResult[];
+  classifier_context_deliveries: ClassifierContextDelivery[];
+  interruptions: Interruption[];
+  diagnostics: Diagnostic[];
   flow_visits: FlowVisit[];
 };
 
@@ -142,4 +161,5 @@ export type Selection =
   | { kind: "span"; id: string }
   | { kind: "tool"; id: string }
   | { kind: "result"; id: string }
+  | { kind: "interruption"; id: string }
   | { kind: "visit"; id: string };

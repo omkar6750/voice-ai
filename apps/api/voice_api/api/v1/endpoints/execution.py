@@ -1,5 +1,7 @@
 """Endpoint registration and fenced call execution; expired work is uncertain, never retried."""
 
+import asyncio
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,15 +11,62 @@ from voice_api.api.deps import get_session, require_operator
 from voice_api.core.security import safe_evidence
 from voice_api.models import Call, Callback, Run, RuntimeEndpoint
 from voice_api.models.common import new_id
-from voice_api.schemas.execution import Claim, EndpointBody, EndpointConfig, Progress
+from voice_api.schemas.execution import (
+    Claim,
+    EndpointBody,
+    EndpointConfig,
+    EndpointProbeResponse,
+    EndpointStatus,
+    Progress,
+    RuntimeEndpointResponse,
+    RuntimeEndpointsResponse,
+)
+from voice_api.services.diagnostic_service import persist_diagnostics
 from voice_api.services.resolution_service import fingerprint
+from voice_runtime.telephony.sim7600 import Sim7600Modem
+from voice_runtime.telephony.status import ModemStatus
 
 router = APIRouter(tags=["execution"], dependencies=[Depends(require_operator)])
 ACTIVE = ("claimed", "running", "uncertain")
 Session = Depends(get_session)
 
 
-@router.get("/runtime-endpoints")
+def _endpoint_status(endpoint: RuntimeEndpoint, now: datetime) -> EndpointStatus:
+    values = dict(endpoint.status or {})
+    values["checked_at"] = values.get("checked_at") or endpoint.last_seen_at
+    is_fresh = (
+        endpoint.last_seen_at is not None
+        and (now - endpoint.last_seen_at).total_seconds() < 120
+    )
+    values["alive"] = bool(values.get("alive", False) and is_fresh)
+    return EndpointStatus.model_validate(values)
+
+
+def _modem_status(status: ModemStatus) -> EndpointStatus:
+    return EndpointStatus(
+        checked_at=status.checked_at,
+        alive=status.alive,
+        serial_connected=status.serial_connected,
+        sim_ready=status.sim_ready,
+        voice_registered=status.voice_registered,
+        data_registered=status.data_registered,
+        packet_attached=status.packet_attached,
+        can_make_call=status.can_make_call,
+        active_call=status.active_call,
+        call_state=status.call_state.value,
+        rssi=status.rssi,
+        signal_quality=status.signal_quality,
+        operator=status.operator,
+        radio_access=status.radio_access,
+        band=status.band,
+        roaming=status.roaming,
+        usb_audio_supported=status.usb_audio_supported,
+        usb_audio_active=status.usb_audio_active,
+        last_error=status.last_error,
+    )
+
+
+@router.get("/runtime-endpoints", response_model=RuntimeEndpointsResponse)
 async def list_endpoints(session: AsyncSession = Session) -> dict:
     rows = (await session.scalars(select(RuntimeEndpoint).order_by(RuntimeEndpoint.name))).all()
     active_runs = (await session.scalars(select(Run).where(Run.status.in_(ACTIVE)))).all()
@@ -32,20 +81,7 @@ async def list_endpoints(session: AsyncSession = Session) -> dict:
                 "config": row.config,
                 "created_at": row.created_at,
                 "active_run_id": active_by_endpoint.get(row.id),
-                "status": row.status
-                if row.status
-                else {
-                    "checked_at": row.last_seen_at.isoformat() if row.last_seen_at else None,
-                    "alive": bool(
-                        row.last_seen_at and (now - row.last_seen_at).total_seconds() < 120
-                    ),
-                    "sim_ready": None,
-                    "can_make_call": None,
-                    "radio_access": "unknown",
-                    "rssi": None,
-                    "usb_audio_active": None,
-                    "last_error": None,
-                },
+                "status": _endpoint_status(row, now),
                 "last_seen_at": row.last_seen_at.isoformat() if row.last_seen_at else None,
                 "updated_at": row.updated_at.isoformat() if row.updated_at else None,
             }
@@ -54,7 +90,7 @@ async def list_endpoints(session: AsyncSession = Session) -> dict:
     }
 
 
-@router.get("/runtime-endpoints/{endpoint_id}")
+@router.get("/runtime-endpoints/{endpoint_id}", response_model=RuntimeEndpointResponse)
 async def get_endpoint(endpoint_id: str, session: AsyncSession = Session) -> dict:
     endpoint = await session.get(RuntimeEndpoint, endpoint_id)
     if endpoint is None:
@@ -68,19 +104,7 @@ async def get_endpoint(endpoint_id: str, session: AsyncSession = Session) -> dic
         "name": endpoint.name,
         "config": endpoint.config,
         "active_run_id": active,
-        "status": endpoint.status
-        or {
-            "checked_at": endpoint.last_seen_at.isoformat() if endpoint.last_seen_at else None,
-            "alive": bool(
-                endpoint.last_seen_at and (now - endpoint.last_seen_at).total_seconds() < 120
-            ),
-            "sim_ready": None,
-            "can_make_call": None,
-            "radio_access": "unknown",
-            "rssi": None,
-            "usb_audio_active": None,
-            "last_error": None,
-        },
+        "status": _endpoint_status(endpoint, now),
         "last_seen_at": endpoint.last_seen_at.isoformat() if endpoint.last_seen_at else None,
         "updated_at": endpoint.updated_at.isoformat() if endpoint.updated_at else None,
     }
@@ -88,25 +112,69 @@ async def get_endpoint(endpoint_id: str, session: AsyncSession = Session) -> dic
 
 @router.post("/runtime-endpoints/{endpoint_id}/status")
 async def update_endpoint_status(
-    endpoint_id: str, body: dict, session: AsyncSession = Session
+    endpoint_id: str, body: EndpointStatus, session: AsyncSession = Session
 ) -> dict:
     endpoint = await session.get(RuntimeEndpoint, endpoint_id, with_for_update=True)
     if endpoint is None:
         raise HTTPException(404, "Runtime endpoint not found")
     now = datetime.now(UTC)
-    endpoint.status = {
-        "checked_at": now.isoformat(),
-        "alive": bool(body.get("alive", True)),
-        "sim_ready": body.get("sim_ready"),
-        "can_make_call": body.get("can_make_call"),
-        "radio_access": body.get("radio_access", "unknown"),
-        "rssi": body.get("rssi"),
-        "usb_audio_active": body.get("usb_audio_active"),
-        "last_error": body.get("last_error"),
-    }
+    endpoint.status = body.model_copy(update={"checked_at": now}).model_dump(mode="json")
     endpoint.last_seen_at = now
     await session.commit()
     return {"id": endpoint.id, "status": endpoint.status}
+
+
+@router.post("/runtime-endpoints/{endpoint_id}/probe", response_model=EndpointProbeResponse)
+async def probe_endpoint(endpoint_id: str, session: AsyncSession = Session) -> dict:
+    endpoint = await session.scalar(
+        select(RuntimeEndpoint)
+        .where(RuntimeEndpoint.id == endpoint_id)
+        .with_for_update()
+    )
+    if endpoint is None:
+        raise HTTPException(404, "Runtime endpoint not found")
+
+    active_run = await session.scalar(
+        select(Run.id)
+        .where(Run.endpoint_id == endpoint.id, Run.status.in_(ACTIVE))
+        .limit(1)
+    )
+    if active_run:
+        raise HTTPException(409, "A call owns this modem; connection probing is paused")
+
+    config = EndpointConfig.model_validate(endpoint.config)
+    modem = Sim7600Modem(
+        config.at_port,
+        config.baudrate,
+        command_timeout=config.at_timeout_secs,
+    )
+    try:
+        timeout = min(30, max(10, config.at_timeout_secs * 10 + 2))
+        async with asyncio.timeout(timeout):
+            status = _modem_status(await modem.probe_status())
+    except Exception as exc:
+        if isinstance(exc, PermissionError):
+            error = "The configured modem COM port is busy or access was denied."
+        elif isinstance(exc, FileNotFoundError):
+            error = "The configured modem COM port was not found."
+        elif isinstance(exc, TimeoutError):
+            error = "The modem did not respond before the connection probe timed out."
+        else:
+            error = f"Modem connection probe failed ({type(exc).__name__})."
+        status = EndpointStatus(
+            checked_at=datetime.now(UTC),
+            alive=False,
+            serial_connected=False,
+            last_error=error,
+        )
+    finally:
+        with suppress(Exception):
+            await modem.close()
+
+    endpoint.status = status.model_dump(mode="json")
+    endpoint.last_seen_at = datetime.now(UTC)
+    await session.commit()
+    return {"id": endpoint.id, "status": status}
 
 
 @router.post("/runtime-endpoints", status_code=201)
@@ -200,6 +268,7 @@ async def progress(run_id: str, body: Progress, session: AsyncSession = Session)
         raise HTTPException(409, "Expired/uncertain execution requires reconciliation")
     if body.status != "running" and not body.transport_released:
         raise HTTPException(422, "Confirm transport cleanup before releasing endpoint")
+    await persist_diagnostics(session, run_id, body.diagnostics)
     run.status = body.status
     run.started_at = run.started_at or now
     call = await session.scalar(select(Call).where(Call.run_id == run.id))

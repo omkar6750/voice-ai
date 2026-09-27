@@ -13,14 +13,46 @@ from voice_api.schemas.browser_session import (
 )
 from voice_api.schemas.call import StartCallBody
 from voice_api.schemas.contact import ContactBody
-from voice_api.schemas.execution import Claim, EndpointBody, EndpointConfig, Progress
+from voice_api.schemas.diagnostics import DiagnosticInput, DiagnosticPayload, DiagnosticResponse
+from voice_api.schemas.execution import (
+    Claim,
+    EndpointBody,
+    EndpointConfig,
+    EndpointProbeResponse,
+    EndpointStatus,
+    Progress,
+    RuntimeEndpointResponse,
+    RuntimeEndpointsResponse,
+)
 from voice_api.schemas.integrations import (
     ConnectionBody,
+    GeneratedTemplateToolResponse,
     MediaImportBody,
+    MediaListResponse,
+    MediaResponse,
+    MediaUpdateBody,
     SecretBody,
     WhatsAppConfig,
 )
 from voice_api.schemas.knowledge import BaseCreate, SearchHit, SearchRequest, SourceCreate
+from voice_api.schemas.providers import (
+    ProviderCatalogResponse,
+    ProviderEntryResponse,
+    ProviderField,
+    ProviderVoice,
+)
+from voice_api.schemas.tools import (
+    ToolCreateBody,
+    ToolCreateResponse,
+    ToolImpactResponse,
+    ToolListResponse,
+    ToolRevisionBody,
+    ToolSummaryResponse,
+    ToolValidationResponse,
+    ToolVersionMutationResponse,
+    ToolVersionResponse,
+    ToolVersionsResponse,
+)
 
 __all__ = [
     "ActivateAgentBody",
@@ -32,17 +64,42 @@ __all__ = [
     "ContactBody",
     "CreateBody",
     "CreateBrowserSessionRequest",
+    "DiagnosticInput",
+    "DiagnosticPayload",
+    "DiagnosticResponse",
     "EndpointBody",
     "EndpointConfig",
+    "EndpointProbeResponse",
+    "EndpointStatus",
     "ExpectedRevision",
+    "GeneratedTemplateToolResponse",
     "MediaImportBody",
+    "MediaListResponse",
+    "MediaResponse",
+    "MediaUpdateBody",
     "Progress",
+    "ProviderCatalogResponse",
+    "ProviderEntryResponse",
+    "ProviderField",
+    "ProviderVoice",
     "RevisionBody",
+    "RuntimeEndpointResponse",
+    "RuntimeEndpointsResponse",
     "SearchHit",
     "SearchRequest",
     "SecretBody",
     "SourceCreate",
     "StartCallBody",
+    "ToolCreateBody",
+    "ToolCreateResponse",
+    "ToolImpactResponse",
+    "ToolListResponse",
+    "ToolRevisionBody",
+    "ToolSummaryResponse",
+    "ToolValidationResponse",
+    "ToolVersionMutationResponse",
+    "ToolVersionResponse",
+    "ToolVersionsResponse",
     "WebRTCOfferRequest",
     "WebRTCPatchRequest",
     "WhatsAppConfig",

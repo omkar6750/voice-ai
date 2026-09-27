@@ -18,10 +18,18 @@ export function ModelsPanel({
   const llmModels = selectedLlm?.models_by_slot?.llm ?? selectedLlm?.models ?? [];
   const modelListed = llmModels.includes(config.llm.model);
 
+  const sttProviders = catalog?.providers.filter((provider) => provider.slots.includes("stt")) ?? [];
+  const selectedStt = sttProviders.find((provider) => provider.provider === config.stt.provider);
+  const sttModels = selectedStt?.models_by_slot?.stt ?? [];
+  const sttModelListed = sttModels.includes(config.stt.model);
+
   const ttsProviders = catalog?.providers.filter((provider) => provider.slots.includes("tts")) ?? [];
   const selectedTts = ttsProviders.find((provider) => provider.provider === config.tts.provider);
-  const ttsModels = selectedTts?.models_by_slot?.tts ?? ["bulbul:v3"];
-  const ttsLanguages = ["en-IN", "hi-IN"];
+  const ttsModels = selectedTts?.models_by_slot?.tts ?? [];
+  const ttsLanguages = selectedTts?.languages ?? [];
+  const ttsVoices = selectedTts?.voices ?? [];
+  const ttsField = (name: string) => selectedTts?.fields?.[name];
+  const ttsFieldSupported = (name: string) => ttsField(name)?.runtime_supported ?? false;
 
   return (
     <section className="grid max-w-5xl gap-8 lg:grid-cols-2">
@@ -73,8 +81,45 @@ export function ModelsPanel({
         <h2 className="text-base font-semibold">Speech services</h2>
         <div>
           <h3 className="text-sm font-medium">Speech recognition</h3>
-          <ReadOnlyValue label="Provider" value={config.stt.provider} />
-          <ReadOnlyValue label="Model" value={config.stt.model} reason="Backend contract currently fixes Sarvam saaras:v3." />
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="stt-provider">STT Provider</FieldLabel>
+              <NativeSelect
+                id="stt-provider"
+                className="w-full"
+                value={config.stt.provider}
+                disabled={disabled || !catalog}
+                onChange={(event) => {
+                  const provider = event.target.value as AgentConfig["stt"]["provider"];
+                  const choice = sttProviders.find((item) => item.provider === provider);
+                  const available = choice?.models_by_slot?.stt ?? [];
+                  if (!available.length) return;
+                  change({ ...config, stt: { provider, model: available[0] as "saaras:v3" } });
+                }}
+              >
+                {sttProviders.map((item) => (
+                  <option key={item.provider} value={item.provider} disabled={!item.models_by_slot?.stt?.length}>
+                    {item.provider}{item.status !== "configured" ? ` (${item.status})` : ""}
+                  </option>
+                ))}
+              </NativeSelect>
+              <FieldDescription>Runtime-supported STT providers and credentials are controlled by the server.</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="stt-model">STT Model</FieldLabel>
+              <NativeSelect
+                id="stt-model"
+                className="w-full"
+                value={config.stt.model}
+                disabled={disabled || sttModels.length === 0}
+                onChange={(event) => change({ ...config, stt: { ...config.stt, model: event.target.value as "saaras:v3" } })}
+              >
+                {!sttModelListed && <option value={config.stt.model}>{config.stt.model} (stored)</option>}
+                {sttModels.map((model) => <option key={model} value={model}>{model}</option>)}
+              </NativeSelect>
+              <FieldDescription>Catalog status: {selectedStt?.status ?? "unavailable"}.</FieldDescription>
+            </Field>
+          </FieldGroup>
         </div>
 
         <div className="flex flex-col gap-4 pt-2">
@@ -88,10 +133,10 @@ export function ModelsPanel({
                 value={config.tts.provider}
                 disabled={disabled}
                 onChange={(event) => {
-                  const provider = event.target.value as "sarvam" | "cartesia";
+                  const provider = event.target.value as AgentConfig["tts"]["provider"];
                   const choice = ttsProviders.find((item) => item.provider === provider);
-                  const defaultVoice = choice?.voices?.[0]?.id ?? (provider === "sarvam" ? "shubh" : "sonic-3");
-                  const defaultModel = choice?.models_by_slot?.tts?.[0] ?? (provider === "sarvam" ? "bulbul:v3" : "sonic-3");
+                  const defaultVoice = choice?.voices?.[0]?.id ?? config.tts.voice;
+                  const defaultModel = choice?.models_by_slot?.tts?.[0] ?? config.tts.model;
                   change({
                     ...config,
                     tts: {
@@ -103,9 +148,13 @@ export function ModelsPanel({
                   });
                 }}
               >
-                <option value="sarvam">Sarvam AI</option>
-                <option value="cartesia">Cartesia</option>
+                {ttsProviders.map((item) => (
+                  <option key={item.provider} value={item.provider} disabled={!item.models_by_slot?.tts?.length}>
+                    {item.provider}{item.status !== "configured" ? ` (${item.status})` : ""}
+                  </option>
+                ))}
               </NativeSelect>
+              <FieldDescription>Runtime status: {selectedTts?.runtime_status ?? "unavailable"}; credentials: {selectedTts?.status ?? "unavailable"}.</FieldDescription>
             </Field>
 
             <Field>
@@ -117,6 +166,7 @@ export function ModelsPanel({
                 disabled={disabled || ttsModels.length <= 1}
                 onChange={(event) => change({ ...config, tts: { ...config.tts, model: event.target.value } })}
               >
+                {!ttsModels.includes(config.tts.model) && <option value={config.tts.model}>{config.tts.model} (stored)</option>}
                 {ttsModels.map((model) => (
                   <option key={model} value={model}>{model}</option>
                 ))}
@@ -125,42 +175,67 @@ export function ModelsPanel({
 
             <Field>
               <FieldLabel htmlFor="tts-voice">Voice</FieldLabel>
-              <Input
-                id="tts-voice"
-                value={config.tts.voice}
-                disabled={disabled}
-                onChange={(event) => change({ ...config, tts: { ...config.tts, voice: event.target.value } })}
-              />
-              <FieldDescription>Enter a voice supported by your configured provider.</FieldDescription>
+              {ttsVoices.length ? (
+                <NativeSelect
+                  id="tts-voice"
+                  className="w-full"
+                  value={config.tts.voice}
+                  disabled={disabled || !ttsFieldSupported("voice")}
+                  onChange={(event) => change({ ...config, tts: { ...config.tts, voice: event.target.value } })}
+                >
+                  {!ttsVoices.some((voice) => voice.id === config.tts.voice) && <option value={config.tts.voice}>{config.tts.voice} (stored)</option>}
+                  {ttsVoices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name}</option>)}
+                </NativeSelect>
+              ) : (
+                <Input
+                  id="tts-voice"
+                  value={config.tts.voice}
+                  disabled={disabled || !ttsFieldSupported("voice")}
+                  onChange={(event) => change({ ...config, tts: { ...config.tts, voice: event.target.value } })}
+                />
+              )}
+              <FieldDescription>{ttsVoices.length ? "Provider voice catalog." : "Enter a provider voice ID; this provider does not expose a voice catalog."}</FieldDescription>
             </Field>
 
-            {config.tts.provider === "sarvam" && (
+            {ttsFieldSupported("language") && (
               <Field>
                 <FieldLabel htmlFor="tts-language">Language</FieldLabel>
-                <NativeSelect
-                  id="tts-language"
-                  className="w-full"
-                  value={config.tts.language}
-                  disabled={disabled}
-                  onChange={(event) => change({ ...config, tts: { ...config.tts, language: event.target.value } })}
-                >
-                  {ttsLanguages.map((lang) => (
-                    <option key={lang} value={lang}>{lang}</option>
-                  ))}
-                </NativeSelect>
+                {ttsLanguages.length ? (
+                  <NativeSelect
+                    id="tts-language"
+                    className="w-full"
+                    value={config.tts.language}
+                    disabled={disabled}
+                    onChange={(event) => change({ ...config, tts: { ...config.tts, language: event.target.value } })}
+                  >
+                    {!ttsLanguages.includes(config.tts.language) && <option value={config.tts.language}>{config.tts.language} (stored)</option>}
+                    {ttsLanguages.map((lang) => <option key={lang} value={lang}>{lang}</option>)}
+                  </NativeSelect>
+                ) : (
+                  <Input
+                    id="tts-language"
+                    value={config.tts.language}
+                    disabled={disabled}
+                    onChange={(event) => change({ ...config, tts: { ...config.tts, language: event.target.value } })}
+                  />
+                )}
               </Field>
             )}
 
-            <NumberField
-              id="tts-pace"
-              label="Pace"
-              value={config.tts.pace}
-              min={0.5}
-              max={2.0}
-              step={0.05}
-              disabled={disabled}
-              onChange={(pace) => change({ ...config, tts: { ...config.tts, pace } })}
-            />
+            {ttsFieldSupported("pace") ? (
+              <NumberField
+                id="tts-pace"
+                label="Pace"
+                value={config.tts.pace}
+                min={0.5}
+                max={2.0}
+                step={0.05}
+                disabled={disabled}
+                onChange={(pace) => change({ ...config, tts: { ...config.tts, pace } })}
+              />
+            ) : (
+              <ReadOnlyValue label="Pace" value={String(config.tts.pace)} reason={ttsField("pace")?.description ?? "This provider does not expose pace to the runtime."} />
+            )}
           </FieldGroup>
         </div>
       </div>

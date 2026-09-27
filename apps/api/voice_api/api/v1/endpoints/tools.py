@@ -6,8 +6,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_operator
 from voice_api.models import Agent, AgentVersion, AgentVersionTool, Tool, ToolVersion
 from voice_api.models.common import new_id
-from voice_api.schemas.agent import CreateBody, ExpectedRevision, RevisionBody
+from voice_api.schemas.agent import ExpectedRevision
+from voice_api.schemas.tools import (
+    ToolCleanupRequest,
+    ToolCreateBody,
+    ToolCreateResponse,
+    ToolHandlerCatalog,
+    ToolImpactResponse,
+    ToolListResponse,
+    ToolRevisionBody,
+    ToolSummaryResponse,
+    ToolValidationReport,
+    ToolValidationResponse,
+    ToolVersionMutationResponse,
+    ToolVersionResponse,
+    ToolVersionsResponse,
+)
 from voice_api.services.publication_service import clone_version
+from voice_api.services.tool_registry_service import (
+    cleanup_unreferenced_drafts,
+    validate_tool_registry,
+)
 from voice_runtime.contracts import ToolConfig
 
 router = APIRouter(tags=["tools"])
@@ -15,14 +34,16 @@ Session = Depends(get_session)
 Operator = Depends(require_operator)
 
 
-@router.get("/tools")
-async def tools(session: AsyncSession = Session, _: None = Operator) -> dict:
+@router.get("/tools", response_model=ToolListResponse)
+async def tools(session: AsyncSession = Session, _: None = Operator) -> ToolListResponse:
     rows = (await session.scalars(select(Tool).order_by(Tool.name))).all()
-    return {"tools": [{"id": row.id, "name": row.name} for row in rows]}
+    return ToolListResponse(
+        tools=[ToolSummaryResponse(id=row.id, name=row.name) for row in rows]
+    )
 
 
 @router.get("/tools/handlers")
-async def tool_handlers(_: None = Operator) -> dict:
+async def tool_handlers(_: None = Operator) -> ToolHandlerCatalog:
     return {
         "handlers": [
             {
@@ -223,11 +244,34 @@ async def tool_handlers(_: None = Operator) -> dict:
     }
 
 
-@router.post("/tools", status_code=201)
+@router.get("/tools/validation", response_model=ToolValidationReport)
+async def validate_tools(
+    session: AsyncSession = Session, _: None = Operator
+) -> ToolValidationReport:
+    """Validate all persisted tool and agent references without changing them."""
+
+    return await validate_tool_registry(session)
+
+
+@router.post("/tools/validation/cleanup", response_model=ToolValidationReport)
+async def cleanup_tools(
+    body: ToolCleanupRequest,
+    session: AsyncSession = Session,
+    _: None = Operator,
+) -> ToolValidationReport:
+    """Optionally remove only unreferenced draft tool versions, then revalidate."""
+
+    cleaned = await cleanup_unreferenced_drafts(session) if body.apply else []
+    report = await validate_tool_registry(session)
+    report.cleaned_record_ids = cleaned
+    return report
+
+
+@router.post("/tools", status_code=201, response_model=ToolCreateResponse)
 async def create_tool(
-    body: CreateBody, session: AsyncSession = Session, _: None = Operator
-) -> dict:
-    config = ToolConfig.model_validate(body.config).model_dump(mode="json")
+    body: ToolCreateBody, session: AsyncSession = Session, _: None = Operator
+) -> ToolCreateResponse:
+    config = body.config.model_dump(mode="json")
     if config["name"] != body.name:
         raise HTTPException(422, "Tool name must match configuration name")
     tool = Tool(id=new_id(), name=body.name)
@@ -236,37 +280,42 @@ async def create_tool(
     await session.flush()
     session.add(version)
     await session.commit()
-    return {"tool_id": tool.id, "version_id": version.id}
+    return ToolCreateResponse(tool_id=tool.id, version_id=version.id)
 
 
-@router.get("/tools/{tool_id}/versions")
-async def tool_versions(tool_id: str, session: AsyncSession = Session, _: None = Operator) -> dict:
+@router.get("/tools/{tool_id}/versions", response_model=ToolVersionsResponse)
+async def tool_versions(
+    tool_id: str, session: AsyncSession = Session, _: None = Operator
+) -> ToolVersionsResponse:
     rows = (
         await session.scalars(
             select(ToolVersion).where(ToolVersion.tool_id == tool_id).order_by(ToolVersion.version)
         )
     ).all()
-    versions = []
+    versions: list[ToolVersionResponse] = []
     for row in rows:
         cfg = dict(row.config or {})
         if "wait" not in cfg or not cfg["wait"]:
-            cfg["wait"] = {"mode": "inline"}
+            cfg["wait"] = {"mode": "silent_wait"}
         versions.append(
-            {
-                "id": row.id,
-                "version": row.version,
-                "revision": row.revision,
-                "status": row.status,
-                "config": cfg,
-            }
+            ToolVersionResponse(
+                id=row.id,
+                version=row.version,
+                revision=row.revision,
+                status=row.status,
+                config=ToolConfig.model_validate(cfg),
+            )
         )
-    return {"versions": versions}
+    return ToolVersionsResponse(versions=versions)
 
 
 @router.patch("/tool-versions/{version_id}")
 async def update_tool_version(
-    version_id: str, body: RevisionBody, session: AsyncSession = Session, _: None = Operator
-) -> dict:
+    version_id: str,
+    body: ToolRevisionBody,
+    session: AsyncSession = Session,
+    _: None = Operator,
+) -> ToolVersionMutationResponse:
     row = await session.get(ToolVersion, version_id, with_for_update=True)
     if row is None:
         raise HTTPException(404, "Tool version not found")
@@ -274,16 +323,55 @@ async def update_tool_version(
         raise HTTPException(409, "Published versions are immutable")
     if row.revision != body.revision:
         raise HTTPException(409, "Draft changed by another operator")
-    row.config = ToolConfig.model_validate(body.config).model_dump(mode="json")
+    row.config = body.config.model_dump(mode="json")
     row.revision += 1
     await session.commit()
-    return {"id": row.id, "revision": row.revision, "config": row.config}
+    return ToolVersionMutationResponse(
+        id=row.id,
+        revision=row.revision,
+        status=row.status,
+        config=body.config,
+    )
+
+
+@router.post("/tool-versions/{version_id}/validate", response_model=ToolValidationResponse)
+async def validate_tool_version(
+    version_id: str, session: AsyncSession = Session, _: None = Operator
+) -> ToolValidationResponse:
+    row = await session.get(ToolVersion, version_id)
+    if row is None:
+        raise HTTPException(404, "Tool version not found")
+    try:
+        config = ToolConfig.model_validate(row.config)
+    except Exception as error:
+        return ToolValidationResponse(
+            id=row.id,
+            valid=False,
+            revision=row.revision,
+            config=None,
+            issues=[
+                {
+                    "severity": "error",
+                    "code": "invalid_tool_config",
+                    "scope": "tool_version",
+                    "record_id": row.id,
+                    "message": str(error),
+                }
+            ],
+        )
+    return ToolValidationResponse(
+        id=row.id,
+        valid=True,
+        revision=row.revision,
+        config=config,
+        issues=[],
+    )
 
 
 @router.post("/tool-versions/{version_id}/publish")
 async def publish_tool(
     version_id: str, body: ExpectedRevision, session: AsyncSession = Session, _: None = Operator
-) -> dict:
+) -> ToolVersionMutationResponse:
     row = await session.get(ToolVersion, version_id, with_for_update=True)
     if row is None:
         raise HTTPException(404, "Tool version not found")
@@ -294,20 +382,20 @@ async def publish_tool(
         raise HTTPException(409, "Draft changed; reload before publishing")
     row.status, row.published_at = "published", datetime.now(UTC)
     await session.commit()
-    return {"id": row.id, "status": row.status}
+    return ToolVersionMutationResponse(id=row.id, status=row.status, revision=row.revision)
 
 
 @router.post("/tool-versions/{version_id}/clone", status_code=201)
 async def clone_tool(
     version_id: str, body: ExpectedRevision, session: AsyncSession = Session, _: None = Operator
-) -> dict:
-    return await clone_version(session, version_id, "tool", body.revision)
+) -> ToolVersionMutationResponse:
+    return ToolVersionMutationResponse(**await clone_version(session, version_id, "tool", body.revision))
 
 
-@router.get("/tools/{tool_id}/impact")
+@router.get("/tools/{tool_id}/impact", response_model=ToolImpactResponse)
 async def tool_deletion_impact(
     tool_id: str, session: AsyncSession = Session, _: None = Operator
-) -> dict:
+) -> ToolImpactResponse:
     tool = await session.get(Tool, tool_id)
     if tool is None:
         raise HTTPException(404, "Tool not found")
@@ -346,19 +434,19 @@ async def tool_deletion_impact(
                     }
                 )
 
-    return {
-        "tool_id": tool.id,
-        "tool_name": tool.name,
-        "is_system_tool": is_system_tool,
-        "can_delete": not is_system_tool,
-        "system_tool_reason": (
+    return ToolImpactResponse(
+        tool_id=tool.id,
+        tool_name=tool.name,
+        is_system_tool=is_system_tool,
+        can_delete=not is_system_tool,
+        system_tool_reason=(
             f"Tool '{tool.name}' is a core system-level tool critical for call transitions or hangup. It cannot be deleted."
             if is_system_tool
             else None
         ),
-        "bound_agents": bound_agents,
-        "versions_count": len(tv_ids),
-    }
+        bound_agents=bound_agents,
+        versions_count=len(tv_ids),
+    )
 
 
 @router.delete("/tools/{tool_id}")

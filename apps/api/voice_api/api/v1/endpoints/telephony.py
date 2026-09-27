@@ -22,6 +22,7 @@ from voice_api.core.config import get_settings
 from voice_api.db.session import SessionFactory
 from voice_api.models import Call, Run
 from voice_api.models.common import now
+from voice_api.schemas.diagnostics import DiagnosticInput
 from voice_api.services.call_service import (
     apply_twilio_call_status,
     apply_twilio_stream_status,
@@ -29,7 +30,9 @@ from voice_api.services.call_service import (
     attach_twilio_media,
     get_by_correlation_id,
 )
+from voice_api.services.diagnostic_service import persist_diagnostic
 from voice_api.services.twilio_service import resolve_twilio_credentials
+from voice_runtime.diagnostics import text_error_diagnostic
 from voice_runtime.execution.delivery import stream_evidence
 from voice_runtime.execution.evidence_client import ApiEvidenceIngestor
 from voice_runtime.execution.exchange import ExchangeTracker
@@ -280,6 +283,14 @@ async def twilio_media_endpoint(
             logger.exception("Twilio pipeline failed during run {}: {}", run_id, exc)
             async with SessionFactory() as session:
                 r = await session.get(Run, run_id)
+                if r:
+                    await persist_diagnostic(
+                        session,
+                        run_id,
+                        DiagnosticInput.model_validate(
+                            text_error_diagnostic(str(exc))
+                        ),
+                    )
                 if r and r.status not in ("completed", "canceled"):
                     r.status = "failed"
                     r.error = f"Pipeline execution failed: {exc}"

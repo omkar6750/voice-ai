@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_operator
 from voice_api.core.config import get_settings
 from voice_api.main import app
-from voice_api.models import AgentVersion, BrowserSession, Contact, Run
+from voice_api.models import Agent, AgentVersion, BrowserSession, Contact, Run
 from voice_api.models.common import new_id
 from voice_api.schemas.browser_session import (
     WebRTCOfferRequest,
@@ -57,6 +57,71 @@ async def test_create_browser_session_creates_run_and_session():
         assert browser_session.run_id == run.id
         assert browser_session.status == "created"
         assert browser_session.expires_at is not None
+
+
+@pytest.mark.asyncio
+async def test_create_browser_session_rejects_version_from_another_agent():
+    session = AsyncMock(spec=AsyncSession)
+    version = AgentVersion(
+        id="version-a",
+        agent_id="agent-a",
+        version=1,
+        revision=1,
+        status="published",
+        config={"flow": {"nodes": []}},
+    )
+    session.get.return_value = version
+
+    with pytest.raises(HTTPException) as exc_info:
+        await create_browser_session(
+            session=session,
+            agent_id="agent-b",
+            agent_version_id="version-a",
+        )
+
+    assert exc_info.value.status_code == 422
+    assert "does not belong" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_create_browser_session_resolves_version_within_selected_agent():
+    session = AsyncMock(spec=AsyncSession)
+    agent = Agent(id="agent-a", name="Agent A", active_version_id=None)
+    version = AgentVersion(
+        id="version-a",
+        agent_id="agent-a",
+        version=3,
+        revision=1,
+        status="published",
+        config={"flow": {"nodes": []}},
+    )
+
+    async def get_mock(model, ident):
+        if model is Agent and ident == "agent-a":
+            return agent
+        return None
+
+    session.get.side_effect = get_mock
+    session.scalar.return_value = version
+
+    with patch(
+        "voice_api.services.browser_session_service.resolve",
+        return_value=({"flow": {"nodes": []}}, "hash123"),
+    ):
+        run, _ = await create_browser_session(session=session, agent_id="agent-a")
+
+    assert run.agent_version_id == "version-a"
+
+
+@pytest.mark.asyncio
+async def test_create_browser_session_requires_agent_when_version_is_omitted():
+    session = AsyncMock(spec=AsyncSession)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await create_browser_session(session=session)
+
+    assert exc_info.value.status_code == 422
+    assert "select an agent" in exc_info.value.detail.lower()
 
 
 @pytest.mark.asyncio
@@ -339,6 +404,11 @@ async def test_end_browser_session_cleans_up():
         ctx.request_handler.close.assert_awaited_once()
         assert browser_session.status == "disconnected"
         assert run.status == "completed"
+
+        # Repeated cleanup is safe and does not close resources a second time.
+        await end_browser_session(session_id, session_mock)
+        ctx.host.close.assert_awaited_once()
+        ctx.request_handler.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio

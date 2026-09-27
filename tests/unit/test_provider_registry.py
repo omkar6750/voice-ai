@@ -50,10 +50,11 @@ async def test_live_models_cached_and_filtered(monkeypatch):
     second = await provider_registry.get_provider_registry(settings)
     assert len(calls) == 2
     assert first == second
-    providers = {item["provider"]: item for item in first["providers"]}
-    assert providers["groq"]["models"] == ["llama-3.1-8b-instant"]
-    assert providers["gemini"]["models"] == ["gemini-2.5-flash"]
-    assert providers["sarvam"]["slots"] == ["stt", "tts"]
+    providers = {item.provider: item for item in first.providers}
+    assert providers["groq"].models == ["llama-3.1-8b-instant"]
+    assert providers["gemini"].models == ["gemini-2.5-flash"]
+    assert providers["sarvam"].slots == ["stt", "tts"]
+    assert providers["cartesia"].fields["pace"].runtime_supported is False
 
 
 @pytest.mark.asyncio
@@ -61,6 +62,6 @@ async def test_unconfigured_models_are_not_invented():
     registry = await provider_registry.get_provider_registry(
         Settings(_env_file=None, groq_api_key=None, gemini_api_key=None, operator_token="test")
     )
-    providers = {item["provider"]: item for item in registry["providers"]}
-    assert providers["groq"]["models"] == []
-    assert providers["gemini"]["models"] == []
+    providers = {item.provider: item for item in registry.providers}
+    assert providers["groq"].models == []
+    assert providers["gemini"].models == []

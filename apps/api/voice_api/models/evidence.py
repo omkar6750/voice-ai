@@ -183,6 +183,8 @@ class TraceSpan(Identity, Base):
     name: Mapped[str] = mapped_column(String(120))
     category: Mapped[str] = mapped_column(String(40))
     status: Mapped[str] = mapped_column(String(30), default="running")
+    output_state: Mapped[str] = mapped_column(String(20), default="not_recorded")
+    interruption_id: Mapped[str | None] = mapped_column(String(36), index=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     duration_ms: Mapped[float | None]
@@ -218,6 +220,7 @@ class ToolInvocation(Identity, Base):
     tool_version_id: Mapped[str | None] = mapped_column(ForeignKey("tool_versions.id"), index=True)
     binding_key: Mapped[str] = mapped_column(String(80))
     status: Mapped[str] = mapped_column(String(30), default="pending")
+    interruption_id: Mapped[str | None] = mapped_column(String(36), index=True)
     arguments: Mapped[dict] = mapped_column(JSONB, default=dict)
     # Legacy final payload remains readable; new results have ordered child rows.
     result: Mapped[dict | list | str | int | float | bool | None] = mapped_column(

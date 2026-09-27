@@ -2,6 +2,7 @@
 
 from typing import Protocol
 
+from voice_runtime.diagnostics import modem_status_metadata
 from voice_runtime.execution.exchange import ExchangeTracker
 from voice_runtime.telephony.base import CallState
 from voice_runtime.telephony.session import TelephonySession
@@ -36,6 +37,15 @@ class Sim7600CallDriver:
         await self.modem.open()
         status = await self.modem.status()
         if not status.can_make_call:
+            tracker.diagnostic(
+                severity="error",
+                category="modem_readiness",
+                source="modem",
+                code="modem_not_ready",
+                message="Modem is not ready for voice calling",
+                detail=status.last_error,
+                metadata=modem_status_metadata(status),
+            )
             raise RuntimeError("Modem is not ready for voice calling")
         await self.modem.ensure_pcm_format(snapshot["audio"]["sample_rate"])
         self.session = TelephonySession(self.modem)

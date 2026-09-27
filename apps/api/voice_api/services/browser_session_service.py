@@ -22,6 +22,7 @@ from pipecat.transports.smallwebrtc.request_handler import (
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from voice_runtime.diagnostics import text_error_diagnostic
 from voice_runtime.execution.delivery import stream_evidence
 from voice_runtime.execution.evidence_client import ApiEvidenceIngestor
 from voice_runtime.execution.exchange import ExchangeTracker
@@ -30,9 +31,11 @@ from voice_runtime.execution.spool import DurableSpool
 
 from voice_api.core.config import Settings
 from voice_api.db.session import SessionFactory
-from voice_api.models import AgentVersion, BrowserSession, Contact, Run
+from voice_api.models import Agent, AgentVersion, BrowserSession, Contact, Run
 from voice_api.models.common import new_id, now
 from voice_api.schemas.browser_session import WebRTCOfferRequest, WebRTCPatchRequest
+from voice_api.schemas.diagnostics import DiagnosticInput
+from voice_api.services.diagnostic_service import persist_diagnostic
 from voice_api.services.resolution_service import fingerprint, resolve
 
 
@@ -48,12 +51,42 @@ class BrowserSessionContext:
         self.has_connected = False
         self.connection_id: str | None = None
         self.connected_event = asyncio.Event()
+        self.cleanup_lock = asyncio.Lock()
+        self.cleanup_complete = False
+        self.disconnect_task: asyncio.Task | None = None
 
     def mark_ended(self) -> None:
         self.is_active = False
 
     async def is_still_active(self) -> bool:
         return self.is_active
+
+    async def close_runtime(self) -> None:
+        """Close runtime resources exactly once, without cancelling the caller task."""
+        current = asyncio.current_task()
+        if self.pipeline_task is current:
+            self.mark_ended()
+            await self._close_resources()
+            self.cleanup_complete = True
+            return
+        async with self.cleanup_lock:
+            if self.cleanup_complete:
+                return
+            self.mark_ended()
+            if self.pipeline_task:
+                if not self.pipeline_task.done():
+                    self.pipeline_task.cancel()
+                await asyncio.gather(self.pipeline_task, return_exceptions=True)
+                if self.cleanup_complete:
+                    return
+            await self._close_resources()
+            self.cleanup_complete = True
+
+    async def _close_resources(self) -> None:
+        if self.host:
+            await self.host.close()
+        if self.request_handler:
+            await self.request_handler.close()
 
 
 class BrowserSessionManager:
@@ -82,6 +115,7 @@ browser_session_manager = BrowserSessionManager()
 
 async def create_browser_session(
     session: AsyncSession,
+    agent_id: str | None = None,
     agent_version_id: str | None = None,
     contact_id: str | None = None,
     phone_number: str | None = None,
@@ -93,18 +127,30 @@ async def create_browser_session(
         version = await session.get(AgentVersion, agent_version_id)
         if version is None:
             raise HTTPException(404, "Agent version not found")
+        if agent_id and version.agent_id != agent_id:
+            raise HTTPException(422, "Agent version does not belong to the selected agent")
     else:
-        stmt = (
-            select(AgentVersion)
-            .where(AgentVersion.status == "published")
-            .order_by(AgentVersion.version.desc())
-        )
-        version = await session.scalar(stmt)
+        if not agent_id:
+            raise HTTPException(422, "Select an agent before starting a browser test")
+        agent = await session.get(Agent, agent_id)
+        if agent is None:
+            raise HTTPException(404, "Agent not found")
+        version = None
+        if agent.active_version_id:
+            active = await session.get(AgentVersion, agent.active_version_id)
+            if active is not None and active.status == "published":
+                version = active
         if version is None:
-            stmt = select(AgentVersion).order_by(AgentVersion.version.desc())
-            version = await session.scalar(stmt)
+            version = await session.scalar(
+                select(AgentVersion)
+                .where(
+                    AgentVersion.agent_id == agent_id,
+                    AgentVersion.status == "published",
+                )
+                .order_by(AgentVersion.version.desc())
+            )
         if version is None:
-            raise HTTPException(400, "No agent version found to test")
+            raise HTTPException(422, "Selected agent has no published version to test")
 
     resolved_contact_id: str | None = None
     contact_snapshot: dict[str, Any] = {}
@@ -251,6 +297,10 @@ async def handle_browser_offer(
         async def on_client_disconnected(_transport, _client):
             logger.info("Browser WebRTC client disconnected for session {}", session_id)
             ctx.mark_ended()
+            ctx.disconnect_task = asyncio.create_task(
+                _finalize_browser_disconnect(session_id),
+                name=f"browser-disconnect-{session_id}",
+            )
 
         ctx.pipeline_task = asyncio.create_task(_run_browser_pipeline(ctx, transport, settings))
 
@@ -291,7 +341,9 @@ async def handle_browser_patch(
     return {"status": "ok"}
 
 
-async def end_browser_session(session_id: str, session: AsyncSession) -> dict[str, str]:
+async def end_browser_session(
+    session_id: str, session: AsyncSession, *, reason: str = "operator_stop"
+) -> dict[str, str]:
     """End an active browser session, cleaning up worker, host, and run status."""
     browser_session = await session.get(BrowserSession, session_id)
     if not browser_session:
@@ -299,13 +351,7 @@ async def end_browser_session(session_id: str, session: AsyncSession) -> dict[st
 
     ctx = browser_session_manager.get_context(session_id)
     if ctx:
-        ctx.mark_ended()
-        if ctx.host:
-            await ctx.host.close()
-        if ctx.request_handler:
-            await ctx.request_handler.close()
-        if ctx.pipeline_task and not ctx.pipeline_task.done():
-            ctx.pipeline_task.cancel()
+        await ctx.close_runtime()
         await browser_session_manager.remove_context(session_id)
 
     browser_session.status = "disconnected"
@@ -314,12 +360,47 @@ async def end_browser_session(session_id: str, session: AsyncSession) -> dict[st
 
     run = await session.get(Run, browser_session.run_id)
     if run and run.status in ("claimed", "running"):
+        await persist_diagnostic(
+            session,
+            run.id,
+            DiagnosticInput(
+                diagnostic_id=str(uuid5(NAMESPACE_URL, f"{run.id}/browser/{reason}")),
+                occurred_at=now(),
+                severity="info" if reason == "operator_stop" else "warning",
+                category="call_termination",
+                source="transport",
+                code=("browser_operator_stop" if reason == "operator_stop" else "browser_disconnect"),
+                message=(
+                    "Browser call ended by operator"
+                    if reason == "operator_stop"
+                    else "Browser connection ended unexpectedly"
+                ),
+                uncertain=reason != "operator_stop",
+            ),
+        )
         run.status = "completed"
         if not run.ended_at:
             run.ended_at = now()
 
     await session.commit()
     return {"status": "disconnected"}
+
+
+async def _finalize_browser_disconnect(session_id: str) -> None:
+    """Finalize a transport-originated disconnect without relying on an HTTP request."""
+    async with SessionFactory() as session:
+        try:
+            await end_browser_session(session_id, session, reason="browser_disconnect")
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                logger.warning(
+                    "Could not finalize browser disconnect session={} status={} detail={}",
+                    session_id,
+                    exc.status_code,
+                    exc.detail,
+                )
+        except Exception:
+            logger.exception("Could not finalize browser disconnect session={}", session_id)
 
 
 async def _run_browser_pipeline(
@@ -345,6 +426,7 @@ async def _run_browser_pipeline(
         s
         for s in (
             settings.groq_api_key,
+            settings.jev_api_key,
             settings.sarvam_api_key,
             settings.cartesia_api_key,
             settings.gemini_api_key,
@@ -388,8 +470,9 @@ async def _run_browser_pipeline(
                 await db_session.commit()
         finally:
             ctx.mark_ended()
-            await host.close()
+            await ctx.close_runtime()
             delivery_task.cancel()
+            await asyncio.gather(delivery_task, return_exceptions=True)
 
             async with SessionFactory() as db_session:
                 r = await db_session.get(Run, run_id)

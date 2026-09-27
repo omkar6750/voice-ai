@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     String,
+    Text,
     UniqueConstraint,
     text,
 )
@@ -75,3 +76,131 @@ class ToolInvocationResult(Identity, Created, Base):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     consumed_exchange_id: Mapped[str | None] = mapped_column(String(36), index=True)
+
+
+class ToolContextDelivery(Identity, Created, Base):
+    """Proof that a result entered context and, optionally, which LLM consumed it."""
+
+    __tablename__ = "tool_context_deliveries"
+    __table_args__ = (
+        UniqueConstraint("result_id"),
+        CheckConstraint(
+            "status IN ('delivered','consumed','context_update_failed','interrupted_before_consumption')"
+        ),
+        CheckConstraint("context_message_index IS NULL OR context_message_index >= 0"),
+    )
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    tool_invocation_id: Mapped[str] = mapped_column(
+        ForeignKey("tool_invocations.id", ondelete="CASCADE"), index=True
+    )
+    result_id: Mapped[str] = mapped_column(
+        ForeignKey("tool_invocation_results.id", ondelete="CASCADE"), index=True
+    )
+    function_call_id: Mapped[str | None] = mapped_column(String(255))
+    is_final: Mapped[bool]
+    status: Mapped[str] = mapped_column(String(40), default="delivered")
+    context_message_index: Mapped[int | None]
+    delivered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consumed_exchange_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    consuming_span_id: Mapped[str | None] = mapped_column(String(36), index=True)
+
+
+class ClassifierResult(Identity, Created, Base):
+    """The finalized result of an automatic entry or exit classifier run."""
+
+    __tablename__ = "classifier_results"
+    __table_args__ = (
+        UniqueConstraint("operation_id"),
+        CheckConstraint("phase IN ('entry','exit')"),
+        CheckConstraint("classifier_type IN ('llm','jev')"),
+        CheckConstraint("status IN ('completed','failed')"),
+    )
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    operation_id: Mapped[str] = mapped_column(
+        ForeignKey("trace_spans.id", ondelete="CASCADE"), index=True
+    )
+    phase: Mapped[str] = mapped_column(String(10))
+    node_key: Mapped[str] = mapped_column(String(120))
+    classifier_type: Mapped[str] = mapped_column(String(10))
+    status: Mapped[str] = mapped_column(String(20))
+    result: Mapped[dict | list | str | int | float | bool | None] = mapped_column(
+        JSONB(none_as_null=True)
+    )
+    error: Mapped[str | None] = mapped_column(String(500))
+    transcript_sha256: Mapped[str] = mapped_column(String(64))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ClassifierContextDelivery(Identity, Created, Base):
+    """Proof that a classifier result reached a subsequent LLM context."""
+
+    __tablename__ = "classifier_context_deliveries"
+    __table_args__ = (
+        UniqueConstraint("classifier_result_id"),
+        CheckConstraint(
+            "status IN ('delivered','consumed','interrupted_before_consumption')"
+        ),
+        CheckConstraint("context_message_index >= 0"),
+    )
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    classifier_result_id: Mapped[str] = mapped_column(
+        ForeignKey("classifier_results.id", ondelete="CASCADE"), index=True
+    )
+    operation_id: Mapped[str] = mapped_column(
+        ForeignKey("trace_spans.id", ondelete="CASCADE"), index=True
+    )
+    phase: Mapped[str] = mapped_column(String(10))
+    node_key: Mapped[str] = mapped_column(String(120))
+    status: Mapped[str] = mapped_column(String(40), default="delivered")
+    context_message_index: Mapped[int]
+    delivered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consumed_exchange_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    consuming_operation_id: Mapped[str | None] = mapped_column(String(36), index=True)
+
+
+class InterruptionEvent(Identity, Created, Base):
+    """Causal interruption marker linking a frame to cancelled work."""
+
+    __tablename__ = "interruption_events"
+    __table_args__ = (
+        CheckConstraint("source IN ('caller','system','transport')"),
+    )
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    exchange_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    source: Mapped[str] = mapped_column(String(20))
+    reason: Mapped[str] = mapped_column(String(255))
+    frame_type: Mapped[str] = mapped_column(String(120))
+    interrupted_operation_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    interrupted_tool_invocation_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class RunDiagnostic(Identity, Created, Base):
+    __tablename__ = "run_diagnostics"
+    __table_args__ = (
+        Index("ix_run_diagnostics_occurred_at", "occurred_at"),
+        CheckConstraint("severity IN ('info','warning','error')"),
+        CheckConstraint(
+            "source IN ('provider','modem','transport','call','evidence','runtime')"
+        ),
+        CheckConstraint("http_status IS NULL OR http_status BETWEEN 100 AND 599"),
+        CheckConstraint("retry_after_seconds IS NULL OR retry_after_seconds >= 0"),
+    )
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    severity: Mapped[str] = mapped_column(String(10))
+    category: Mapped[str] = mapped_column(String(80))
+    source: Mapped[str] = mapped_column(String(20))
+    code: Mapped[str | None] = mapped_column(String(120))
+    message: Mapped[str] = mapped_column(String(500))
+    detail: Mapped[str | None] = mapped_column(Text)
+    retryable: Mapped[bool] = mapped_column(default=False, server_default="false")
+    uncertain: Mapped[bool] = mapped_column(default=False, server_default="false")
+    provider_request_id: Mapped[str | None] = mapped_column(String(255))
+    http_status: Mapped[int | None]
+    retry_after_seconds: Mapped[float | None]
+    metadata_json: Mapped[dict] = mapped_column(
+        "metadata", JSONB, default=dict, server_default="{}"
+    )
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

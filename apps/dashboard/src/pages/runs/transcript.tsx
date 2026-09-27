@@ -23,7 +23,7 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
-import { clock, consumingLlm, resultsFor } from "./model";
+import { clock, consumingLlm, deliveryFor, resultsFor } from "./model";
 import type { Selection, Timeline, Tool } from "./types";
 
 function ToolActivity({
@@ -57,6 +57,7 @@ function ToolActivity({
         </Bubble>
         {results.map((result) => {
           const next = consumingLlm(timeline, result);
+          const delivery = deliveryFor(timeline, result);
           const exchange = timeline.exchanges.find(
             (item) => item.id === result.consumed_exchange_id,
           );
@@ -74,12 +75,15 @@ function ToolActivity({
                 {result.is_final ? " · final" : " · intermediate"}
               </Button>
               <p className="text-xs text-muted-foreground">
-                {result.consumed_at
-                  ? "Entered context " +
-                    clock(result.consumed_at) +
-                    " · exchange " +
-                    (exchange?.sequence ?? "?")
-                  : "Not recorded as consumed"}
+                {delivery?.delivered_at
+                  ? "Added to context " + clock(delivery.delivered_at)
+                  : "Not recorded as added to context"}
+                {delivery?.consumed_at
+                  ? " · consumed by LLM " + clock(delivery.consumed_at)
+                  : " · not recorded as consumed"}
+                {delivery?.consumed_at
+                  ? " · exchange " + (exchange?.sequence ?? "?")
+                  : ""}
                 {next ? " · next recorded LLM: " + next.name : ""}
               </p>
             </div>

@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -21,6 +22,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.flows import ContextStrategy, ContextStrategyConfig, FlowManager, NodeConfig
 from pipecat.flows.types import FlowsFunctionSchema
+from pipecat.frames.frames import FunctionCallResultProperties
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -36,6 +38,12 @@ from pipecat.services.sarvam.tts import SarvamTTSService
 from pipecat.workers.runner import WorkerRunner
 
 from voice_runtime.call_capture import CallCapture
+from voice_runtime.contracts import is_registered_handler
+from voice_runtime.diagnostics import (
+    exception_diagnostic,
+    provider_error_diagnostic,
+    text_error_diagnostic,
+)
 from voice_runtime.execution.contact_context import sanitize_contact_variables
 from voice_runtime.execution.exchange import ExchangeTracker, bind_transcripts
 from voice_runtime.execution.observer import EvidenceObserver
@@ -84,6 +92,64 @@ def trim_classifier_result(res: dict) -> dict:
     return trimmed
 
 
+def _retry_after(value: str | None) -> float | None:
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        return None
+
+
+def _provider_body(response: httpx.Response) -> dict | str:
+    try:
+        body = response.json()
+    except ValueError:
+        return response.text[:500]
+    return body if isinstance(body, dict) else str(body)
+
+
+def build_speech_services(settings, snapshot: dict, sample_rate: int):
+    """Build STT/TTS services from the resolved snapshot's exact selections."""
+
+    stt_config = snapshot["stt"]
+    if stt_config["provider"] != "sarvam":
+        raise ValueError(f"Unsupported STT provider: {stt_config['provider']}")
+    stt = SarvamSTTService(
+        api_key=settings.sarvam_api_key,
+        settings=SarvamSTTService.Settings(model=stt_config["model"]),
+        sample_rate=sample_rate,
+    )
+
+    tts_config = snapshot["tts"]
+    if tts_config["provider"] == "sarvam":
+        tts = SarvamTTSService(
+            api_key=settings.sarvam_api_key,
+            settings=SarvamTTSService.Settings(
+                model=tts_config["model"],
+                voice=tts_config["voice"],
+                language=tts_config["language"],
+                pace=tts_config["pace"],
+            ),
+            sample_rate=sample_rate,
+        )
+    elif tts_config["provider"] == "cartesia":
+        tts = CartesiaTTSService(
+            api_key=settings.cartesia_api_key,
+            settings=CartesiaTTSService.Settings(
+                model=tts_config["model"],
+                voice=tts_config["voice"],
+                language=tts_config["language"],
+            ),
+            sample_rate=sample_rate,
+            encoding="pcm_s16le",
+            container="raw",
+        )
+    else:
+        raise ValueError(f"Unsupported TTS provider: {tts_config['provider']}")
+    return stt, tts
+
+
 async def run_jev_classification(
     api_key: str,
     transcript: str,
@@ -98,16 +164,13 @@ async def run_jev_classification(
         "questions": questions,
     }
     if not api_key:
-        logger.warning("JEV API key not configured on runtime; using fallback")
+        logger.warning("JEV API key not configured on runtime")
         return {
-            "lead_temperature": {
-                "choice": "warm",
-                "probabilities": {"hot": 0.2, "warm": 0.6, "cold": 0.2},
-                "confidence": 0.5,
-                "rationale": "Jev API key missing",
-            },
-            "service_fit": {"choice": "strong_fit", "confidence": 0.5},
-            "tone": {"choice": "receptive", "confidence": 0.5},
+            "status": "error",
+            "error": "JEV API key is not configured",
+            "_diagnostic": provider_error_diagnostic(
+                provider="jev", status_code=401, body={"message": "API key is not configured"}
+            ),
         }
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -131,19 +194,36 @@ async def run_jev_classification(
                     else:
                         normalized[key] = {"choice": str(val), "confidence": 0.5}
                 return normalized
-            logger.error("JEV System One HTTP {}: {}", resp.status_code, resp.text[:300])
+            logger.error("JEV System One HTTP {}", resp.status_code)
+            try:
+                body = resp.json()
+            except Exception:
+                body = resp.text[:500]
+            return {
+                "status": "error",
+                "error": f"JEV provider returned HTTP {resp.status_code}",
+                "_diagnostic": provider_error_diagnostic(
+                    provider="jev",
+                    status_code=resp.status_code,
+                    body=body,
+                    request_id=resp.headers.get("x-request-id") or resp.headers.get("request-id"),
+                    retry_after_seconds=_retry_after(resp.headers.get("retry-after")),
+                ),
+            }
     except Exception as exc:
         logger.error("JEV System One API error: {}", exc)
-    return {
-        "lead_temperature": {
-            "choice": "warm",
-            "probabilities": {"hot": 0.2, "warm": 0.6, "cold": 0.2},
-            "confidence": 0.5,
-            "rationale": "Fallback classification",
-        },
-        "service_fit": {"choice": "strong_fit", "confidence": 0.5},
-        "tone": {"choice": "receptive", "confidence": 0.5},
-    }
+        return {
+            "status": "error",
+            "error": "JEV provider request failed",
+            "_diagnostic": exception_diagnostic(
+                exc,
+                source="provider",
+                category="provider_request_failed",
+                code="jev_request_failed",
+                message="Jev provider request failed",
+                retryable=True,
+            ),
+        }
 
 
 async def run_llm_classification(
@@ -156,9 +236,11 @@ async def run_llm_classification(
     if not api_key:
         logger.warning("Groq API key not configured for LLM classification")
         return {
-            "lead_temperature": "warm",
-            "service_fit": "strong_fit",
-            "tone": "receptive",
+            "status": "error",
+            "error": "Groq API key is not configured",
+            "_diagnostic": provider_error_diagnostic(
+                provider="groq", status_code=401, body={"message": "API key is not configured"}
+            ),
         }
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -183,14 +265,36 @@ async def run_llm_classification(
             if resp.status_code == 200:
                 raw_data = json.loads(resp.json()["choices"][0]["message"]["content"])
                 return raw_data if isinstance(raw_data, dict) else {"result": raw_data}
-            logger.error("LLM classification HTTP {}: {}", resp.status_code, resp.text[:300])
+            logger.error("LLM classification HTTP {}", resp.status_code)
+            try:
+                body = resp.json()
+            except Exception:
+                body = resp.text[:500]
+            return {
+                "status": "error",
+                "error": f"LLM provider returned HTTP {resp.status_code}",
+                "_diagnostic": provider_error_diagnostic(
+                    provider="groq",
+                    status_code=resp.status_code,
+                    body=body,
+                    request_id=resp.headers.get("x-request-id") or resp.headers.get("request-id"),
+                    retry_after_seconds=_retry_after(resp.headers.get("retry-after")),
+                ),
+            }
     except Exception as exc:
         logger.error("LLM classification error: {}", exc)
-    return {
-        "lead_temperature": "warm",
-        "service_fit": "strong_fit",
-        "tone": "receptive",
-    }
+        return {
+            "status": "error",
+            "error": "LLM classifier provider request failed",
+            "_diagnostic": exception_diagnostic(
+                exc,
+                source="provider",
+                category="provider_request_failed",
+                code="groq_request_failed",
+                message="Groq provider request failed",
+                retryable=True,
+            ),
+        }
 
 
 def _parse_spoken_callback_time(phrase: str) -> datetime:
@@ -249,15 +353,45 @@ def _parse_spoken_callback_time(phrase: str) -> datetime:
 
 class TracedFlowManager(FlowManager):
     def __init__(
-        self, *, tracker: ExchangeTracker, bindings: dict, observer: EvidenceObserver, **kwargs
+        self,
+        *,
+        tracker: ExchangeTracker,
+        bindings: dict,
+        observer: EvidenceObserver,
+        context: LLMContext,
+        classifier_runner: Callable[[str, str], Awaitable[tuple[str, dict[str, str]] | None]],
+        **kwargs,
     ):
         super().__init__(**kwargs)
         self.tracker = tracker
         self.bindings = bindings
         self.observer = observer
+        self._context_for_evidence = context
+        self._classifier_runner = classifier_runner
         self._transition_tool_id: str | None = None
 
+    def _context_message_index(self) -> int | None:
+        messages = self._context_for_evidence.get_messages()
+        return len(messages) - 1 if messages else None
+
     async def _set_node(self, node_id: str, node_config: NodeConfig) -> None:
+        classifier_messages: list[dict[str, str]] = []
+        current_node = self.current_node
+        if current_node and current_node != node_id:
+            classifier = await self._classifier_runner("exit", current_node)
+            if classifier is not None:
+                _, message = classifier
+                classifier_messages.append(message)
+        classifier = await self._classifier_runner("entry", node_id)
+        if classifier is not None:
+            _, message = classifier
+            classifier_messages.append(message)
+        if classifier_messages:
+            node_config = dict(node_config)
+            node_config["task_messages"] = [
+                *node_config.get("task_messages", []),
+                *classifier_messages,
+            ]
         await super()._set_node(node_id, node_config)
         self.tracker.start_visit(node_id, self._transition_tool_id)
         self._transition_tool_id = None
@@ -288,11 +422,22 @@ class TracedFlowManager(FlowManager):
                 is_final = properties is None or properties.is_final
                 connection_id = None
                 provider_message_id = None
+                diagnostic = None
                 if isinstance(result, dict):
                     result = dict(result)
                     connection_id = result.pop("_connection_id", None)
                     provider_message_id = result.pop("_provider_message_id", None)
-                self.tracker.tool_result(invocation_id, result, is_final=is_final)
+                    diagnostic = result.pop("_diagnostic", None)
+                    if diagnostic is None and result.get("status") == "error":
+                        diagnostic = exception_diagnostic(
+                            RuntimeError(str(result.get("error", "Tool execution failed"))),
+                            category="tool_failure",
+                            code="tool_error",
+                            message=f"Tool {name} failed",
+                        )
+                if isinstance(diagnostic, dict):
+                    self.tracker.diagnostic(**diagnostic)
+                result_id = self.tracker.tool_result(invocation_id, result, is_final=is_final)
                 if (
                     name == "change_node"
                     and is_final
@@ -300,7 +445,22 @@ class TracedFlowManager(FlowManager):
                     and result.get("status") == "ok"
                 ):
                     self._transition_tool_id = invocation_id
-                await original_callback(result, properties=properties)
+                result_properties = properties or FunctionCallResultProperties(is_final=is_final)
+                previous_context_callback = result_properties.on_context_updated
+
+                async def context_updated() -> None:
+                    self.tracker.context_updated(
+                        invocation_id,
+                        result_id,
+                        context_message_index=self._context_message_index(),
+                    )
+                    if previous_context_callback is not None:
+                        await previous_context_callback()
+
+                result_properties = replace(
+                    result_properties, on_context_updated=context_updated
+                )
+                await original_callback(result, properties=result_properties)
                 if is_final:
                     final_result, final_sent = result, True
                     self.tracker.end_tool(
@@ -316,7 +476,7 @@ class TracedFlowManager(FlowManager):
             try:
                 await execute(replace(params, result_callback=result_callback))
             finally:
-                if not final_sent:
+                if not final_sent and not self.tracker.tool_was_ended(invocation_id):
                     self.tracker.end_tool(
                         invocation_id, "failed", {"error": "No final tool result"}
                     )
@@ -333,6 +493,7 @@ class NativePipelineHost:
         self.ready = asyncio.Event()
         self.errors: list[str] = []
         self._call_hung_up: bool = False
+        self._termination_diagnostic_recorded = False
         self._end_task: asyncio.Task | None = None
         self.tracker: ExchangeTracker | None = None
         self._nodes: dict[str, dict] = {}
@@ -385,8 +546,97 @@ class NativePipelineHost:
             ),
         )
 
-    async def _whatsapp_runtime_config(self) -> tuple[str, str, str | None, str, str | None]:
-        """Return token, phone number, matching DB connection, and API version."""
+    async def _run_node_classifier(
+        self, phase: str, node_key: str
+    ) -> tuple[str, dict[str, str]] | None:
+        """Run one configured node classifier and return its context message."""
+        classifier_cfg = self._snapshot.get("classifier", {})
+        if not classifier_cfg.get("enabled", True):
+            return None
+        configured_nodes = classifier_cfg.get("node_entries" if phase == "entry" else "node_exits", [])
+        if node_key not in configured_nodes or self.tracker is None:
+            return None
+
+        classifier_type = classifier_cfg.get("classifier_type", "llm")
+        transcript = _extract_transcript(getattr(self, "context", None), self.tracker)
+        if classifier_type == "jev":
+            jev_cfg = classifier_cfg.get("jev", {})
+            provider, model = "typesafe", jev_cfg.get("model", "jev-latest")
+        else:
+            llm_cfg = classifier_cfg.get("model", {})
+            provider, model = llm_cfg.get("provider", "groq"), llm_cfg.get(
+                "model", "llama-3.3-70b-versatile"
+            )
+
+        operation = self.tracker.start_classifier(
+            phase=phase,
+            node_key=node_key,
+            classifier_type=classifier_type,
+            provider=provider,
+            model=model,
+            transcript=transcript,
+        )
+        result: dict[str, Any]
+        error: str | None = None
+        try:
+            if classifier_type == "jev":
+                jev_cfg = classifier_cfg.get("jev", {})
+                questions = jev_cfg.get("questions") or {}
+                if not questions:
+                    from voice_runtime.contracts.cadence import default_jev_questions
+
+                    questions = {key: value.model_dump() for key, value in default_jev_questions().items()}
+                jev_key = getattr(self.settings, "jev_api_key", None) or os.getenv(
+                    "VOICE_JEV_API_KEY", ""
+                )
+                raw_result = await run_jev_classification(
+                    api_key=jev_key,
+                    transcript=transcript,
+                    questions=questions,
+                    model=model,
+                    api_url=jev_cfg.get("api_url", "https://api.typesafe.ai/v1/systemone"),
+                )
+            elif provider == "groq":
+                groq_key = getattr(self.settings, "groq_api_key", None) or os.getenv(
+                    "VOICE_GROQ_API_KEY", ""
+                )
+                raw_result = await run_llm_classification(
+                    api_key=groq_key,
+                    transcript=transcript,
+                    prompt=classifier_cfg.get(
+                        "prompt", "Classify the supplied conversation using only observed evidence."
+                    ),
+                    model=model,
+                )
+            else:
+                raw_result = {
+                    "status": "error",
+                    "error": f"Unsupported classifier LLM provider: {provider}",
+                }
+            result = trim_classifier_result(raw_result)
+            raw_diagnostic = raw_result.get("_diagnostic") if isinstance(raw_result, dict) else None
+            if isinstance(raw_diagnostic, dict):
+                self.tracker.diagnostic(**raw_diagnostic)
+            if result.get("status") == "error":
+                error = str(result.get("error", "Classifier failed"))
+        except Exception:
+            logger.exception("{} classifier failed for node {}", phase, node_key)
+            result = {"status": "error", "error": "Classifier execution failed"}
+            error = str(result["error"])
+
+        status = "failed" if error else "completed"
+        result_id, message = self.tracker.finish_classifier(
+            operation, status, result, error=error
+        )
+        return result_id, message
+
+    async def _whatsapp_runtime_config(
+        self,
+        *,
+        connection_id: str | None = None,
+        local_media_id: str | None = None,
+    ) -> tuple[str, str, str | None, str, str | None, str | None]:
+        """Resolve WhatsApp credentials and an optional catalog media record."""
         access_token = getattr(self.settings, "whatsapp_access_token", None) or os.getenv(
             "VOICE_WHATSAPP_ACCESS_TOKEN", ""
         )
@@ -396,6 +646,7 @@ class NativePipelineHost:
         connection_id = None
         api_version = "v21.0"
         header_media_id = None
+        header_media_type = None
         if phone_number_id:
             try:
                 from sqlalchemy import select
@@ -408,26 +659,32 @@ class NativePipelineHost:
                 from voice_api.services.vault_service import CredentialVault
 
                 async with SessionFactory() as session:
-                    rows = (
-                        await session.scalars(
-                            select(IntegrationConnection).where(
-                                IntegrationConnection.provider == "whatsapp",
-                                IntegrationConnection.enabled.is_(True),
-                            )
-                        )
-                    ).all()
+                    query = select(IntegrationConnection).where(
+                        IntegrationConnection.provider == "whatsapp",
+                        IntegrationConnection.enabled.is_(True),
+                    )
+                    if connection_id:
+                        query = query.where(IntegrationConnection.id == connection_id)
+                    rows = (await session.scalars(query)).all()
                     for row in rows:
-                        if str(row.config.get("phone_number_id", "")) == str(phone_number_id):
+                        if connection_id or str(row.config.get("phone_number_id", "")) == str(
+                            phone_number_id
+                        ):
                             connection_id = str(row.id)
+                            phone_number_id = str(row.config.get("phone_number_id") or phone_number_id)
                             api_version = str(row.config.get("api_version") or api_version)
-                            latest_media = await session.scalar(
-                                select(IntegrationMedia)
-                                .where(IntegrationMedia.connection_id == row.id)
-                                .order_by(IntegrationMedia.uploaded_at.desc())
-                            )
-                            header_media_id = (
-                                latest_media.provider_media_id if latest_media else None
-                            )
+                            if local_media_id:
+                                media = await session.scalar(
+                                    select(IntegrationMedia).where(
+                                        IntegrationMedia.id == local_media_id,
+                                        IntegrationMedia.connection_id == row.id,
+                                        IntegrationMedia.status == "available",
+                                    )
+                                )
+                                header_media_id = (
+                                    media.provider_media_id if media is not None else None
+                                )
+                                header_media_type = media.media_type if media is not None else None
                             if not access_token:
                                 secret = await session.scalar(
                                     select(IntegrationSecret).where(
@@ -447,7 +704,14 @@ class NativePipelineHost:
                             break
             except Exception as exc:
                 logger.warning("Could not resolve WhatsApp integration metadata: {}", exc)
-        return access_token, phone_number_id, connection_id, api_version, header_media_id
+        return (
+            access_token,
+            phone_number_id,
+            connection_id,
+            api_version,
+            header_media_id,
+            header_media_type,
+        )
 
     def _handler(self, name: str):
         async def handle(args: dict, _manager: FlowManager):
@@ -459,6 +723,13 @@ class NativePipelineHost:
                 return {"status": "ok", "node": target}, self._node(target)
             if name == "end_call":
                 self._call_hung_up = True
+                self.tracker.diagnostic(
+                    severity="info",
+                    category="call_termination",
+                    source="call",
+                    code="agent_hangup",
+                    message="Agent requested call termination",
+                )
                 self._end_task = asyncio.create_task(self.worker.cancel())
                 return {"status": "ok"}
             if name == "check_whatsapp_window":
@@ -560,6 +831,7 @@ class NativePipelineHost:
                     connection_id,
                     api_version,
                     _db_header_media_id,
+                    _db_header_media_type,
                 ) = await self._whatsapp_runtime_config()
                 if not access_token or not phone_number_id:
                     logger.warning(
@@ -568,6 +840,11 @@ class NativePipelineHost:
                     return {
                         "status": "error",
                         "error": "WhatsApp credentials not configured on runtime",
+                        "_diagnostic": provider_error_diagnostic(
+                            provider="whatsapp",
+                            status_code=401,
+                            body={"message": "API key is not configured"},
+                        ),
                     }
 
                 payload = {
@@ -591,7 +868,17 @@ class NativePipelineHost:
                             )
                             return {
                                 "status": "error",
-                                "error": f"WhatsApp API {resp.status_code}: {resp.text[:200]}",
+                                "error": f"WhatsApp API returned HTTP {resp.status_code}",
+                                "_diagnostic": provider_error_diagnostic(
+                                    provider="whatsapp",
+                                    status_code=resp.status_code,
+                                    body=_provider_body(resp),
+                                    request_id=resp.headers.get("x-request-id")
+                                    or resp.headers.get("request-id"),
+                                    retry_after_seconds=_retry_after(
+                                        resp.headers.get("retry-after")
+                                    ),
+                                ),
                             }
                         data = resp.json()
                         msg_id = (data.get("messages") or [{}])[0].get("id", "unknown")
@@ -604,16 +891,52 @@ class NativePipelineHost:
                         }
                 except Exception as exc:
                     logger.error("WhatsApp direct message exception: {}", exc)
-                    return {"status": "error", "error": f"WhatsApp request failed: {exc}"}
+                    return {
+                        "status": "error",
+                        "error": "WhatsApp request failed",
+                        "_diagnostic": exception_diagnostic(
+                            exc,
+                            source="provider",
+                            category="provider_request_failed",
+                            code="whatsapp_request_failed",
+                            message="WhatsApp provider request failed",
+                            retryable=True,
+                        ),
+                    }
 
             if name.startswith("whatsapp_template_"):
+                tool_definition = (
+                    self._snapshot.get("_resolved", {})
+                    .get("tools", {})
+                    .get(name, {})
+                    .get("definition", {})
+                )
+                whatsapp_config = tool_definition.get("whatsapp")
+                if not isinstance(whatsapp_config, dict):
+                    return {
+                        "status": "error",
+                        "error": "WhatsApp template tool is missing account configuration",
+                        "_diagnostic": exception_diagnostic(
+                            ValueError("missing WhatsApp template configuration"),
+                            source="runtime",
+                            category="tool_configuration",
+                            code="whatsapp_tool_unconfigured",
+                            message="WhatsApp template tool is not configured",
+                            retryable=False,
+                        ),
+                    }
+                local_media_id = whatsapp_config.get("header_media_id")
                 (
                     access_token,
                     phone_number_id,
                     connection_id,
                     api_version,
                     db_header_media_id,
-                ) = await self._whatsapp_runtime_config()
+                    db_header_media_type,
+                ) = await self._whatsapp_runtime_config(
+                    connection_id=whatsapp_config.get("connection_id"),
+                    local_media_id=local_media_id,
+                )
                 if not access_token or not phone_number_id:
                     logger.warning(
                         "WhatsApp credentials not configured on runtime; failing tool cleanly"
@@ -621,6 +944,24 @@ class NativePipelineHost:
                     return {
                         "status": "error",
                         "error": "WhatsApp credentials not configured on runtime",
+                        "_diagnostic": provider_error_diagnostic(
+                            provider="whatsapp",
+                            status_code=401,
+                            body={"message": "API key is not configured"},
+                        ),
+                    }
+                if local_media_id and not db_header_media_id:
+                    return {
+                        "status": "error",
+                        "error": "Configured WhatsApp media is unavailable",
+                        "_diagnostic": exception_diagnostic(
+                            ValueError("configured WhatsApp media is unavailable"),
+                            source="runtime",
+                            category="tool_configuration",
+                            code="whatsapp_media_unavailable",
+                            message="Configured WhatsApp media is unavailable",
+                            retryable=False,
+                        ),
                     }
 
                 contact = (
@@ -640,28 +981,21 @@ class NativePipelineHost:
                     return {"status": "error", "error": "No valid phone number for contact"}
 
                 caller_name = (args.get("caller_name") or contact.get("name") or "there").strip()
-                if name.startswith("whatsapp_template_"):
-                    template_name = args.get("template_name") or name.removeprefix(
-                        "whatsapp_template_"
-                    )
-                else:
-                    template_name = (
-                        args.get("template_name")
-                        or getattr(self.settings, "whatsapp_template_name", None)
-                        or os.getenv("VOICE_WHATSAPP_TEMPLATE_NAME", "dialtone_followup")
-                    )
-                tool_definition = (
-                    self._snapshot.get("_resolved", {})
-                    .get("tools", {})
-                    .get(name, {})
-                    .get("definition", {})
-                )
-                configured_media_id = tool_definition.get("header_media_id")
-                header_media_id = configured_media_id or (
-                    getattr(self.settings, "whatsapp_header_media_id", None)
-                    or os.getenv("VOICE_WHATSAPP_HEADER_MEDIA_ID", "")
-                    or db_header_media_id
-                )
+                template_name = str(whatsapp_config.get("template_name") or "").strip()
+                if not template_name:
+                    return {
+                        "status": "error",
+                        "error": "WhatsApp template name is not configured",
+                        "_diagnostic": exception_diagnostic(
+                            ValueError("missing WhatsApp template name"),
+                            source="runtime",
+                            category="tool_configuration",
+                            code="whatsapp_template_unconfigured",
+                            message="WhatsApp template name is not configured",
+                            retryable=False,
+                        ),
+                    }
+                header_media_id = db_header_media_id
 
                 summary = f"Thank you for speaking with Northstar Software Studio, {caller_name}! We have prepared your custom development overview and pricing catalog."
                 if name == "send_followup" and args.get("message"):
@@ -671,26 +1005,44 @@ class NativePipelineHost:
 
                 components = []
                 if header_media_id:
+                    header_type = db_header_media_type or "image"
                     components.append(
                         {
                             "type": "header",
-                            "parameters": [{"type": "image", "image": {"id": header_media_id}}],
+                            "parameters": [
+                                {
+                                    "type": header_type,
+                                    header_type: {"id": header_media_id},
+                                }
+                            ],
                         }
                     )
                 if args.get("components"):
                     components.extend(args["components"])
                 else:
-                    body_params = [{"type": "text", "text": caller_name}]
-                    if args.get("message") or not name.startswith("whatsapp_template_"):
-                        body_params.append(
-                            {"type": "text", "text": " ".join(summary.split())[:1024]}
-                        )
-                    for k in sorted(args.keys()):
-                        if k.startswith("param_") and k != "param_1":
-                            body_params.append({"type": "text", "text": str(args[k])[:1024]})
+                    mappings = whatsapp_config.get("parameter_mappings") or {}
+                    if mappings:
+                        body_params = [
+                            {"type": "text", "text": str(args[argument])[:1024]}
+                            for index, argument in sorted(
+                                mappings.items(), key=lambda item: int(item[0])
+                            )
+                            if args.get(argument) is not None
+                        ]
+                    else:
+                        body_params = [{"type": "text", "text": caller_name}]
+                        if args.get("message"):
+                            body_params.append(
+                                {"type": "text", "text": " ".join(summary.split())[:1024]}
+                            )
+                        for k in sorted(args.keys()):
+                            if k.startswith("param_") and k != "param_1":
+                                body_params.append(
+                                    {"type": "text", "text": str(args[k])[:1024]}
+                                )
                     components.append({"type": "body", "parameters": body_params})
 
-                template_lang = args.get("language") or "en"
+                template_lang = str(whatsapp_config.get("language") or "en")
                 if len(template_lang) > 2 and "_" in template_lang:
                     pass
                 elif len(template_lang) == 2:
@@ -723,7 +1075,17 @@ class NativePipelineHost:
                             )
                             return {
                                 "status": "error",
-                                "error": f"WhatsApp API {resp.status_code}: {resp.text[:200]}",
+                                "error": f"WhatsApp API returned HTTP {resp.status_code}",
+                                "_diagnostic": provider_error_diagnostic(
+                                    provider="whatsapp",
+                                    status_code=resp.status_code,
+                                    body=_provider_body(resp),
+                                    request_id=resp.headers.get("x-request-id")
+                                    or resp.headers.get("request-id"),
+                                    retry_after_seconds=_retry_after(
+                                        resp.headers.get("retry-after")
+                                    ),
+                                ),
                             }
                         data = resp.json()
                         msg_id = (data.get("messages") or [{}])[0].get("id", "unknown")
@@ -736,7 +1098,18 @@ class NativePipelineHost:
                         }
                 except Exception as exc:
                     logger.error("WhatsApp dispatch exception: {}", exc)
-                    return {"status": "error", "error": f"WhatsApp request failed: {exc}"}
+                    return {
+                        "status": "error",
+                        "error": "WhatsApp request failed",
+                        "_diagnostic": exception_diagnostic(
+                            exc,
+                            source="provider",
+                            category="provider_request_failed",
+                            code="whatsapp_request_failed",
+                            message="WhatsApp provider request failed",
+                            retryable=True,
+                        ),
+                    }
 
             if name in ("classify_jev", "classify_lead"):
                 transcript = _extract_transcript(getattr(self, "context", None), self.tracker)
@@ -763,7 +1136,10 @@ class NativePipelineHost:
                     api_url=jev_cfg.get("api_url", "https://api.typesafe.ai/v1/systemone"),
                 )
                 logger.info("JEV CLASSIFY RESULT: {}", res)
-                return trim_classifier_result(res)
+                trimmed = trim_classifier_result(res)
+                if isinstance(res.get("_diagnostic"), dict):
+                    trimmed["_diagnostic"] = res["_diagnostic"]
+                return trimmed
 
             if name == "classify_llm":
                 transcript = _extract_transcript(getattr(self, "context", None), self.tracker)
@@ -781,7 +1157,10 @@ class NativePipelineHost:
                     model=llm_cfg.get("model", "llama-3.3-70b-versatile"),
                 )
                 logger.info("LLM CLASSIFY RESULT: {}", res)
-                return trim_classifier_result(res)
+                trimmed = trim_classifier_result(res)
+                if isinstance(res.get("_diagnostic"), dict):
+                    trimmed["_diagnostic"] = res["_diagnostic"]
+                return trimmed
 
             if name in ("check_callback_availability", "book_callback"):
                 endpoint = (
@@ -989,11 +1368,14 @@ class NativePipelineHost:
             raise ValueError(
                 "Background hooks and entry/exit actions are not supported by live runtime"
             )
-        if any(
-            binding["definition"]["kind"] != "registered"
-            for binding in snapshot["_resolved"]["tools"].values()
-        ):
-            raise ValueError("HTTP tools are not supported by live runtime")
+        for binding_key, binding in snapshot["_resolved"]["tools"].items():
+            definition = binding["definition"]
+            if definition["kind"] != "registered":
+                raise ValueError("HTTP tools are not supported by live runtime")
+            if not is_registered_handler(definition.get("handler")):
+                raise ValueError(
+                    f"Tool binding '{binding_key}' uses an unregistered runtime handler"
+                )
         for key in self._nodes:
             for name in self._nodes[key]["tool_bindings"]:
                 if name not in snapshot["_resolved"]["tools"]:
@@ -1022,11 +1404,7 @@ class NativePipelineHost:
                 capture=self.capture,
                 frame_ms=snapshot["audio"]["frame_ms"],
             ).transport()
-        stt = SarvamSTTService(
-            api_key=self.settings.sarvam_api_key,
-            settings=SarvamSTTService.Settings(model=snapshot["stt"]["model"]),
-            sample_rate=rate,
-        )
+        stt, tts = build_speech_services(self.settings, snapshot, rate)
         llm_config = snapshot["llm"]
         llm_settings = {
             "model": llm_config["model"],
@@ -1053,25 +1431,6 @@ class NativePipelineHost:
         else:
             raise ValueError("Unsupported LLM provider")
         tts_config = snapshot["tts"]
-        if tts_config["provider"] == "sarvam":
-            tts = SarvamTTSService(
-                api_key=self.settings.sarvam_api_key,
-                settings=SarvamTTSService.Settings(
-                    model=tts_config["model"],
-                    voice=tts_config["voice"],
-                    language=tts_config["language"],
-                    pace=tts_config["pace"],
-                ),
-                sample_rate=rate,
-            )
-        else:
-            tts = CartesiaTTSService(
-                api_key=self.settings.cartesia_api_key,
-                settings=CartesiaTTSService.Settings(voice=tts_config["voice"]),
-                sample_rate=rate,
-                encoding="pcm_s16le",
-                container="raw",
-            )
         vad_config = snapshot["vad"]
         vad = SileroVADAnalyzer(
             sample_rate=rate,
@@ -1152,6 +1511,8 @@ class NativePipelineHost:
             tracker=tracker,
             bindings=snapshot["_resolved"]["tools"],
             observer=self.observer,
+            context=context,
+            classifier_runner=self._run_node_classifier,
         )
         # Populate flow state with temporal context for dynamic prompts
         self.flow.state.update(temporal)
@@ -1174,6 +1535,9 @@ class NativePipelineHost:
                 err_msg = getattr(frame, "error", None) or "inspect evidence"
                 logger.warning("Pipeline error during active call: {}", err_msg)
                 self.errors.append(f"Pipeline failed: {err_msg}")
+                if self.tracker is not None:
+                    diagnostic = text_error_diagnostic(str(err_msg))
+                    self.tracker.diagnostic(**diagnostic)
             await self.worker.cancel()
 
         runner = WorkerRunner(handle_sigint=False, handle_sigterm=False)
@@ -1206,6 +1570,7 @@ class NativePipelineHost:
                 raise RuntimeError(self.errors[-1])
             await asyncio.sleep(1)
             if not await _check_active():
+                await self._record_call_termination(modem_or_check)
                 self._call_hung_up = True
                 await self.worker.cancel()
                 break
@@ -1214,6 +1579,92 @@ class NativePipelineHost:
         if self.errors and not self._call_hung_up:
             raise RuntimeError(self.errors[-1])
         return {"flow_node": self.flow.current_node}
+
+    async def _record_call_termination(self, modem_or_check) -> None:
+        if self._termination_diagnostic_recorded or self.tracker is None:
+            return
+        self._termination_diagnostic_recorded = True
+        if modem_or_check is None:
+            return
+        if callable(modem_or_check) and not hasattr(modem_or_check, "state"):
+            self.tracker.diagnostic(
+                severity="warning",
+                category="call_termination",
+                source="transport",
+                code="remote_hangup",
+                message="Telephony transport reported that the call ended",
+                uncertain=True,
+            )
+            return
+        try:
+            status = await modem_or_check.status()
+        except Exception as exc:
+            self.tracker.diagnostic(
+                severity="error",
+                category="modem_failure",
+                source="modem",
+                code="termination_status_unavailable",
+                message="Could not read modem state at call termination",
+                detail=str(exc),
+                uncertain=True,
+            )
+            return
+        metadata = {
+            "alive": status.alive,
+            "serial_connected": status.serial_connected,
+            "sim_ready": status.sim_ready,
+            "voice_registered": status.voice_registered,
+            "call_state": status.call_state.value,
+            "rssi": status.rssi,
+            "signal_quality": status.signal_quality,
+            "operator": status.operator,
+            "radio_access": status.radio_access,
+            "usb_audio_active": status.usb_audio_active,
+        }
+        if status.rssi is not None and status.rssi <= 5:
+            self.tracker.diagnostic(
+                severity="warning",
+                category="modem_signal",
+                source="modem",
+                code="low_signal_observed",
+                message="Low modem signal was observed near call termination",
+                uncertain=True,
+                metadata=metadata,
+            )
+        if not status.voice_registered:
+            code, message, category = (
+                "network_unregistered",
+                "Modem was not voice-registered when the call ended",
+                "modem_network",
+            )
+        elif not status.alive or not status.serial_connected:
+            code, message, category = (
+                "modem_disconnected",
+                "Modem connection was unavailable when the call ended",
+                "modem_failure",
+            )
+        elif status.last_error:
+            code, message, category = (
+                "modem_command_error",
+                "Modem reported an error near call termination",
+                "modem_failure",
+            )
+        else:
+            code, message, category = (
+                "remote_hangup",
+                "The call ended without an agent hangup request",
+                "call_termination",
+            )
+        self.tracker.diagnostic(
+            severity="warning" if category == "call_termination" else "error",
+            category=category,
+            source="modem",
+            code=code,
+            message=message,
+            detail=status.last_error,
+            uncertain=category == "call_termination",
+            metadata=metadata,
+        )
 
     async def close(self) -> None:
         try:

@@ -32,6 +32,7 @@ async def create_session(
     req = body or CreateBrowserSessionRequest()
     run, browser_session = await create_browser_session(
         session=session,
+        agent_id=req.agent_id,
         agent_version_id=req.agent_version_id,
         contact_id=req.contact_id,
         phone_number=req.phone_number,

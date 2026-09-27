@@ -16,6 +16,12 @@ related: [RFC-0001, RFC-0002, RFC-0003, RFC-0004, RFC-0006]
 - Claim ownership lives on Run, not runtime_endpoints. Clearing a database lease cannot stop worker or modem call. Remove force-release behavior.
 - Recovery: request stop, verify worker stopped and transport idle, then reconcile uncertain run or recover endpoint through existing verified routes. Never blindly redial. Diagnostics use owner runtime snapshot during active call, not a competing AT session.
 
+## Live status implementation amendment, 2026-09-27
+
+- Endpoint cards start a read-only AT status probe only after an operator clicks **Test connection**.
+- While AT responds, the dashboard repeats the probe every five seconds; it stops on an unavailable response or status-request failure. A new click starts another cycle.
+- The API locks the endpoint while probing and rejects probes for active or uncertain calls. See ADR-0017.
+
 ## 1. Context
 
 The initial voice path runs on a local SIM7600 endpoint with AT and raw USB PCM serial ports. SIP/WebRTC transport adapters are future work.

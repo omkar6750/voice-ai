@@ -35,6 +35,13 @@ class ExchangeTracker:
         self._visit_sequence = 0
         self._tool_result_sequences: dict[str, int] = {}
         self._pending_results: list[str] = []
+        self._tool_result_metadata: dict[str, dict[str, Any]] = {}
+        self._tool_invocation_metadata: dict[str, dict[str, Any]] = {}
+        self._active_tools: dict[str, dict[str, Any]] = {}
+        self._ended_tools: set[str] = set()
+        self._active_operations: dict[str, dict[str, Any]] = {}
+        self._classifier_result_metadata: dict[str, dict[str, Any]] = {}
+        self._pending_classifier_results: list[str] = []
 
     def emit(
         self,
@@ -59,6 +66,16 @@ class ExchangeTracker:
             )
         )
         return record_id
+
+    def diagnostic(self, **fields: Any) -> str:
+        """Emit one normalized diagnostic into the same durable evidence spool."""
+        diagnostic_id = fields.pop("diagnostic_id", None) or uuid4().hex
+        return self.emit(
+            "diagnostic",
+            record_id=diagnostic_id,
+            diagnostic_id=diagnostic_id,
+            **fields,
+        )
 
     def begin(self, origin: str) -> str:
         if origin not in {"greeting", "caller", "agent"}:
@@ -121,6 +138,10 @@ class ExchangeTracker:
     ) -> str:
         invocation_id = uuid4().hex
         self._tool_result_sequences[invocation_id] = 0
+        self._tool_invocation_metadata[invocation_id] = {
+            "function_call_id": function_call_id,
+        }
+        self._active_tools[invocation_id] = {"function_call_id": function_call_id}
         self.emit(
             "tool_started",
             invocation_id=invocation_id,
@@ -146,8 +167,36 @@ class ExchangeTracker:
             payload=payload,
             is_final=is_final,
         )
-        self._pending_results.append(result_id)
+        self._tool_result_metadata[result_id] = {
+            "invocation_id": invocation_id,
+            "is_final": is_final,
+            **self._tool_invocation_metadata.get(invocation_id, {}),
+        }
         return result_id
+
+    def context_updated(
+        self,
+        invocation_id: str,
+        result_id: str,
+        *,
+        context_message_index: int | None = None,
+    ) -> str:
+        metadata = self._tool_result_metadata.get(result_id)
+        if metadata is None or metadata["invocation_id"] != invocation_id:
+            raise ValueError("context delivery must reference a recorded tool result")
+        delivery_id = uuid4().hex
+        self.emit(
+            "tool_result_context_updated",
+            record_id=delivery_id,
+            delivery_id=delivery_id,
+            invocation_id=invocation_id,
+            result_id=result_id,
+            function_call_id=metadata.get("function_call_id"),
+            is_final=metadata["is_final"],
+            context_message_index=context_message_index,
+        )
+        self._pending_results.append(result_id)
+        return delivery_id
 
     def end_tool(
         self,
@@ -157,7 +206,12 @@ class ExchangeTracker:
         *,
         connection_id: str | None = None,
         provider_message_id: str | None = None,
+        interruption_id: str | None = None,
     ) -> None:
+        if invocation_id in self._ended_tools:
+            return
+        self._active_tools.pop(invocation_id, None)
+        self._ended_tools.add(invocation_id)
         self.emit(
             "tool_ended",
             invocation_id=invocation_id,
@@ -166,9 +220,58 @@ class ExchangeTracker:
             result=result,
             connection_id=connection_id,
             provider_message_id=provider_message_id,
+            interruption_id=interruption_id,
         )
 
-    def consume_results(self, exchange_id: str | None) -> None:
+    def tool_was_ended(self, invocation_id: str) -> bool:
+        return invocation_id in self._ended_tools
+
+    def interrupt(
+        self,
+        *,
+        source: str,
+        reason: str,
+        frame_type: str,
+    ) -> str:
+        interruption_id = uuid4().hex
+        operation_ids = [
+            operation_id
+            for operation_id, operation in self._active_operations.items()
+            if operation["category"] not in {"speech", "stt"}
+        ]
+        tool_ids = list(self._active_tools)
+        self.emit(
+            "interruption",
+            record_id=interruption_id,
+            interruption_id=interruption_id,
+            exchange_id=self.current,
+            source=source,
+            reason=reason,
+            frame_type=frame_type,
+            interrupted_operation_ids=operation_ids,
+            interrupted_tool_invocation_ids=tool_ids,
+        )
+        for operation_id in operation_ids:
+            operation = self._active_operations.get(operation_id)
+            if operation is not None:
+                self.finish_operation(
+                    operation,
+                    "interrupted",
+                    output_state="interrupted",
+                    interruption_id=interruption_id,
+                )
+        for invocation_id in tool_ids:
+            self.end_tool(
+                invocation_id,
+                "cancelled",
+                {"status": "cancelled", "reason": reason},
+                interruption_id=interruption_id,
+            )
+        return interruption_id
+
+    def consume_results(
+        self, exchange_id: str | None, consuming_operation_id: str | None = None
+    ) -> None:
         if exchange_id is None:
             return
         pending, self._pending_results = self._pending_results, []
@@ -362,11 +465,13 @@ class ExchangeTracker:
         input_payload = attributes.pop("input_payload", None)
         otel_trace_id = attributes.pop("otel_trace_id", None)
         otel_span_id = attributes.pop("otel_span_id", None)
+        parent_id = attributes.pop("parent_operation_id", None)
         operation = {
             "operation_id": uuid4().hex,
             "exchange_id": self.current,
             "name": name,
             "category": category,
+            "parent_id": parent_id,
             "started_ns": time.time_ns(),
             "provider": provider,
             "model": model,
@@ -376,11 +481,16 @@ class ExchangeTracker:
             "attributes": attributes,
         }
         self._operation_clocks[operation["operation_id"]] = time.monotonic_ns()
+        self._active_operations[operation["operation_id"]] = operation
         self.emit("operation_started", **operation)
         return operation
 
     def finish_operation(self, operation: Mapping[str, Any], status: str, **attributes: Any):
+        operation_id = operation["operation_id"]
+        if operation_id not in self._active_operations:
+            return
         clock = self._operation_clocks.pop(operation["operation_id"], None)
+        self._active_operations.pop(operation_id, None)
         duration_ms = None if clock is None else (time.monotonic_ns() - clock) / 1000000
         measured = {
             key: attributes.pop(key, None)
@@ -395,6 +505,23 @@ class ExchangeTracker:
                 "audio_seconds",
             )
         }
+        output_state = attributes.pop("output_state", None)
+        interruption_id = attributes.pop("interruption_id", None)
+        if output_state is None:
+            if status in {"interrupted", "cancelled"}:
+                output_state = "interrupted"
+            elif status == "failed":
+                output_state = "failed"
+            elif operation["category"] in {"speech", "playback"}:
+                output_state = "not_applicable"
+            elif measured["output_payload"] is None:
+                output_state = "not_recorded"
+            elif isinstance(measured["output_payload"], dict) and measured["output_payload"].get(
+                "text"
+            ) == "":
+                output_state = "empty"
+            else:
+                output_state = "recorded"
         self.emit(
             "span",
             **{
@@ -402,6 +529,8 @@ class ExchangeTracker:
                 "status": status,
                 "ended_ns": time.time_ns(),
                 "duration_ms": duration_ms,
+                "output_state": output_state,
+                "interruption_id": interruption_id,
                 "attributes": {**operation["attributes"], **attributes},
                 **measured,
             },

@@ -112,24 +112,47 @@ class Sim7600Modem(TelephonyTransport):
 
     async def status(self) -> ModemStatus:
         await self.open()
+        return await self._read_status(
+            (
+                "AT",
+                "AT+CPIN?",
+                "AT+CSQ",
+                "AT+CEREG?",
+                "AT+CREG?",
+                "AT+CGATT?",
+                "AT+COPS?",
+                "AT+CPSI?",
+                "AT+CGACT?",
+                "AT+CLCC",
+                "AT+CPCMREG?",
+                "ATI",
+                "AT+CGMR",
+                "AT+CEER",
+            )
+        )
+
+    async def probe_status(self) -> ModemStatus:
+        """Read the connection and SIM fields needed for a live endpoint card."""
+        await self.open()
+        return await self._read_status(
+            (
+                "AT",
+                "AT+CPIN?",
+                "AT+CSQ",
+                "AT+CEREG?",
+                "AT+CREG?",
+                "AT+CGATT?",
+                "AT+COPS?",
+                "AT+CPSI?",
+                "AT+CLCC",
+                "AT+CPCMREG?",
+            )
+        )
+
+    async def _read_status(self, commands: tuple[str, ...]) -> ModemStatus:
         results: dict[str, list[str]] = {}
         errors: list[str] = []
-        for command in (
-            "AT",
-            "AT+CPIN?",
-            "AT+CSQ",
-            "AT+CEREG?",
-            "AT+CREG?",
-            "AT+CGATT?",
-            "AT+COPS?",
-            "AT+CPSI?",
-            "AT+CGACT?",
-            "AT+CLCC",
-            "AT+CPCMREG?",
-            "ATI",
-            "AT+CGMR",
-            "AT+CEER",
-        ):
+        for command in commands:
             try:
                 results[command] = await self._command(command)
             except ModemCommandError as exc:

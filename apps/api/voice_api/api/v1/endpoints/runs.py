@@ -18,6 +18,7 @@ from voice_api.models import (
     TraceSpan,
 )
 from voice_api.models.common import new_id
+from voice_api.schemas.timeline import TimelineResponse
 from voice_api.services.evidence_service import related_evidence
 from voice_api.services.resolution_service import resolve
 
@@ -63,6 +64,7 @@ async def request_browser_run(
     )
     session.add(run)
     await session.commit()
+    return {"run_id": run.id, "status": run.status}
 
 
 @router.get("/runs")
@@ -129,8 +131,8 @@ async def get_run(run_id: str, session: AsyncSession = Session, _: None = Operat
     }
 
 
-@router.get("/runs/{run_id}/timeline")
-async def timeline(run_id: str, session: AsyncSession = Session, _: None = Operator) -> dict:
+@router.get("/runs/{run_id}/timeline", response_model=TimelineResponse)
+async def timeline(run_id: str, session: AsyncSession = Session, _: None = Operator) -> TimelineResponse:
     run = await session.get(Run, run_id)
     if run is None:
         raise HTTPException(404, "Run not found")
@@ -214,6 +216,8 @@ async def timeline(run_id: str, session: AsyncSession = Session, _: None = Opera
                 "name": x.name,
                 "category": x.category,
                 "status": x.status,
+                "output_state": x.output_state,
+                "interruption_id": x.interruption_id,
                 "started_at": x.started_at,
                 "ended_at": x.ended_at,
                 "attributes": x.attributes,
@@ -242,6 +246,7 @@ async def timeline(run_id: str, session: AsyncSession = Session, _: None = Opera
                 "function_call_id": x.function_call_id,
                 "binding_key": x.binding_key,
                 "status": x.status,
+                "interruption_id": x.interruption_id,
                 "arguments": x.arguments,
                 "result": x.result,
                 "started_at": x.started_at,

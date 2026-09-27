@@ -11,24 +11,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_operator
 from voice_api.core.security import safe_evidence
 from voice_api.models import (
+    ClassifierContextDelivery,
+    ClassifierResult,
     ConversationMessage,
     Exchange,
     FlowNodeVisit,
+    InterruptionEvent,
     Run,
+    RunDiagnostic,
+    ToolContextDelivery,
     ToolInvocation,
     ToolInvocationResult,
     TraceSpan,
 )
 from voice_runtime.contracts.evidence import (
+    ClassifierContextUpdated,
+    ClassifierResultConsumed,
+    ClassifierResultRecorded,
+    DiagnosticRecord,
     EvidenceBatch,
     ExchangeEnded,
     ExchangeRecord,
     FlowVisitEnded,
     FlowVisitStarted,
+    InterruptionRecord,
     MessageRecord,
     OperationEnded,
     ToolEnded,
     ToolResultConsumed,
+    ToolResultContextUpdated,
     ToolResultRecorded,
     ToolStarted,
 )
@@ -69,6 +80,7 @@ class ResultBody(EvidenceBody):
 class ConsumptionBody(EvidenceBody):
     exchange_id: Id
     consumed_at: AwareDatetime
+    consuming_operation_id: Id | None = None
 
 
 def at_ns(value: int) -> datetime:
@@ -178,6 +190,158 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
                 setattr(span, key, value)
         await session.flush()
         return
+    if isinstance(record, ClassifierResultRecorded):
+        operation = await session.get(TraceSpan, record.operation_id)
+        if (
+            operation is None
+            or operation.run_id != run_id
+            or operation.category != "classifier"
+            or operation.status != record.status
+        ):
+            raise HTTPException(422, "Classifier result needs a matching finalized classifier operation")
+        fields = {
+            "run_id": run_id,
+            "operation_id": record.operation_id,
+            "phase": record.phase,
+            "node_key": record.node_key,
+            "classifier_type": record.classifier_type,
+            "status": record.status,
+            "result": record.result,
+            "error": record.error,
+            "transcript_sha256": record.transcript_sha256,
+            "occurred_at": at_ns(record.timestamp_ns),
+        }
+        row = await session.get(ClassifierResult, record.result_id)
+        if row:
+            verify_same(row, fields)
+        else:
+            session.add(ClassifierResult(id=record.result_id, **fields))
+        await session.flush()
+        return
+    if isinstance(record, ClassifierContextUpdated):
+        result = await session.get(ClassifierResult, record.result_id)
+        operation = await session.get(TraceSpan, record.operation_id)
+        if (
+            result is None
+            or result.run_id != run_id
+            or result.operation_id != record.operation_id
+            or operation is None
+            or operation.run_id != run_id
+        ):
+            raise HTTPException(422, "Classifier context delivery must reference its result")
+        fields = {
+            "run_id": run_id,
+            "classifier_result_id": record.result_id,
+            "operation_id": record.operation_id,
+            "phase": record.phase,
+            "node_key": record.node_key,
+            "status": "delivered",
+            "context_message_index": record.context_message_index,
+            "delivered_at": at_ns(record.timestamp_ns),
+        }
+        delivery = await session.get(ClassifierContextDelivery, record.delivery_id)
+        if delivery:
+            verify_same(delivery, fields)
+        else:
+            existing = await session.scalar(
+                select(ClassifierContextDelivery).where(
+                    ClassifierContextDelivery.classifier_result_id == record.result_id
+                )
+            )
+            if existing:
+                verify_same(existing, fields)
+            else:
+                session.add(ClassifierContextDelivery(id=record.delivery_id, **fields))
+        await session.flush()
+        return
+    if isinstance(record, ClassifierResultConsumed):
+        result = await session.get(ClassifierResult, record.result_id)
+        exchange = await session.get(Exchange, record.exchange_id)
+        operation = await session.get(TraceSpan, record.consuming_operation_id)
+        if (
+            result is None
+            or result.run_id != run_id
+            or exchange is None
+            or exchange.run_id != run_id
+            or operation is None
+            or operation.run_id != run_id
+            or operation.category != "llm"
+        ):
+            raise HTTPException(422, "Classifier consumption must belong to this run")
+        delivery = await session.scalar(
+            select(ClassifierContextDelivery).where(
+                ClassifierContextDelivery.classifier_result_id == record.result_id
+            )
+        )
+        if delivery is None:
+            raise HTTPException(422, "Classifier consumption requires context delivery")
+        fields = {
+            "status": "consumed",
+            "consumed_at": at_ns(record.timestamp_ns),
+            "consumed_exchange_id": record.exchange_id,
+            "consuming_operation_id": record.consuming_operation_id,
+        }
+        if delivery.status == "consumed":
+            verify_same(delivery, fields)
+        else:
+            for key, value in fields.items():
+                setattr(delivery, key, value)
+        await session.flush()
+        return
+    if isinstance(record, InterruptionRecord):
+        if record.exchange_id is not None:
+            exchange = await session.get(Exchange, record.exchange_id)
+            if exchange is None or exchange.run_id != run_id:
+                raise HTTPException(422, "Interruption exchange must belong to run")
+        for operation_id in record.interrupted_operation_ids:
+            operation = await session.get(TraceSpan, operation_id)
+            if operation is None or operation.run_id != run_id:
+                raise HTTPException(422, "Interruption operation must belong to run")
+        for invocation_id in record.interrupted_tool_invocation_ids:
+            invocation = await session.get(ToolInvocation, invocation_id)
+            if invocation is None or invocation.run_id != run_id:
+                raise HTTPException(422, "Interruption tool must belong to run")
+        fields = {
+            "run_id": run_id,
+            "exchange_id": record.exchange_id,
+            "source": record.source,
+            "reason": record.reason,
+            "frame_type": record.frame_type,
+            "interrupted_operation_ids": record.interrupted_operation_ids,
+            "interrupted_tool_invocation_ids": record.interrupted_tool_invocation_ids,
+            "occurred_at": at_ns(record.timestamp_ns),
+        }
+        row = await session.get(InterruptionEvent, record.interruption_id)
+        if row:
+            verify_same(row, fields)
+        else:
+            session.add(InterruptionEvent(id=record.interruption_id, **fields))
+        await session.flush()
+        return
+    if isinstance(record, DiagnosticRecord):
+        fields = {
+            "run_id": run_id,
+            "severity": record.severity,
+            "category": record.category,
+            "source": record.source,
+            "code": record.code,
+            "message": record.message,
+            "detail": record.detail,
+            "retryable": record.retryable,
+            "uncertain": record.uncertain,
+            "provider_request_id": record.provider_request_id,
+            "http_status": record.http_status,
+            "retry_after_seconds": record.retry_after_seconds,
+            "metadata_json": record.metadata,
+            "occurred_at": at_ns(record.timestamp_ns),
+        }
+        row = await session.get(RunDiagnostic, record.diagnostic_id)
+        if row:
+            verify_same(row, fields)
+        else:
+            session.add(RunDiagnostic(id=record.diagnostic_id, **fields))
+        await session.flush()
+        return
     if isinstance(record, ToolStarted):
         if record.exchange_id is not None:
             exchange = await session.get(Exchange, record.exchange_id)
@@ -228,6 +392,7 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
             "result": record.result,
             "connection_id": record.connection_id,
             "provider_message_id": record.provider_message_id,
+            "interruption_id": record.interruption_id,
         }
         if row.ended_at is not None:
             verify_same(row, fields)
@@ -255,6 +420,42 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
             session.add(ToolInvocationResult(id=record.id, **fields))
         await session.flush()
         return
+    if isinstance(record, ToolResultContextUpdated):
+        result = await session.get(ToolInvocationResult, record.result_id)
+        invocation = await session.get(ToolInvocation, record.invocation_id)
+        if (
+            result is None
+            or result.run_id != run_id
+            or invocation is None
+            or invocation.run_id != run_id
+            or result.tool_invocation_id != record.invocation_id
+        ):
+            raise HTTPException(422, "Context delivery must reference its tool result")
+        fields = {
+            "run_id": run_id,
+            "tool_invocation_id": record.invocation_id,
+            "result_id": record.result_id,
+            "function_call_id": record.function_call_id,
+            "is_final": record.is_final,
+            "status": "delivered",
+            "context_message_index": record.context_message_index,
+            "delivered_at": at_ns(record.timestamp_ns),
+        }
+        delivery = await session.get(ToolContextDelivery, record.delivery_id)
+        if delivery is None:
+            existing = await session.scalar(
+                select(ToolContextDelivery).where(
+                    ToolContextDelivery.result_id == record.result_id
+                )
+            )
+            if existing is not None:
+                verify_same(existing, fields)
+            else:
+                session.add(ToolContextDelivery(id=record.delivery_id, **fields))
+        else:
+            verify_same(delivery, fields)
+        await session.flush()
+        return
     if isinstance(record, ToolResultConsumed):
         result = await session.get(ToolInvocationResult, record.result_id)
         exchange = await session.get(Exchange, record.exchange_id)
@@ -265,6 +466,8 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
             or exchange.run_id != run_id
         ):
             raise HTTPException(422, "Consumption must belong to run")
+        if record.invocation_id is not None and result.tool_invocation_id != record.invocation_id:
+            raise HTTPException(422, "Consumption invocation does not match the result")
         consumed_at = at_ns(record.timestamp_ns)
         if consumed_at < result.occurred_at:
             raise HTTPException(422, "Consumption precedes result")
@@ -274,6 +477,27 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
         else:
             for key, value in fields.items():
                 setattr(result, key, value)
+        if record.consuming_operation_id is not None:
+            operation = await session.get(TraceSpan, record.consuming_operation_id)
+            if operation is None or operation.run_id != run_id:
+                raise HTTPException(422, "Consuming operation must belong to run")
+            delivery = await session.scalar(
+                select(ToolContextDelivery).where(
+                    ToolContextDelivery.result_id == record.result_id
+                )
+            )
+            if delivery is not None:
+                delivery_fields = {
+                    "status": "consumed",
+                    "consumed_at": consumed_at,
+                    "consumed_exchange_id": record.exchange_id,
+                    "consuming_span_id": record.consuming_operation_id,
+                }
+                if delivery.status == "consumed":
+                    verify_same(delivery, delivery_fields)
+                else:
+                    for key, value in delivery_fields.items():
+                        setattr(delivery, key, value)
         await session.flush()
         return
     if record.exchange_id is not None:
@@ -302,6 +526,7 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
             exchange_id=record.exchange_id,
             name=record.name,
             category=record.category,
+            parent_id=record.parent_id,
             started_at=at_ns(record.started_ns),
             provider=record.provider,
             model=record.model,
@@ -323,6 +548,8 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
                 ended_at=ended_at,
                 duration_ms=record.duration_ms,
                 status=record.status,
+                output_state=record.output_state,
+                interruption_id=record.interruption_id,
                 attributes=record.attributes,
                 output_payload=record.output_payload,
                 ttfb_ms=record.ttfb_ms,
@@ -530,5 +757,17 @@ async def consume_result(
     ):
         raise HTTPException(409, "Result was already consumed at another boundary")
     result.consumed_at, result.consumed_exchange_id = body.consumed_at, body.exchange_id
+    if body.consuming_operation_id is not None:
+        operation = await session.get(TraceSpan, body.consuming_operation_id)
+        if operation is None or operation.run_id != run_id:
+            raise HTTPException(422, "Consuming operation must belong to run")
+        delivery = await session.scalar(
+            select(ToolContextDelivery).where(ToolContextDelivery.result_id == result_id)
+        )
+        if delivery is not None:
+            delivery.status = "consumed"
+            delivery.consumed_at = body.consumed_at
+            delivery.consumed_exchange_id = body.exchange_id
+            delivery.consuming_span_id = body.consuming_operation_id
     await session.commit()
     return {"id": result.id, "consumed_exchange_id": result.consumed_exchange_id}

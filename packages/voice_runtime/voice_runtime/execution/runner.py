@@ -9,6 +9,7 @@ from uuid import uuid4
 import httpx
 from loguru import logger
 
+from voice_runtime.diagnostics import diagnostic_dict, exception_diagnostic
 from voice_runtime.execution.delivery import stream_evidence
 from voice_runtime.execution.evidence_client import ApiEvidenceIngestor
 from voice_runtime.execution.exchange import ExchangeTracker
@@ -57,6 +58,7 @@ async def execute_call(
     # Mark dispatch BEFORE external work. A lost response must never lead to redial.
     await post("progress", {"token": token, "status": "running"})
     outcome, final_state, error = "failed", None, None
+    diagnostics: list[dict] = []
     released, incomplete = False, False
     call_task = heartbeat_task = delivery_task = None
     spool = None
@@ -91,6 +93,7 @@ async def execute_call(
     except Exception as exc:
         logger.exception("Call task raised exception during run {}: {}", run_id, exc)
         error = f"Call execution failed: {exc}"
+        diagnostics.append(exception_diagnostic(exc, code="call_execution_failed", message="Call execution failed"))
     except asyncio.CancelledError:
         error = "Call execution cancelled"
         raise
@@ -105,12 +108,31 @@ async def execute_call(
             released = True
         except Exception:
             error = "Transport cleanup uncertain; endpoint remains reserved"
+            diagnostics.append(
+                diagnostic_dict(
+                    severity="error",
+                    category="transport_cleanup",
+                    source="transport",
+                    code="transport_cleanup_uncertain",
+                    message="Transport cleanup was not confirmed; endpoint remains reserved",
+                    uncertain=True,
+                )
+            )
         if released and after_close is not None:
             try:
                 await after_close()
             except Exception:
                 incomplete = True
                 outcome, error = "failed", "Call artifacts incomplete; inspect runtime files"
+                diagnostics.append(
+                    diagnostic_dict(
+                        severity="error",
+                        category="artifact_failure",
+                        source="runtime",
+                        code="artifact_registration_failed",
+                        message="Call artifacts could not be finalized",
+                    )
+                )
         # Stop and await uploader before final drain: only one cursor owner at a time.
         if delivery_task:
             delivery_task.cancel()
@@ -118,6 +140,16 @@ async def execute_call(
             if isinstance(delivery_result[0], Exception):
                 incomplete = True
                 outcome, error = "failed", "Evidence delivery failed; durable spool requires review"
+                diagnostics.append(
+                    diagnostic_dict(
+                        severity="error",
+                        category="evidence_delivery",
+                        source="evidence",
+                        code="evidence_delivery_failed",
+                        message="Evidence delivery failed; durable spool requires review",
+                        retryable=True,
+                    )
+                )
         try:
             if spool is None:
                 raise RuntimeError("Evidence spool was not created")
@@ -129,6 +161,16 @@ async def execute_call(
         except Exception:
             incomplete = True
             outcome, error = "failed", "Evidence incomplete; durable spool requires replay"
+            diagnostics.append(
+                diagnostic_dict(
+                    severity="error",
+                    category="evidence_delivery",
+                    source="evidence",
+                    code="evidence_incomplete",
+                    message="Evidence is incomplete and requires spool replay",
+                    retryable=True,
+                )
+            )
         finally:
             try:
                 if spool is not None:
@@ -136,6 +178,15 @@ async def execute_call(
             except Exception:
                 incomplete = True
                 outcome, error = "failed", "Evidence storage failed; durable spool requires review"
+                diagnostics.append(
+                    diagnostic_dict(
+                        severity="error",
+                        category="evidence_storage",
+                        source="evidence",
+                        code="evidence_storage_failed",
+                        message="Evidence spool storage failed; durable review is required",
+                    )
+                )
             finally:
                 if heartbeat_task:
                     heartbeat_task.cancel()
@@ -149,6 +200,7 @@ async def execute_call(
                     "transport_released": True,
                     "error": error,
                     "final_state": {"runtime": final_state, "evidence_incomplete": incomplete},
+                    "diagnostics": diagnostics,
                 },
             )
     if not released:

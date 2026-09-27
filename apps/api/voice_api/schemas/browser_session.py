@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 
 class CreateBrowserSessionRequest(BaseModel):
+    agent_id: str | None = None
     agent_version_id: str | None = None
     contact_id: str | None = None
     phone_number: str | None = None
