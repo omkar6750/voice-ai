@@ -304,6 +304,7 @@ export function AgentEditorPage() {
               <ContextPanel
                 config={draft}
                 change={setDraft}
+                catalog={providers.data}
                 disabled={disabled}
               />
             )}

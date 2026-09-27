@@ -212,7 +212,7 @@ export function FlowPanel({
               <option value="reset">Reset</option>
             </NativeSelect>
             <FieldDescription>
-              Append keeps the conversation context; Reset replaces task messages when entering this node.
+              Append keeps earlier dialogue and node messages. Reset replaces the entire LLM message list, including prior caller and agent turns; saved transcripts remain in run evidence, not in the next LLM request.
             </FieldDescription>
           </Field>
           <Field>

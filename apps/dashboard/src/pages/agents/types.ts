@@ -153,10 +153,12 @@ export type ClassifierConfig = CadenceConfig & {
 
 export type SummarizerConfig = CadenceConfig & {
   model?: {
-    provider?: string;
+    provider?: "groq" | "gemini";
     model?: string;
     temperature?: number;
     max_tokens?: number;
+    top_p?: number | null;
+    reasoning_effort?: "none" | "provider_default";
   };
   prompt?: string;
   answer_signals?: string[];

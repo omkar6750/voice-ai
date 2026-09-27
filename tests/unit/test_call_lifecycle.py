@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from voice_runtime.telephony.base import CallState
+from voice_runtime.telephony.driver import Sim7600CallDriver
 from voice_runtime.telephony.session import TelephonySession
 from voice_runtime.telephony.sim7600 import ModemCommandError, Sim7600Modem
 
@@ -52,3 +53,49 @@ async def test_missing_at_response_is_not_assumed_success():
     await modem.open()
     with pytest.raises(ModemCommandError, match="timed out"):
         await modem.start_usb_audio()
+
+
+@pytest.mark.asyncio
+async def test_driver_hangs_up_modem_after_conversation_finishes():
+    modem = AsyncMock()
+    modem.status.return_value.can_make_call = True
+    modem.state.side_effect = [CallState.ACTIVE, CallState.IDLE]
+    host = AsyncMock()
+    host.converse.return_value = {"status": "completed"}
+    tracker = AsyncMock()
+    driver = Sim7600CallDriver(host, modem_factory=lambda *args, **kwargs: modem)
+    snapshot = {
+        "_resolved": {"endpoint": {"at_port": "COM16", "baudrate": 115200, "at_timeout_secs": 3}},
+        "audio": {"sample_rate": 8000},
+    }
+
+    await driver.prepare(snapshot, tracker)
+    assert await driver.call("+15551234567") == {"status": "completed"}
+    modem.hangup.assert_not_awaited()
+    await driver.close()
+
+    modem.hangup.assert_awaited_once()
+    host.close.assert_awaited_once()
+    modem.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_driver_releases_host_and_modem_when_hangup_fails():
+    modem = AsyncMock()
+    modem.status.return_value.can_make_call = True
+    modem.state.return_value = CallState.ACTIVE
+    modem.hangup.side_effect = ModemCommandError("hangup failed")
+    host = AsyncMock()
+    driver = Sim7600CallDriver(host, modem_factory=lambda *args, **kwargs: modem)
+    snapshot = {
+        "_resolved": {"endpoint": {"at_port": "COM16", "baudrate": 115200, "at_timeout_secs": 3}},
+        "audio": {"sample_rate": 8000},
+    }
+
+    await driver.prepare(snapshot, AsyncMock())
+    await driver.call("+15551234567")
+    with pytest.raises(ModemCommandError, match="hangup failed"):
+        await driver.close()
+
+    host.close.assert_awaited_once()
+    modem.close.assert_awaited_once()
