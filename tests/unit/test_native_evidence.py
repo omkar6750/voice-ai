@@ -36,12 +36,14 @@ def test_flow_tools_and_provider_evidence_round_trip():
         {"node": "discovery"},
         llm["operation_id"],
     )
-    tracker.tool_result(invocation, {"status": "ok"}, is_final=True)
+    result_id = tracker.tool_result(invocation, {"status": "ok"}, is_final=True)
+    tracker.context_updated(invocation, result_id, context_message_index=3)
     tracker.end_tool(invocation, "completed", {"status": "ok"})
     tracker.finish_operation(llm, "completed", output_payload={"text": "Hello"})
     tracker.end_visit("completed")
     tracker.start_visit("discovery", invocation)
-    tracker.consume_results(greeting)
+    consuming = tracker.start_operation("inference", "llm", model="model-2")
+    tracker.consume_results(greeting, consuming["operation_id"])
     tracker.end_visit("completed")
     tracker.end_exchange("completed")
     records = EvidenceBatch(records=sink.records).records
@@ -55,6 +57,7 @@ def test_flow_tools_and_provider_evidence_round_trip():
         "span",
         "tool_started",
         "tool_result",
+        "tool_result_context_updated",
         "tool_ended",
         "tool_result_consumed",
     }

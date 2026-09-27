@@ -369,6 +369,14 @@ async def _run_browser_pipeline(
             logger.exception("Browser pipeline failed during run {}: {}", run_id, exc)
             async with SessionFactory() as db_session:
                 r = await db_session.get(Run, run_id)
+                if r:
+                    await persist_diagnostic(
+                        db_session,
+                        run_id,
+                        DiagnosticInput.model_validate(
+                            text_error_diagnostic(str(exc))
+                        ),
+                    )
                 if r and r.status not in ("completed", "canceled"):
                     r.status = "failed"
                     r.error = f"Pipeline execution failed: {exc}"

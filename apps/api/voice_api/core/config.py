@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     cartesia_api_key: str | None = None
     sarvam_api_key: str | None = None
     groq_api_key: str | None = None
+    jev_api_key: str | None = None
     recordings_dir: str = "data/recordings"
     integration_keys: str | None = None
     integration_active_key: str | None = None

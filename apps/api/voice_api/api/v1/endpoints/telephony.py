@@ -254,6 +254,7 @@ async def twilio_media_endpoint(
         s
         for s in (
             settings.groq_api_key,
+            settings.jev_api_key,
             settings.sarvam_api_key,
             settings.cartesia_api_key,
             settings.gemini_api_key,

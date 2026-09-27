@@ -66,6 +66,7 @@ async def _run_live_call_background(run_id: str, endpoint_id: str) -> None:
                     secret
                     for secret in (
                         settings.groq_api_key,
+                        settings.jev_api_key,
                         settings.sarvam_api_key,
                         settings.cartesia_api_key,
                         settings.gemini_api_key,

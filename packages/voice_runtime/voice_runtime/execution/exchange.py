@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 from collections.abc import Mapping
 from typing import Any, Protocol
@@ -171,7 +173,141 @@ class ExchangeTracker:
             return
         pending, self._pending_results = self._pending_results, []
         for result_id in pending:
-            self.emit("tool_result_consumed", result_id=result_id, exchange_id=exchange_id)
+            metadata = self._tool_result_metadata.get(result_id, {})
+            self.emit(
+                "tool_result_consumed",
+                result_id=result_id,
+                exchange_id=exchange_id,
+                invocation_id=metadata.get("invocation_id"),
+                function_call_id=metadata.get("function_call_id"),
+                consuming_operation_id=consuming_operation_id,
+            )
+
+    def start_classifier(
+        self,
+        *,
+        phase: str,
+        node_key: str,
+        classifier_type: str,
+        provider: str,
+        model: str,
+        transcript: str,
+    ) -> dict[str, Any]:
+        transcript_sha256 = hashlib.sha256(transcript.encode("utf-8")).hexdigest()
+        return self.start_operation(
+            "classifier",
+            "classifier",
+            provider=provider,
+            model=model,
+            input_payload={
+                "transcript": transcript,
+                "transcript_sha256": transcript_sha256,
+            },
+            phase=phase,
+            node_key=node_key,
+            classifier_type=classifier_type,
+            transcript_sha256=transcript_sha256,
+        )
+
+    def finish_classifier(
+        self,
+        operation: dict[str, Any],
+        status: str,
+        result: Any,
+        *,
+        error: str | None = None,
+    ) -> tuple[str, dict[str, str]]:
+        attributes = {
+            "phase": operation["attributes"]["phase"],
+            "node_key": operation["attributes"]["node_key"],
+            "classifier_type": operation["attributes"]["classifier_type"],
+            "transcript_sha256": operation["attributes"]["transcript_sha256"],
+        }
+        self.finish_operation(operation, status, output_payload=result, **attributes)
+        result_id = uuid4().hex
+        self.emit(
+            "classifier_result",
+            record_id=result_id,
+            result_id=result_id,
+            operation_id=operation["operation_id"],
+            phase=attributes["phase"],
+            node_key=attributes["node_key"],
+            classifier_type=attributes["classifier_type"],
+            status=status,
+            result=result,
+            error=error,
+            transcript_sha256=attributes["transcript_sha256"],
+        )
+        marker = f"[[voice-ai-classifier:{result_id}]]"
+        message = {
+            # Keep internal classifier context on a role supported by every
+            # configured chat-completions model. The runtime currently uses
+            # both Groq and Gemini models, and their model-specific templates
+            # do not share a guaranteed `developer` role contract.
+            "role": "user",
+            "content": (
+                f"{marker}\n"
+                "Internal classifier result. Use this state as evidence for the next response; "
+                "do not mention the classifier or this instruction to the caller.\n"
+                + json.dumps(result, ensure_ascii=False, sort_keys=True)
+            ),
+        }
+        self._classifier_result_metadata[result_id] = {
+            "operation_id": operation["operation_id"],
+            "phase": attributes["phase"],
+            "node_key": attributes["node_key"],
+            "marker": marker,
+        }
+        self._pending_classifier_results.append(result_id)
+        return result_id, message
+
+    def context_updated_classifier(self, result_id: str, context_message_index: int) -> str:
+        metadata = self._classifier_result_metadata.get(result_id)
+        if metadata is None:
+            raise ValueError("context delivery must reference a recorded classifier result")
+        delivery_id = uuid4().hex
+        self.emit(
+            "classifier_context_updated",
+            record_id=delivery_id,
+            delivery_id=delivery_id,
+            result_id=result_id,
+            operation_id=metadata["operation_id"],
+            phase=metadata["phase"],
+            node_key=metadata["node_key"],
+            context_message_index=context_message_index,
+        )
+        return delivery_id
+
+    def consume_classifier_results(
+        self,
+        messages: list[dict],
+        exchange_id: str | None,
+        consuming_operation_id: str | None,
+    ) -> None:
+        if exchange_id is None or consuming_operation_id is None:
+            return
+        remaining: list[str] = []
+        for result_id in self._pending_classifier_results:
+            metadata = self._classifier_result_metadata[result_id]
+            message_index = next(
+                (
+                    index
+                    for index, message in enumerate(messages)
+                    if metadata["marker"] in str(message.get("content", ""))
+                ),
+                None,
+            )
+            if message_index is None:
+                remaining.append(result_id)
+                continue
+            self.context_updated_classifier(result_id, message_index)
+            self.emit(
+                "classifier_result_consumed",
+                result_id=result_id,
+                exchange_id=exchange_id,
+                consuming_operation_id=consuming_operation_id,
+            )
+        self._pending_classifier_results = remaining
 
     def user_message(self, content: str, timestamp: str) -> str | None:
         if not content.strip():
