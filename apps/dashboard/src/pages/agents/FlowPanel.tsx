@@ -24,6 +24,7 @@ export function FlowPanel({
 }) {
   const temporalKeys = (variablesCatalog?.temporal ?? []).map((t) => t.key);
   const contactVariables = config.contact_variables ?? [];
+  const verbatimOpening = Boolean(config.greeting?.trim());
   const availableVariables = [
     ...temporalKeys,
     ...contactVariables,
@@ -267,18 +268,23 @@ export function FlowPanel({
             </FieldLabel>
             <NativeSelect
               id="immediate-response"
-              value={String(node.respond_immediately)}
+              value={String(verbatimOpening && node.id === config.flow.initial_node ? false : node.respond_immediately)}
               onChange={(event) =>
                 updateNode({
                   ...node,
                   respond_immediately: event.target.value === "true",
                 })
               }
-              disabled={disabled}
+              disabled={disabled || (verbatimOpening && node.id === config.flow.initial_node)}
             >
               <option value="true">Yes</option>
               <option value="false">No</option>
             </NativeSelect>
+            {verbatimOpening && node.id === config.flow.initial_node && (
+              <FieldDescription>
+                A verbatim opening is enabled, so this node must wait for the caller before running the LLM.
+              </FieldDescription>
+            )}
           </Field>
         </FieldGroup>
         {!node.terminal && (

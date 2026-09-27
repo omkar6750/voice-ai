@@ -127,6 +127,15 @@ export function AgentEditorPage() {
 
   async function save() {
     if (!stored || !draft || stored.status !== "draft") return;
+    const initialNode = draft.flow.nodes.find(
+      (item) => item.id === draft.flow.initial_node,
+    );
+    if (draft.greeting.trim() && initialNode?.respond_immediately) {
+      toast.error(
+        "A verbatim opening requires the initial node to wait for the caller.",
+      );
+      return;
+    }
     if (unboundToolReferences.length > 0) {
       toast.error(
         `Cannot save draft: flow references unbound tools [${unboundToolReferences.join(", ")}]. Remove them or bind them in Tools first.`

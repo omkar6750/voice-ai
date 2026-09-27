@@ -22,7 +22,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.flows import ContextStrategy, ContextStrategyConfig, FlowManager, NodeConfig
 from pipecat.flows.types import FlowsFunctionSchema
-from pipecat.frames.frames import FunctionCallResultProperties
+from pipecat.frames.frames import FunctionCallResultProperties, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -68,6 +68,25 @@ def _extract_transcript(
             label = "Caller" if getattr(t, "speaker", "") == "user" else "Agent"
             transcript_lines.append(f"{label}: {getattr(t, 'text', '')}")
     return "\n".join(transcript_lines[-limit:])
+
+
+_OPENING_PLACEHOLDER = re.compile(r"{{\s*([A-Za-z0-9_.:-]+)\s*}}")
+
+
+def render_opening(text: str, state: dict[str, Any]) -> str:
+    """Render only values already exposed to the flow state."""
+
+    def replace(match: re.Match[str]) -> str:
+        value: Any = state
+        for part in match.group(1).split("."):
+            if not isinstance(value, dict) or part not in value:
+                raise ValueError(
+                    f"Opening references unavailable variable '{match.group(1)}'"
+                )
+            value = value[part]
+        return "" if value is None else str(value)
+
+    return _OPENING_PLACEHOLDER.sub(replace, text)
 
 
 def trim_classifier_result(res: dict) -> dict:
@@ -498,6 +517,7 @@ class NativePipelineHost:
         self.tracker: ExchangeTracker | None = None
         self._nodes: dict[str, dict] = {}
         self._snapshot: dict = {}
+        self._verbatim_opening: str | None = None
 
     def _node(self, key: str) -> NodeConfig:
         node = self._nodes[key]
@@ -1448,22 +1468,34 @@ class NativePipelineHost:
         allowed_vars = snapshot.get("contact_variables", [])
         sanitized_contact = sanitize_contact_variables(contact, allowed_vars)
 
-        kickoff_greeting = snapshot.get("greeting")
-        if not kickoff_greeting:
-            name_phrase = f" to {sanitized_contact['name']}" if "name" in sanitized_contact else ""
-            kickoff_greeting = (
-                f"Start the phone conversation with a friendly '{temporal['greeting_phrase']}'{name_phrase}. "
-                f"Caller's local time is {temporal['local_time_12h']} ({temporal['local_time_24h']})."
-            )
+        flow_state: dict[str, Any] = dict(temporal)
+        flow_state["contact"] = sanitized_contact
+        flow_state.update(sanitized_contact)
+        for variable in allowed_vars:
+            flow_state.setdefault(variable, "")
 
-        context = LLMContext(
-            [
-                {
-                    "role": "user",
-                    "content": kickoff_greeting,
-                }
-            ]
+        configured_opening = snapshot.get("greeting") or ""
+        self._verbatim_opening = (
+            render_opening(configured_opening, flow_state)
+            if configured_opening.strip()
+            else None
         )
+        initial_messages: list[dict[str, str]] = []
+        if not self._verbatim_opening:
+            kickoff_greeting = configured_opening
+            if not kickoff_greeting:
+                name_phrase = (
+                    f" to {sanitized_contact['name']}" if "name" in sanitized_contact else ""
+                )
+                kickoff_greeting = (
+                    f"Start the phone conversation with a friendly '{temporal['greeting_phrase']}'"
+                    f"{name_phrase}. "
+                    f"Caller's local time is {temporal['local_time_12h']} "
+                    f"({temporal['local_time_24h']})."
+                )
+            initial_messages = [{"role": "user", "content": kickoff_greeting}]
+
+        context = LLMContext(initial_messages)
         self.context = context
         aggregators = LLMContextAggregatorPair(
             context,
@@ -1514,16 +1546,7 @@ class NativePipelineHost:
             context=context,
             classifier_runner=self._run_node_classifier,
         )
-        # Populate flow state with temporal context for dynamic prompts
-        self.flow.state.update(temporal)
-        # Populate flow state with selectively whitelisted contact variables
-        self.flow.state["contact"] = sanitized_contact
-        for variable, value in sanitized_contact.items():
-            self.flow.state[variable] = value
-        # Ensure any allowed variable that is missing on this contact safely defaults to ""
-        for variable in allowed_vars:
-            if variable not in self.flow.state:
-                self.flow.state[variable] = ""
+        self.flow.state.update(flow_state)
 
         @self.worker.event_handler("on_pipeline_started")
         async def started(_worker, _frame):
@@ -1556,6 +1579,10 @@ class NativePipelineHost:
         """
         self.tracker.begin("greeting")
         await self.flow.initialize(self._node(self._snapshot["flow"]["initial_node"]))
+        if self._verbatim_opening:
+            await self.worker.queue_frame(
+                TTSSpeakFrame(self._verbatim_opening, append_to_context=True)
+            )
 
         async def _check_active() -> bool:
             if modem_or_check is None:

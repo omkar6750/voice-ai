@@ -31,7 +31,6 @@ export function normalizeCallbackScheduling(value?: (Omit<Partial<CallbackSchedu
 }
 export type AgentConfig = {
   name: string;
-  persona: string;
   system_prompt: string;
   greeting: string;
   contact_variables: string[];

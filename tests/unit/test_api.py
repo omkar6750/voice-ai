@@ -328,3 +328,36 @@ def test_flow_node_config_allows_role_prompt_and_context_strategy() -> None:
     assert node.role_prompt == "You are a helpful assistant."
     assert node.context_strategy == "reset"
 
+
+def test_verbatim_opening_requires_initial_node_to_wait() -> None:
+    from pydantic import ValidationError
+    from voice_runtime.contracts.agent import AgentConfig
+
+    config = {
+        "name": "opening-test",
+        "greeting": "Hello {{name}}",
+        "flow": {
+            "initial_node": "greeting",
+            "nodes": [{"id": "greeting", "prompt": "Continue after the caller answers", "terminal": True}],
+        },
+    }
+    with pytest.raises(ValidationError, match="verbatim opening"):
+        AgentConfig.model_validate(config)
+
+
+def test_legacy_persona_is_ignored_and_empty_greeting_keeps_immediate_default() -> None:
+    from voice_runtime.contracts.agent import AgentConfig
+
+    config = AgentConfig.model_validate(
+        {
+            "name": "legacy-agent",
+            "persona": "legacy value",
+            "flow": {
+                "initial_node": "greeting",
+                "nodes": [{"id": "greeting", "prompt": "Say hello", "terminal": True}],
+            },
+        }
+    )
+    assert config.flow.nodes[0].respond_immediately is True
+    assert "persona" not in config.model_dump()
+

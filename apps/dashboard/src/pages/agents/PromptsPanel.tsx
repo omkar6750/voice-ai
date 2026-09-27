@@ -59,20 +59,23 @@ export function PromptsPanel({
     });
   }
 
+  function updateGreeting(greeting: string) {
+    const nextFlow = greeting.trim()
+      ? {
+          ...config.flow,
+          nodes: config.flow.nodes.map((node) =>
+            node.id === config.flow.initial_node
+              ? { ...node, respond_immediately: false }
+              : node,
+          ),
+        }
+      : config.flow;
+    change({ ...config, greeting, flow: nextFlow });
+  }
+
   return (
     <section className="flex max-w-3xl flex-col gap-6">
       <FieldGroup>
-        <Field>
-          <FieldLabel htmlFor="persona">Persona</FieldLabel>
-          <Input
-            id="persona"
-            value={config.persona}
-            onChange={(event) =>
-              change({ ...config, persona: event.target.value })
-            }
-            disabled={disabled}
-          />
-        </Field>
         <PromptEditor
           id="system-prompt"
           label="Global system prompt"
@@ -85,15 +88,19 @@ export function PromptsPanel({
         />
         <PromptEditor
           id="greeting"
-          label="Greeting instruction"
+          label="Verbatim opening"
           value={config.greeting}
-          placeholder="Example: Introduce yourself warmly and ask whether this is a good time to talk."
-          onChange={(greeting) => change({ ...config, greeting })}
+          placeholder="Example: Hello, I’m calling about {{ product }}. Do you have two minutes to talk?"
+          onChange={updateGreeting}
           availableTools={boundTools}
           registeredTools={registeredTools}
           availableVariables={availableVariables}
           disabled={disabled}
         />
+        <p className="text-xs text-muted-foreground">
+          Spoken exactly as written before the first LLM turn. Use approved contact or temporal variables with{" "}
+          <code className="mx-1">{"{{variable}}"}</code>. Do not repeat this opening in the initial node prompt.
+        </p>
       </FieldGroup>
 
       <section className="flex flex-col gap-3 rounded-lg border p-4">

@@ -10,7 +10,7 @@ from voice_api.api.v1.endpoints import calls
 from voice_api.schemas.call import StartCallBody
 from voice_runtime.contracts.evidence import EvidenceBatch
 from voice_runtime.execution.exchange import ExchangeTracker
-from voice_runtime.execution.native import NativePipelineHost
+from voice_runtime.execution.native import NativePipelineHost, render_opening
 
 
 class MemorySink:
@@ -19,6 +19,19 @@ class MemorySink:
 
     def submit(self, record):
         self.records.append(record)
+
+
+def test_verbatim_opening_renders_whitelisted_state_and_nested_contact_values() -> None:
+    rendered = render_opening(
+        "Hello {{ contact.name }}, this is about {{campaign}}.",
+        {"contact": {"name": "Maria"}, "campaign": "summer"},
+    )
+    assert rendered == "Hello Maria, this is about summer."
+
+
+def test_verbatim_opening_rejects_unavailable_state() -> None:
+    with pytest.raises(ValueError, match="unavailable variable"):
+        render_opening("Hello {{phone_number}}", {"name": "Maria"})
 
 
 def test_flow_tools_and_provider_evidence_round_trip():

@@ -125,7 +125,6 @@ class CallbackSchedulingConfig(ConfigModel):
 
 class AgentConfig(ConfigModel):
     name: str = Field(min_length=1)
-    persona: str = ""
     system_prompt: str = ""
     greeting: str = ""
     contact_variables: list[Identifier] = Field(default_factory=list)
@@ -155,4 +154,25 @@ class AgentConfig(ConfigModel):
             raise ValueError(
                 f"unknown tool bindings: {sorted(references - self.tool_bindings.keys())}"
             )
+        return self
+
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_legacy_persona(cls, value):
+        """Keep historical configs readable after persona was removed."""
+        if isinstance(value, dict) and "persona" in value:
+            value = dict(value)
+            value.pop("persona", None)
+        return value
+
+    @model_validator(mode="after")
+    def validate_verbatim_opening_timing(self):
+        if self.greeting.strip():
+            nodes = {node.id: node for node in self.flow.nodes}
+            initial = nodes[self.flow.initial_node]
+            if initial.respond_immediately:
+                raise ValueError(
+                    "A verbatim opening requires the initial node to wait for caller speech "
+                    "(respond_immediately=false)"
+                )
         return self
