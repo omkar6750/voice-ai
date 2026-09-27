@@ -133,8 +133,9 @@ export function AudioPanel({
           </Field>
         </FieldGroup>
         <p className="text-xs text-muted-foreground">
-          VAD and interruption settings are stored. Verify their effect in a
-          live call before treating them as proven.
+          Interruptions control barge-in; the idle timeout starts after the agent
+          finishes speaking, reprompts once, then ends the call after another idle
+          period. Verify thresholds on a real carrier call.
         </p>
       </div>
     </section>

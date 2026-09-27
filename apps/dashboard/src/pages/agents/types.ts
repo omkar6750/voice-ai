@@ -37,8 +37,6 @@ export type AgentConfig = {
   language: {
     default_language: string;
     supported_languages: string[];
-    follow_caller_language: boolean;
-    persist_requested_language: boolean;
   };
   flow: {
     initial_node: string;
@@ -76,6 +74,14 @@ export type AgentConfig = {
     voice: string;
     language: string;
     pace: number;
+    cartesia?: {
+      generation_config?: {
+        volume?: number | null;
+        speed?: number | null;
+        emotion?: string | null;
+      } | null;
+      pronunciation_dict_id?: string | null;
+    } | null;
   };
   audio: {
     sample_rate: 8000 | 16000;

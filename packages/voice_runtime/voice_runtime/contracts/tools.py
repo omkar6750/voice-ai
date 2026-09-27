@@ -70,6 +70,7 @@ class ToolConfig(ConfigModel):
     handler: Identifier | None = None
     http: HTTPToolConfig | None = None
     whatsapp: WhatsAppTemplateConfig | None = None
+    knowledge_base_id: Identifier | None = None
     parameters: dict[str, Any] = Field(default_factory=lambda: {"type": "object", "properties": {}})
     wait: WaitConfig = Field(default_factory=WaitConfig)
 
@@ -85,4 +86,6 @@ class ToolConfig(ConfigModel):
             raise ValueError("WhatsApp settings require the send_whatsapp_template handler")
         if self.handler == "send_whatsapp_template" and self.whatsapp is None:
             raise ValueError("send_whatsapp_template requires WhatsApp settings")
+        if self.handler != "query_knowledge_base" and self.knowledge_base_id is not None:
+            raise ValueError("knowledge_base_id requires the query_knowledge_base handler")
         return self

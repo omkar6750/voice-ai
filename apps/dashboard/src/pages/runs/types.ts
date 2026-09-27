@@ -72,6 +72,9 @@ export type Span = {
   ttfat_ms: number | null;
   prompt_tokens: number | null;
   completion_tokens: number | null;
+  total_tokens: number | null;
+  cache_read_input_tokens: number | null;
+  cache_creation_input_tokens: number | null;
   reasoning_tokens: number | null;
   audio_seconds: number | null;
   otel_trace_id: string | null;

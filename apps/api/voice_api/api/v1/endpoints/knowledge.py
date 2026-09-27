@@ -77,6 +77,7 @@ async def create_base(
             "kind": "registered",
             "name": tool_slug,
             "handler": "query_knowledge_base",
+            "knowledge_base_id": row.id,
             "description": f"Search the {body.name} using hybrid vector retrieval to answer customer inquiries.",
             "parameters": {
                 "type": "object",

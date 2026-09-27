@@ -30,6 +30,19 @@ export function ModelsPanel({
   const ttsVoices = selectedTts?.voices ?? [];
   const ttsField = (name: string) => selectedTts?.fields?.[name];
   const ttsFieldSupported = (name: string) => ttsField(name)?.runtime_supported ?? false;
+  const cartesiaGeneration = config.tts.cartesia?.generation_config;
+  function updateCartesiaGeneration(field: "volume" | "speed" | "emotion", value: number | string | null) {
+    change({
+      ...config,
+      tts: {
+        ...config.tts,
+        cartesia: {
+          ...config.tts.cartesia,
+          generation_config: { ...cartesiaGeneration, [field]: value },
+        },
+      },
+    });
+  }
 
   return (
     <section className="grid max-w-5xl gap-8 lg:grid-cols-2">
@@ -144,6 +157,8 @@ export function ModelsPanel({
                       provider,
                       model: defaultModel,
                       voice: defaultVoice,
+                      pace: provider === "cartesia" ? 1 : config.tts.pace,
+                      cartesia: provider === "cartesia" ? config.tts.cartesia ?? null : null,
                     },
                   });
                 }}
@@ -222,7 +237,7 @@ export function ModelsPanel({
               </Field>
             )}
 
-            {ttsFieldSupported("pace") ? (
+            {config.tts.provider === "sarvam" ? (
               <NumberField
                 id="tts-pace"
                 label="Pace"
@@ -233,8 +248,41 @@ export function ModelsPanel({
                 disabled={disabled}
                 onChange={(pace) => change({ ...config, tts: { ...config.tts, pace } })}
               />
-            ) : (
-              <ReadOnlyValue label="Pace" value={String(config.tts.pace)} reason={ttsField("pace")?.description ?? "This provider does not expose pace to the runtime."} />
+            ) : null}
+            {config.tts.provider === "cartesia" && (
+              <>
+                <Field>
+                  <FieldLabel htmlFor="cartesia-volume">Volume</FieldLabel>
+                  <Input id="cartesia-volume" type="number" min={0.5} max={2} step={0.05}
+                    value={cartesiaGeneration?.volume ?? ""} placeholder="Provider default (1.0)" disabled={disabled}
+                    onChange={(event) => updateCartesiaGeneration("volume", event.target.value === "" ? null : Number(event.target.value))} />
+                  <FieldDescription>Cartesia generation volume, 0.5–2.0.</FieldDescription>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="cartesia-speed">Speed</FieldLabel>
+                  <Input id="cartesia-speed" type="number" min={0.6} max={1.5} step={0.05}
+                    value={cartesiaGeneration?.speed ?? ""} placeholder="Provider default (1.0)" disabled={disabled}
+                    onChange={(event) => updateCartesiaGeneration("speed", event.target.value === "" ? null : Number(event.target.value))} />
+                  <FieldDescription>Cartesia generation speed, separate from Sarvam pace.</FieldDescription>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="cartesia-emotion">Emotion</FieldLabel>
+                  <Input id="cartesia-emotion" value={cartesiaGeneration?.emotion ?? ""}
+                    placeholder="Provider default" disabled={disabled}
+                    onChange={(event) => updateCartesiaGeneration("emotion", event.target.value || null)} />
+                  <FieldDescription>For example: calm, excited, or neutral. Voice support varies.</FieldDescription>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="cartesia-pronunciation">Pronunciation dictionary ID</FieldLabel>
+                  <Input id="cartesia-pronunciation"
+                    value={config.tts.cartesia?.pronunciation_dict_id ?? ""}
+                    placeholder="Optional dictionary ID" disabled={disabled}
+                    onChange={(event) => change({ ...config, tts: {
+                      ...config.tts,
+                      cartesia: { ...config.tts.cartesia, pronunciation_dict_id: event.target.value || null },
+                    } })} />
+                </Field>
+              </>
             )}
           </FieldGroup>
         </div>

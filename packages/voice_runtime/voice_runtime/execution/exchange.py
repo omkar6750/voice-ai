@@ -501,6 +501,9 @@ class ExchangeTracker:
                 "ttfat_ms",
                 "prompt_tokens",
                 "completion_tokens",
+                "total_tokens",
+                "cache_read_input_tokens",
+                "cache_creation_input_tokens",
                 "reasoning_tokens",
                 "audio_seconds",
             )

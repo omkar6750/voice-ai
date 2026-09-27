@@ -71,6 +71,9 @@ class OperationEnded(OperationStarted):
     ttfat_ms: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     prompt_tokens: int | None = Field(default=None, ge=0)
     completion_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
+    cache_read_input_tokens: int | None = Field(default=None, ge=0)
+    cache_creation_input_tokens: int | None = Field(default=None, ge=0)
     reasoning_tokens: int | None = Field(default=None, ge=0)
     audio_seconds: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 

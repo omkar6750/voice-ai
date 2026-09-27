@@ -13,7 +13,7 @@ RuntimeStatus = Literal["supported", "pending", "unavailable"]
 class ProviderField(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["string", "number", "boolean"]
+    type: Literal["string", "number", "boolean", "object"]
     runtime_supported: bool = True
     description: str | None = None
 

@@ -43,6 +43,7 @@ class EvidenceObserver(BaseObserver):
         llm,
         stt,
         tts,
+        llm_provider: str = "groq",
         llm_model: str,
         stt_model: str,
         tts_model: str,
@@ -51,6 +52,7 @@ class EvidenceObserver(BaseObserver):
         super().__init__()
         self.tracker = tracker
         self.llm, self.stt, self.tts = llm, stt, tts
+        self.providers = {"llm": llm_provider, "stt": type(stt).__name__, "tts": type(tts).__name__}
         self.models = {"llm": llm_model, "stt": stt_model, "tts": tts_model}
         self.llm_operation: dict | None = None
         self.stt_operation: dict | None = None
@@ -91,7 +93,7 @@ class EvidenceObserver(BaseObserver):
             self.llm_operation = self.tracker.start_operation(
                 "inference",
                 "llm",
-                provider="groq",
+                provider=self.providers["llm"],
                 model=self.models["llm"],
                 input_payload=payload,
                 parent_operation_id=self.last_speech_operation_id,
@@ -240,6 +242,9 @@ class EvidenceObserver(BaseObserver):
             elif isinstance(metric, LLMUsageMetricsData):
                 values["prompt_tokens"] = metric.value.prompt_tokens
                 values["completion_tokens"] = metric.value.completion_tokens
+                values["total_tokens"] = metric.value.total_tokens
+                values["cache_read_input_tokens"] = metric.value.cache_read_input_tokens
+                values["cache_creation_input_tokens"] = metric.value.cache_creation_input_tokens
                 values["reasoning_tokens"] = metric.value.reasoning_tokens
             elif isinstance(metric, ProcessingMetricsData):
                 values["processing_ms"] = metric.value * 1000

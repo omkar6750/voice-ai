@@ -22,7 +22,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.flows import ContextStrategy, ContextStrategyConfig, FlowManager, NodeConfig
 from pipecat.flows.types import FlowsFunctionSchema
-from pipecat.frames.frames import FunctionCallResultProperties, TTSSpeakFrame
+from pipecat.frames.frames import EndFrame, FunctionCallResultProperties, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -30,15 +30,18 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.cartesia.tts import CartesiaTTSService, GenerationConfig
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.groq.llm import GroqLLMService
 from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.services.sarvam.tts import SarvamTTSService
+from pipecat.turns.user_start import TranscriptionUserTurnStartStrategy, VADUserTurnStartStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
 
 from voice_runtime.call_capture import CallCapture
 from voice_runtime.contracts import is_registered_handler
+from voice_runtime.contracts.prompt_references import compile_tool_references
 from voice_runtime.diagnostics import (
     exception_diagnostic,
     provider_error_diagnostic,
@@ -153,12 +156,21 @@ def build_speech_services(settings, snapshot: dict, sample_rate: int):
             sample_rate=sample_rate,
         )
     elif tts_config["provider"] == "cartesia":
+        cartesia = tts_config.get("cartesia") or {}
+        cartesia_settings = {}
+        if cartesia.get("generation_config"):
+            cartesia_settings["generation_config"] = GenerationConfig(
+                **cartesia["generation_config"]
+            )
+        if cartesia.get("pronunciation_dict_id"):
+            cartesia_settings["pronunciation_dict_id"] = cartesia["pronunciation_dict_id"]
         tts = CartesiaTTSService(
             api_key=settings.cartesia_api_key,
             settings=CartesiaTTSService.Settings(
                 model=tts_config["model"],
                 voice=tts_config["voice"],
                 language=tts_config["language"],
+                **cartesia_settings,
             ),
             sample_rate=sample_rate,
             encoding="pcm_s16le",
@@ -167,6 +179,24 @@ def build_speech_services(settings, snapshot: dict, sample_rate: int):
     else:
         raise ValueError(f"Unsupported TTS provider: {tts_config['provider']}")
     return stt, tts
+
+
+def build_user_aggregator_params(snapshot: dict, vad) -> LLMUserAggregatorParams:
+    """Apply saved call controls to Pipecat's actual user-turn detector."""
+    limits = snapshot["call_limits"]
+    strategies = None
+    if not limits["interruptions_enabled"]:
+        strategies = UserTurnStrategies(
+            start=[
+                VADUserTurnStartStrategy(enable_interruptions=False),
+                TranscriptionUserTurnStartStrategy(enable_interruptions=False),
+            ]
+        )
+    return LLMUserAggregatorParams(
+        vad_analyzer=vad,
+        user_turn_strategies=strategies,
+        user_idle_timeout=limits["idle_timeout_secs"],
+    )
 
 
 async def run_jev_classification(
@@ -514,6 +544,7 @@ class NativePipelineHost:
         self._call_hung_up: bool = False
         self._termination_diagnostic_recorded = False
         self._end_task: asyncio.Task | None = None
+        self._idle_reprompts = 0
         self.tracker: ExchangeTracker | None = None
         self._nodes: dict[str, dict] = {}
         self._snapshot: dict = {}
@@ -528,9 +559,16 @@ class NativePipelineHost:
         if "initial_node" not in flow and not role_message:
             # Compatibility for pre-Pipecat snapshots used by older evidence tests.
             role_message = node.get("prompt", "")
+        exposed_tools = set(node["tool_bindings"])
+        role_message = compile_tool_references(role_message or "", exposed_tools)
         task_messages = []
         if node.get("prompt"):
-            task_messages.append({"role": "user", "content": node["prompt"]})
+            task_messages.append(
+                {
+                    "role": "user",
+                    "content": compile_tool_references(node["prompt"], exposed_tools),
+                }
+            )
         if node.get("terminal"):
             task_messages.append(
                 {
@@ -565,6 +603,26 @@ class NativePipelineHost:
                 strategy=ContextStrategy(node.get("context_strategy", "append"))
             ),
         )
+
+    async def _handle_user_idle(self) -> None:
+        if self._call_hung_up or self.worker is None:
+            return
+        if self._idle_reprompts == 0:
+            self._idle_reprompts = 1
+            await self.worker.queue_frame(
+                TTSSpeakFrame("Are you still there?", append_to_context=True)
+            )
+            return
+        self._call_hung_up = True
+        if self.tracker is not None:
+            self.tracker.diagnostic(
+                severity="info",
+                category="call_termination",
+                source="call",
+                code="caller_idle_timeout",
+                message="Caller remained idle after one reprompt",
+            )
+        self._end_task = asyncio.create_task(self.worker.cancel())
 
     async def _run_node_classifier(
         self, phase: str, node_key: str
@@ -742,6 +800,8 @@ class NativePipelineHost:
                     return {"status": "error", "error": "Transition is not allowed"}
                 return {"status": "ok", "node": target}, self._node(target)
             if name == "end_call":
+                if self._call_hung_up:
+                    return {"status": "ok"}
                 self._call_hung_up = True
                 self.tracker.diagnostic(
                     severity="info",
@@ -750,7 +810,7 @@ class NativePipelineHost:
                     code="agent_hangup",
                     message="Agent requested call termination",
                 )
-                self._end_task = asyncio.create_task(self.worker.cancel())
+                await self.worker.queue_frame(EndFrame())
                 return {"status": "ok"}
             if name == "check_whatsapp_window":
                 contact = (
@@ -1282,12 +1342,10 @@ class NativePipelineHost:
                     logger.error("schedule_callback failed to persist: {}", exc)
                     return {"status": "error", "error": f"Failed to persist callback: {exc}"}
 
-            if (
-                name == "query_knowledge_base"
-                or name.startswith("query_knowledge_base_")
-                or name.startswith("query_kb_")
-                or ("knowledge" in name and "query" in name)
-            ):
+            definition = (
+                self._snapshot.get("_resolved", {}).get("tools", {}).get(name, {}).get("definition", {})
+            )
+            if definition.get("handler") == "query_knowledge_base":
                 query_text = (
                     args.get("query")
                     or args.get("question")
@@ -1298,31 +1356,16 @@ class NativePipelineHost:
                 if not query_text:
                     return {"status": "error", "error": "Missing search query parameter"}
 
-                kb_ids = []
-                assigned_kbs = self._snapshot.get("_resolved", {}).get("knowledge") or []
-                for k in assigned_kbs:
-                    if k.get("id"):
-                        kb_ids.append(k["id"])
-                if not kb_ids and self._snapshot.get("knowledge_base_ids"):
-                    kb_ids = list(self._snapshot["knowledge_base_ids"])
-
-                if not kb_ids:
-                    try:
-                        from sqlalchemy import select
-                        from voice_api.db.session import SessionFactory
-                        from voice_api.models import KnowledgeBase
-
-                        async with SessionFactory() as db_session:
-                            all_rows = (await db_session.scalars(select(KnowledgeBase.id))).all()
-                            kb_ids = list(all_rows)
-                    except Exception as exc:
-                        logger.warning("Failed to look up knowledge bases in DB: {}", exc)
-
-                if not kb_ids:
+                kb_id = definition.get("knowledge_base_id")
+                attached_ids = {
+                    kb["id"]
+                    for kb in self._snapshot.get("_resolved", {}).get("knowledge", [])
+                    if kb.get("id")
+                }
+                if not kb_id or kb_id not in attached_ids:
                     return {
-                        "status": "not_found",
-                        "hits": [],
-                        "context": "No knowledge bases are linked to this agent.",
+                        "status": "error",
+                        "error": "Knowledge tool is not scoped to an attached knowledge base",
                     }
 
                 all_hits = []
@@ -1342,9 +1385,8 @@ class NativePipelineHost:
 
                     async with SessionFactory() as db_session, httpx.AsyncClient() as http_client:
                         embedder = GeminiEmbedder(gemini_key, http_client) if gemini_key else None
-                        for kb_id in kb_ids:
-                            hits = await search(db_session, kb_id, query_text, retrieval_cfg, embedder)
-                            all_hits.extend(hits)
+                        hits = await search(db_session, kb_id, query_text, retrieval_cfg, embedder)
+                        all_hits.extend(hits)
                 except Exception as exc:
                     logger.error("RAG search failed for query '{}': {}", query_text, exc)
                     return {"status": "error", "error": f"Knowledge search failed: {exc}"}
@@ -1359,19 +1401,22 @@ class NativePipelineHost:
                     }
 
                 context_excerpts = "\n\n".join(
-                    f"[{h.title}]\n{h.content}" for h in top_hits[:3]
+                    f"[{h.title}; chunk {h.chunk_id}]\n{h.content[:600]}"
+                    for h in top_hits[:3]
                 )
                 return {
                     "status": "ok",
-                    "hits_count": len(top_hits),
+                    "knowledge_base_id": kb_id,
+                    "hits_count": len(all_hits),
                     "context": context_excerpts,
                     "results": [
                         {
+                            "chunk_id": h.chunk_id,
                             "title": h.title,
-                            "content": h.content,
+                            "source_path": h.source_path,
                             "score": round(h.score, 4),
                         }
-                        for h in top_hits
+                        for h in top_hits[:3]
                     ],
                 }
 
@@ -1499,8 +1544,17 @@ class NativePipelineHost:
         self.context = context
         aggregators = LLMContextAggregatorPair(
             context,
-            user_params=LLMUserAggregatorParams(vad_analyzer=vad),
+            user_params=build_user_aggregator_params(snapshot, vad),
         )
+
+        @aggregators.user().event_handler("on_user_turn_idle")
+        async def on_user_turn_idle(_aggregator):
+            await self._handle_user_idle()
+
+        @aggregators.user().event_handler("on_user_turn_started")
+        async def on_user_turn_started(_aggregator, _strategy):
+            self._idle_reprompts = 0
+
         bind_transcripts(aggregators, tracker)
         pipeline = Pipeline(
             [
@@ -1518,6 +1572,7 @@ class NativePipelineHost:
             llm=llm,
             stt=stt,
             tts=tts,
+            llm_provider=llm_config["provider"],
             llm_model=llm_config["model"],
             stt_model=snapshot["stt"]["model"],
             tts_model=tts_config["model"],
@@ -1531,6 +1586,7 @@ class NativePipelineHost:
             enable_rtvi=False,
             params=PipelineParams(
                 enable_metrics=True,
+                enable_usage_metrics=True,
                 audio_in_sample_rate=rate,
                 audio_out_sample_rate=rate,
             ),

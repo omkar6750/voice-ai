@@ -170,6 +170,19 @@ export function RunDetailPage() {
     timeline?.spans
       .filter((span) => span.ttfb_ms != null)
       .map((span) => span.ttfb_ms!) ?? [];
+  const llmSpans = timeline?.spans.filter((span) => span.category === "llm") ?? [];
+  const usageSpans = llmSpans.filter(
+    (span) => span.total_tokens != null ||
+      (span.prompt_tokens != null && span.completion_tokens != null),
+  );
+  const inputTokens = usageSpans.reduce((sum, span) => sum + (span.prompt_tokens ?? 0), 0);
+  const outputTokens = usageSpans.reduce((sum, span) => sum + (span.completion_tokens ?? 0), 0);
+  const totalTokens = usageSpans.reduce(
+    (sum, span) => sum + (span.total_tokens ?? (span.prompt_tokens! + span.completion_tokens!)),
+    0,
+  );
+  const derivedTotals = usageSpans.some((span) => span.total_tokens == null);
+  const tokenCoverage = usageSpans.length === llmSpans.length ? "" : " (partial)";
   return (
     <div className="flex min-w-0 flex-col lg:flex-row">
       <aside className="hidden w-48 shrink-0 border-r bg-card lg:block">
@@ -280,6 +293,13 @@ export function RunDetailPage() {
               </span>
               <span>
                 Provider operations <strong>{timeline.spans.length}</strong>
+              </span>
+              <span>
+                LLM calls <strong>{llmSpans.length}</strong>
+              </span>
+              <span>
+                Conversation LLM tokens <strong>{usageSpans.length ? `${totalTokens}${tokenCoverage}` : "Not recorded"}</strong>
+                {usageSpans.length > 0 && <span className="text-muted-foreground"> · {inputTokens} in / {outputTokens} out · {usageSpans.length}/{llmSpans.length} measured{derivedTotals ? " · some totals derived" : ""}</span>}
               </span>
               <span>
                 Tools <strong>{timeline.tools.length}</strong>

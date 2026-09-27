@@ -557,6 +557,9 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
                 ttfat_ms=record.ttfat_ms,
                 prompt_tokens=record.prompt_tokens,
                 completion_tokens=record.completion_tokens,
+                total_tokens=record.total_tokens,
+                cache_read_input_tokens=record.cache_read_input_tokens,
+                cache_creation_input_tokens=record.cache_creation_input_tokens,
                 reasoning_tokens=record.reasoning_tokens,
                 audio_seconds=record.audio_seconds,
             )

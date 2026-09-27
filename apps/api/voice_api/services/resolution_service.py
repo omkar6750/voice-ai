@@ -84,7 +84,9 @@ async def resolve(
             raise HTTPException(422, "Published tool unavailable")
         tools[binding.binding_key] = {
             "version_id": tool.id,
-            "definition": ToolConfig.model_validate(tool.config).model_dump(mode="json"),
+            "definition": ToolConfig.model_validate(tool.config).model_dump(
+                mode="json", exclude_none=True
+            ),
             "binding": binding.config,
         }
     knowledge = []
@@ -93,31 +95,6 @@ async def resolve(
         if kb is None:
             raise HTTPException(422, "Knowledge base unavailable")
         knowledge.append({"id": kb.id, "name": kb.name})
-    if knowledge and not any("knowledge" in k or k == "query_knowledge_base" for k in tools):
-        tools["query_knowledge_base"] = {
-            "version_id": "auto_kb_tool",
-            "definition": {
-                "kind": "registered",
-                "name": "query_knowledge_base",
-                "handler": "query_knowledge_base",
-                "description": "Search attached knowledge base using hybrid vector retrieval to answer customer inquiries.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Search query or customer question to retrieve information for",
-                        }
-                    },
-                    "required": ["query"],
-                },
-                "wait": {
-                    "mode": "acknowledge_then_wait",
-                    "acknowledgement": "Let me check our knowledge base for that.",
-                },
-            },
-            "binding": {},
-        }
     logs = (
         workspace.pipeline_logs_enabled
         if config.pipeline_logs == "inherit"
@@ -125,7 +102,7 @@ async def resolve(
     )
     snapshot = safe_evidence(
         {
-            **config.model_dump(mode="json"),
+            **config.model_dump(mode="json", exclude_none=True),
             "_resolved": {
                 "schema_version": 1,
                 "agent_version_id": version.id,

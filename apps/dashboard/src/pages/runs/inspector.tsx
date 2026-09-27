@@ -274,6 +274,15 @@ function Evidence({
             <Value label="Output tokens">
               {span.completion_tokens ?? "Not recorded"}
             </Value>
+            <Value label="Total tokens">
+              {span.total_tokens ?? "Not recorded"}
+            </Value>
+            <Value label="Cached input read">
+              {span.cache_read_input_tokens ?? "Not recorded"}
+            </Value>
+            <Value label="Cached input created">
+              {span.cache_creation_input_tokens ?? "Not recorded"}
+            </Value>
             <Value label="Reasoning tokens">
               {span.reasoning_tokens ?? "Not recorded"}
             </Value>

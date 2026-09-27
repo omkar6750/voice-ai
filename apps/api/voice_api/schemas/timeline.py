@@ -68,6 +68,9 @@ class TimelineSpan(BaseModel):
     ttfat_ms: float | None
     prompt_tokens: int | None
     completion_tokens: int | None
+    total_tokens: int | None
+    cache_read_input_tokens: int | None
+    cache_creation_input_tokens: int | None
     reasoning_tokens: int | None
     audio_seconds: float | None
     input: JsonValue | None

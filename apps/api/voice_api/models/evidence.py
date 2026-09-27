@@ -156,6 +156,9 @@ class TraceSpan(Identity, Base):
                 "audio_seconds",
                 "prompt_tokens",
                 "completion_tokens",
+                "total_tokens",
+                "cache_read_input_tokens",
+                "cache_creation_input_tokens",
                 "reasoning_tokens",
             )
         ),
@@ -171,6 +174,9 @@ class TraceSpan(Identity, Base):
     ttfat_ms: Mapped[float | None]
     prompt_tokens: Mapped[int | None]
     completion_tokens: Mapped[int | None]
+    total_tokens: Mapped[int | None]
+    cache_read_input_tokens: Mapped[int | None]
+    cache_creation_input_tokens: Mapped[int | None]
     reasoning_tokens: Mapped[int | None]
     audio_seconds: Mapped[float | None]
     run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)

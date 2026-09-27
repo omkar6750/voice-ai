@@ -8,6 +8,7 @@ from pydantic import Field, field_validator, model_validator
 from .base import ConfigModel, Identifier
 from .cadence import ClassifierConfig, SummarizerConfig
 from .knowledge import RetrievalConfig
+from .prompt_references import tool_references
 from .providers import AudioConfig, CallLimits, LLMConfig, STTConfig, TTSConfig, VADConfig
 from .tools import ToolBinding
 
@@ -77,8 +78,6 @@ class LanguageConfig(ConfigModel):
     supported_languages: list[str] = Field(
         default_factory=lambda: ["en-IN", "hi-IN", "mr-IN", "te-IN"]
     )
-    follow_caller_language: bool = True
-    persist_requested_language: bool = True
 
 
 class CallbackRoleConfig(ConfigModel):
@@ -150,6 +149,13 @@ class AgentConfig(ConfigModel):
         references = set(self.background_hooks)
         for node in self.flow.nodes:
             references.update(node.tool_bindings + node.entry_actions + node.exit_actions)
+            unbound = tool_references(node.prompt) - set(node.tool_bindings)
+            if node.role_prompt:
+                unbound |= tool_references(node.role_prompt) - set(node.tool_bindings)
+            if unbound:
+                raise ValueError(
+                    f"unbound prompt tool references in node '{node.id}': {sorted(unbound)}"
+                )
         if references - self.tool_bindings.keys():
             raise ValueError(
                 f"unknown tool bindings: {sorted(references - self.tool_bindings.keys())}"

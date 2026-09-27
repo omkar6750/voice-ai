@@ -219,14 +219,6 @@ export function PromptsPanel({
           label="Supported languages"
           value={config.language.supported_languages.join(", ")}
         />
-        <ReadOnlyValue
-          label="Follow caller"
-          value={String(config.language.follow_caller_language)}
-        />
-        <ReadOnlyValue
-          label="Persist caller preference"
-          value={String(config.language.persist_requested_language)}
-        />
       </div>
     </section>
   );

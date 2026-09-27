@@ -44,12 +44,24 @@ class LLMConfig(ConfigModel):
         return self
 
 
+class CartesiaGenerationConfig(ConfigModel):
+    volume: float | None = Field(default=None, ge=0.5, le=2.0)
+    speed: float | None = Field(default=None, ge=0.6, le=1.5)
+    emotion: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+class CartesiaTTSConfig(ConfigModel):
+    generation_config: CartesiaGenerationConfig | None = None
+    pronunciation_dict_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
 class TTSConfig(ConfigModel):
     provider: Literal["sarvam", "cartesia"] = "sarvam"
     model: str = "bulbul:v3"
     voice: str = "ritu"
     language: str = "en-IN"
     pace: float = Field(default=1.0, gt=0)
+    cartesia: CartesiaTTSConfig | None = None
 
     @model_validator(mode="after")
     def validate_provider_model(self):
@@ -62,6 +74,10 @@ class TTSConfig(ConfigModel):
                 f"TTS model '{self.model}' is not supported by provider '{self.provider}'; "
                 f"use '{expected}'"
             )
+        if self.provider == "sarvam" and self.cartesia is not None:
+            raise ValueError("Cartesia settings are unavailable for Sarvam TTS")
+        if self.provider == "cartesia" and self.pace != 1.0:
+            raise ValueError("Cartesia uses generation_config.speed, not Sarvam pace")
         return self
 
 
@@ -95,6 +111,8 @@ RUNTIME_PROVIDER_CAPABILITIES: dict[str, dict] = {
                 "runtime_supported": False,
                 "description": "Cartesia pace is not wired into the current Pipecat runtime.",
             },
+            "generation_config": {"type": "object", "runtime_supported": True},
+            "pronunciation_dict_id": {"type": "string", "runtime_supported": True},
         },
         "runtime_status": "supported",
     },

@@ -30,6 +30,7 @@ export function PromptEditor({
 }) {
   const mirror = useRef<HTMLPreElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const roughTokens = Math.ceil(new TextEncoder().encode(value).length / 4);
 
   // Tool references
   const toolReferences = [...value.matchAll(toolPattern)].map((match) => match[1]);
@@ -149,6 +150,10 @@ export function PromptEditor({
       <FieldDescription>
         Use <code>#tool_name</code> to invoke tools and <code>{"{{ variable }}"}</code> for dynamic contact & temporal fields.
       </FieldDescription>
+      <p className="text-xs text-muted-foreground">
+        This field: {value.length} characters · roughly {roughTokens} tokens. Estimate only;
+        actual model usage also includes system instructions, tools, and conversation history.
+      </p>
 
       {unresolvedTools.length > 0 && (
         <p className="text-xs text-destructive">
