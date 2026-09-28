@@ -23,8 +23,8 @@ from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_runtime.diagnostics import text_error_diagnostic
-from voice_runtime.execution.delivery import stream_evidence
-from voice_runtime.execution.evidence_client import ApiEvidenceIngestor
+from voice_runtime.execution.delivery import finalize_evidence, stream_evidence, supervise_execution
+from voice_runtime.execution.evidence_client import ApiEvidenceIngestor, EvidenceDeliveryError
 from voice_runtime.execution.exchange import ExchangeTracker
 from voice_runtime.execution.native import NativePipelineHost
 from voice_runtime.execution.spool import DurableSpool
@@ -161,9 +161,7 @@ async def create_browser_session(
             raise HTTPException(404, "Contact not found")
         resolved_contact_id = contact.id
         effective_phone = (
-            phone_number.strip()
-            if phone_number and phone_number.strip()
-            else contact.phone_number
+            phone_number.strip() if phone_number and phone_number.strip() else contact.phone_number
         )
         contact_snapshot = {
             "id": contact.id,
@@ -369,7 +367,9 @@ async def end_browser_session(
                 severity="info" if reason == "operator_stop" else "warning",
                 category="call_termination",
                 source="transport",
-                code=("browser_operator_stop" if reason == "operator_stop" else "browser_disconnect"),
+                code=(
+                    "browser_operator_stop" if reason == "operator_stop" else "browser_disconnect"
+                ),
                 message=(
                     "Browser call ended by operator"
                     if reason == "operator_stop"
@@ -443,21 +443,25 @@ async def _run_browser_pipeline(
     ) as client:
         ingestor = ApiEvidenceIngestor(client, run_id, settings.operator_token or "")
         delivery_task = asyncio.create_task(stream_evidence(spool, ingestor))
+        execution_failed = False
 
         try:
-            await host.prepare(snapshot, tracker, transport=transport)
-            await host.converse(ctx.is_still_active)
+
+            async def execute_pipeline() -> None:
+                await host.prepare(snapshot, tracker, transport=transport)
+                await host.converse(ctx.is_still_active)
+
+            await supervise_execution(execute_pipeline(), delivery_task)
         except Exception as exc:
+            execution_failed = True
             logger.exception("Browser pipeline failed during run {}: {}", run_id, exc)
             async with SessionFactory() as db_session:
                 r = await db_session.get(Run, run_id)
-                if r:
+                if r and not isinstance(exc, EvidenceDeliveryError):
                     await persist_diagnostic(
                         db_session,
                         run_id,
-                        DiagnosticInput.model_validate(
-                            text_error_diagnostic(str(exc))
-                        ),
+                        DiagnosticInput.model_validate(text_error_diagnostic(str(exc))),
                     )
                 if r and r.status not in ("completed", "canceled"):
                     r.status = "failed"
@@ -470,16 +474,33 @@ async def _run_browser_pipeline(
                 await db_session.commit()
         finally:
             ctx.mark_ended()
-            await ctx.close_runtime()
-            delivery_task.cancel()
-            await asyncio.gather(delivery_task, return_exceptions=True)
+            try:
+                await ctx.close_runtime()
+            except Exception:
+                execution_failed = True
+                logger.exception("Browser runtime cleanup failed for run {}", run_id)
+            finalization = await finalize_evidence(spool, ingestor, delivery_task)
 
             async with SessionFactory() as db_session:
                 r = await db_session.get(Run, run_id)
+                if finalization.diagnostic:
+                    await persist_diagnostic(
+                        db_session,
+                        run_id,
+                        DiagnosticInput.model_validate(finalization.diagnostic),
+                    )
                 if r and r.status in ("claimed", "running"):
-                    r.status = "completed"
+                    r.status = "failed" if execution_failed else "completed"
+                    r.final_state = {"evidence_incomplete": finalization.incomplete}
+                    if execution_failed and not r.error:
+                        r.error = "Browser pipeline stopped before normal completion"
                     if not r.ended_at:
                         r.ended_at = now()
+                elif r:
+                    r.final_state = {
+                        **(r.final_state or {}),
+                        "evidence_incomplete": finalization.incomplete,
+                    }
                 bs = await db_session.get(BrowserSession, session_id)
                 if bs and bs.status in ("created", "connecting", "connected"):
                     bs.status = "disconnected"

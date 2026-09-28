@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, Field, JsonValue
+from pydantic import AwareDatetime, Field, JsonValue, TypeAdapter, ValidationError
 
 from .base import ConfigModel
 
@@ -224,6 +224,30 @@ EvidenceRecord = Annotated[
     | DiagnosticRecord,
     Field(discriminator="kind"),
 ]
+
+# Reuse this exact discriminated union at producer, spool, client, and API seams.
+EvidenceRecordAdapter = TypeAdapter(EvidenceRecord)
+
+
+class EvidenceRecordValidationError(ValueError):
+    """Safe, content-free description of a producer-side evidence contract failure."""
+
+    def __init__(self, *, event_kind: str | None, validation_location: str):
+        super().__init__("Evidence record failed contract validation")
+        self.event_kind = event_kind
+        self.validation_location = validation_location
+
+
+def validate_evidence_record(record: dict) -> Record:
+    try:
+        return EvidenceRecordAdapter.validate_python(record)
+    except ValidationError as exc:
+        first = exc.errors(include_input=False)[0]
+        kind = record.get("kind")
+        raise EvidenceRecordValidationError(
+            event_kind=kind if isinstance(kind, str) else None,
+            validation_location=".".join(str(part) for part in first["loc"]),
+        ) from None
 
 
 class EvidenceBatch(ConfigModel):

@@ -10,6 +10,7 @@ import asyncio
 import os
 import re
 from collections.abc import Awaitable, Callable
+from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -26,6 +27,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
+    LLMAssistantAggregatorParams,
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
@@ -36,6 +38,10 @@ from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.services.sarvam.tts import SarvamTTSService
 from pipecat.turns.user_start import TranscriptionUserTurnStartStrategy, VADUserTurnStartStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat.utils.context.llm_context_summarization import (
+    LLMAutoContextSummarizationConfig,
+    LLMContextSummaryConfig,
+)
 from pipecat.workers.runner import WorkerRunner
 
 from voice_runtime.call_capture import CallCapture
@@ -485,6 +491,8 @@ class NativePipelineHost:
         self._nodes: dict[str, dict] = {}
         self._snapshot: dict = {}
         self._verbatim_opening: str | None = None
+        self._exchange_count = 0
+        self._classifier_cadence_running = False
 
     def _node(self, key: str) -> NodeConfig:
         """Adapt one saved graph node into Pipecat's native NodeConfig shape."""
@@ -496,7 +504,13 @@ class NativePipelineHost:
         if "initial_node" not in flow and not role_message:
             # Compatibility for pre-Pipecat snapshots used by older evidence tests.
             role_message = node.get("prompt", "")
-        exposed_tools = set(node["tool_bindings"])
+        transitions = node.get("transitions", [])
+        node_bindings = [
+            name
+            for name in node["tool_bindings"]
+            if name != "change_node" or transitions
+        ]
+        exposed_tools = set(node_bindings)
         role_message = compile_tool_references(role_message or "", exposed_tools)
         task_messages = []
         if node.get("prompt"):
@@ -518,14 +532,19 @@ class NativePipelineHost:
             )
         bindings = self._snapshot["_resolved"]["tools"]
         functions = []
-        for name in node["tool_bindings"]:
+        for name in node_bindings:
             tool = bindings[name]["definition"]
             parameters = tool["parameters"]
+            properties = deepcopy(parameters.get("properties", {}))
+            if name == "change_node":
+                node_property = properties.get("node")
+                if isinstance(node_property, dict):
+                    node_property["enum"] = list(transitions)
             functions.append(
                 FlowsFunctionSchema(
                     name=name,
                     description=tool["description"],
-                    properties=parameters.get("properties", {}),
+                    properties=properties,
                     required=parameters.get("required", []),
                     handler=self._handler(name),
                 )
@@ -562,7 +581,7 @@ class NativePipelineHost:
         self._end_task = asyncio.create_task(self.worker.cancel())
 
     async def _run_node_classifier(
-        self, phase: str, node_key: str
+        self, phase: str, node_key: str, *, force: bool = False
     ) -> tuple[str, dict[str, str]] | None:
         """Run one configured node classifier and return its context message."""
         classifier_cfg = self._snapshot.get("classifier", {})
@@ -571,7 +590,9 @@ class NativePipelineHost:
         configured_nodes = classifier_cfg.get(
             "node_entries" if phase == "entry" else "node_exits", []
         )
-        if node_key not in configured_nodes or self.tracker is None:
+        if not force and node_key not in configured_nodes:
+            return None
+        if self.tracker is None:
             return None
 
         transcript = _extract_transcript(getattr(self, "context", None), self.tracker)
@@ -641,6 +662,30 @@ class NativePipelineHost:
         status = "failed" if error else "completed"
         result_id, message = self.tracker.finish_classifier(operation, status, result, error=error)
         return result_id, message
+
+    async def _run_classifier_cadence(self) -> None:
+        """Run the configured classifier after every N finalized caller exchanges."""
+        if self._classifier_cadence_running or not self.flow or not self.context:
+            return
+        config = self._snapshot.get("classifier", {})
+        every_n = config.get("every_n_exchanges")
+        if not config.get("enabled", True) or not every_n or self._exchange_count % every_n:
+            return
+        node_key = self.flow.current_node
+        if not node_key:
+            return
+        self._classifier_cadence_running = True
+        try:
+            result = await self._run_node_classifier("entry", node_key, force=True)
+            if result is not None:
+                _, message = result
+                # The user-turn event fires after Pipecat has pushed the current
+                # context frame. This message is therefore deliberately made
+                # available to the next LLM request, not retroactively injected
+                # into the request already in flight.
+                self.context.add_message(message)
+        finally:
+            self._classifier_cadence_running = False
 
     async def _whatsapp_runtime_config(
         self,
@@ -1385,6 +1430,19 @@ class NativePipelineHost:
             required_credentials.append(("gemini_api_key", self.settings.gemini_api_key))
         else:
             required_credentials.append(("groq_api_key", self.settings.groq_api_key))
+        summarizer_cfg = snapshot.get("context", {}).get("summarizer", {})
+        if summarizer_cfg.get("enabled"):
+            summary_provider = (summarizer_cfg.get("model") or {}).get(
+                "provider", llm_provider
+            )
+            required_credentials.append(
+                (
+                    "gemini_api_key" if summary_provider == "gemini" else "groq_api_key",
+                    self.settings.gemini_api_key
+                    if summary_provider == "gemini"
+                    else self.settings.groq_api_key,
+                )
+            )
         for name, value in required_credentials:
             if not value:
                 raise ValueError(f"{name} is not configured")
@@ -1432,6 +1490,56 @@ class NativePipelineHost:
             )
         else:
             raise ValueError("Unsupported LLM provider")
+
+        summarizer_cfg = snapshot.get("context", {}).get("summarizer", {})
+        assistant_params = None
+        if summarizer_cfg.get("enabled"):
+            summary_model = summarizer_cfg.get("model") or {}
+            summary_provider = summary_model.get("provider", llm_config["provider"])
+            summary_settings = {
+                "model": summary_model.get("model", llm_config["model"]),
+                "temperature": summary_model.get("temperature", 0.4),
+                "max_tokens": summary_model.get(
+                    "max_tokens", summarizer_cfg.get("output_budget_tokens", 512)
+                ),
+            }
+            if summary_model.get("top_p") is not None:
+                summary_settings["top_p"] = summary_model["top_p"]
+            if summary_provider == "groq":
+                summary_llm = GroqLLMService(
+                    api_key=self.settings.groq_api_key,
+                    settings=GroqLLMService.Settings(
+                        **summary_settings,
+                        reasoning_effort="none",
+                    ),
+                )
+            elif summary_provider == "gemini":
+                summary_llm = GoogleLLMService(
+                    api_key=self.settings.gemini_api_key,
+                    settings=GoogleLLMService.Settings(**summary_settings),
+                )
+            else:
+                raise ValueError(f"Unsupported summarizer provider: {summary_provider}")
+
+            summary_config = LLMContextSummaryConfig(
+                target_context_tokens=summarizer_cfg.get("output_budget_tokens", 512),
+                min_messages_after_summary=summarizer_cfg.get("preserve_recent_messages", 6),
+                summarization_prompt=summarizer_cfg.get("prompt"),
+                llm=summary_llm,
+            )
+            assistant_params = LLMAssistantAggregatorParams(
+                enable_auto_context_summarization=True,
+                auto_context_summarization_config=LLMAutoContextSummarizationConfig(
+                    max_context_tokens=summarizer_cfg.get("context_window_tokens", 8192),
+                    # Pipecat measures messages; a normal caller/assistant
+                    # exchange contributes two messages. Tool messages may
+                    # cause an earlier safe compaction.
+                    max_unsummarized_messages=max(
+                        2, int(summarizer_cfg.get("every_n_exchanges", 10)) * 2
+                    ),
+                    summary_config=summary_config,
+                ),
+            )
         tts_config = snapshot["tts"]
         vad_config = snapshot["vad"]
         vad = SileroVADAnalyzer(
@@ -1480,6 +1588,7 @@ class NativePipelineHost:
         aggregators = LLMContextAggregatorPair(
             context,
             user_params=build_user_aggregator_params(snapshot, vad),
+            assistant_params=assistant_params,
         )
 
         @aggregators.user().event_handler("on_user_turn_idle")
@@ -1500,6 +1609,11 @@ class NativePipelineHost:
             self.observer.record_turn_event(
                 "user_turn_inference_triggered", strategy=type(strategy).__name__
             )
+
+        @aggregators.user().event_handler("on_user_turn_message_added")
+        async def on_user_turn_message_added(_aggregator, _message):
+            self._exchange_count += 1
+            await self._run_classifier_cadence()
 
         @aggregators.user().event_handler("on_user_turn_stop_timeout")
         async def on_user_turn_stop_timeout(_aggregator):

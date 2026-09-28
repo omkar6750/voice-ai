@@ -9,7 +9,19 @@ from collections.abc import Mapping
 from typing import Any, Protocol
 from uuid import uuid4
 
+from voice_runtime.contracts.diagnostics import DiagnosticPayload
+from voice_runtime.contracts.evidence import (
+    EvidenceRecordValidationError,
+    validate_evidence_record,
+)
 from voice_runtime.execution.redaction import redact
+
+BACKGROUND_OPERATION_CATEGORIES: set[str] = {
+    "classifier",
+    "summarizer",
+    "summary",
+    "composer",
+}
 
 
 class RecordSink(Protocol):
@@ -52,29 +64,38 @@ class ExchangeTracker:
         **data: Any,
     ) -> str:
         record_id = record_id or uuid4().hex
-        self.sink.submit(
-            redact(
-                {
-                    "id": record_id,
-                    "run_id": self.run_id,
-                    "kind": kind,
-                    **({"exchange_id": exchange_id} if exchange_id is not None else {}),
-                    "timestamp_ns": time.time_ns(),
-                    **data,
-                },
-                self._secrets,
-            )
+        record = redact(
+            {
+                "id": record_id,
+                "run_id": self.run_id,
+                "kind": kind,
+                **({"exchange_id": exchange_id} if exchange_id is not None else {}),
+                "timestamp_ns": time.time_ns(),
+                **data,
+            },
+            self._secrets,
         )
+        try:
+            typed_record = validate_evidence_record(record)
+        except EvidenceRecordValidationError as exc:
+            fail = getattr(self.sink, "fail", None)
+            if callable(fail):
+                fail(exc)
+            raise
+        self.sink.submit(typed_record.model_dump(mode="json"))
         return record_id
 
     def diagnostic(self, **fields: Any) -> str:
         """Emit one normalized diagnostic into the same durable evidence spool."""
         diagnostic_id = fields.pop("diagnostic_id", None) or uuid4().hex
+        # diagnostic_dict also serves progress; evidence uses timestamp_ns instead.
+        fields.pop("occurred_at", None)
+        payload = DiagnosticPayload.model_validate(fields).model_dump(mode="json")
         return self.emit(
             "diagnostic",
             record_id=diagnostic_id,
             diagnostic_id=diagnostic_id,
-            **fields,
+            **payload,
         )
 
     def begin(self, origin: str) -> str:
@@ -238,6 +259,7 @@ class ExchangeTracker:
             operation_id
             for operation_id, operation in self._active_operations.items()
             if operation["category"] not in {"speech", "stt"}
+            and operation["category"] not in BACKGROUND_OPERATION_CATEGORIES
         ]
         tool_ids = list(self._active_tools)
         self.emit(
@@ -519,9 +541,10 @@ class ExchangeTracker:
                 output_state = "not_applicable"
             elif measured["output_payload"] is None:
                 output_state = "not_recorded"
-            elif isinstance(measured["output_payload"], dict) and measured["output_payload"].get(
-                "text"
-            ) == "":
+            elif (
+                isinstance(measured["output_payload"], dict)
+                and measured["output_payload"].get("text") == ""
+            ):
                 output_state = "empty"
             else:
                 output_state = "recorded"

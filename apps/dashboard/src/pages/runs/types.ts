@@ -120,33 +120,7 @@ export type FlowVisit = {
   triggered_by_tool_id: string | null;
 };
 
-export type Timeline = {
-  run: {
-    id: string;
-    status: string;
-    agent_id: string;
-    agent_version_id: string;
-  };
-  call: {
-    id: string;
-    status: string;
-    provider: string;
-    provider_call_id: string | null;
-    answered_at: string | null;
-    ended_at: string | null;
-  } | null;
-  exchanges: Exchange[];
-  messages: Message[];
-  spans: Span[];
-  tools: Tool[];
-  tool_results: ToolResult[];
-  tool_context_deliveries: ToolContextDelivery[];
-  classifier_results: ClassifierResult[];
-  classifier_context_deliveries: ClassifierContextDelivery[];
-  interruptions: Interruption[];
-  diagnostics: Diagnostic[];
-  flow_visits: FlowVisit[];
-};
+export type Timeline = components["schemas"]["TimelineResponse"];
 
 export type Artifact = {
   id: string;

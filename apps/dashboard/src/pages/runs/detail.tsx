@@ -4,6 +4,7 @@ import { Activity, ArrowLeft, FileAudio, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { useApi, useOperatorToken } from "@/app/api";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -347,6 +348,9 @@ export function RunDetailPage() {
               <span>
                 Exchanges <strong>{timeline.exchanges.length}</strong>
               </span>
+              {timeline.run.evidence_complete === false && (
+                <Badge variant="destructive">Evidence incomplete · replay required</Badge>
+              )}
               <span>
                 Provider operations <strong>{timeline.spans.length}</strong>
               </span>

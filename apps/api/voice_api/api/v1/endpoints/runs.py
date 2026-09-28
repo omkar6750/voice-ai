@@ -132,7 +132,9 @@ async def get_run(run_id: str, session: AsyncSession = Session, _: None = Operat
 
 
 @router.get("/runs/{run_id}/timeline", response_model=TimelineResponse)
-async def timeline(run_id: str, session: AsyncSession = Session, _: None = Operator) -> TimelineResponse:
+async def timeline(
+    run_id: str, session: AsyncSession = Session, _: None = Operator
+) -> TimelineResponse:
     run = await session.get(Run, run_id)
     if run is None:
         raise HTTPException(404, "Run not found")
@@ -171,6 +173,12 @@ async def timeline(run_id: str, session: AsyncSession = Session, _: None = Opera
             "status": run.status,
             "agent_id": (await session.get(AgentVersion, run.agent_version_id)).agent_id,
             "agent_version_id": run.agent_version_id,
+            "evidence_complete": (
+                not run.final_state["evidence_incomplete"]
+                if isinstance(run.final_state, dict)
+                and isinstance(run.final_state.get("evidence_incomplete"), bool)
+                else None
+            ),
         },
         "call": None
         if call is None

@@ -37,6 +37,7 @@ from voice_runtime.contracts.evidence import (
     InterruptionRecord,
     MessageRecord,
     OperationEnded,
+    OperationStarted,
     ToolEnded,
     ToolResultConsumed,
     ToolResultContextUpdated,
@@ -192,13 +193,25 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
         return
     if isinstance(record, ClassifierResultRecorded):
         operation = await session.get(TraceSpan, record.operation_id)
-        if (
-            operation is None
-            or operation.run_id != run_id
-            or operation.category != "classifier"
-            or operation.status != record.status
-        ):
-            raise HTTPException(422, "Classifier result needs a matching finalized classifier operation")
+        if operation is None:
+            session.add(
+                TraceSpan(
+                    id=record.operation_id,
+                    run_id=run_id,
+                    name="classifier",
+                    category="classifier",
+                    status=record.status,
+                    started_at=at_ns(record.timestamp_ns),
+                    ended_at=at_ns(record.timestamp_ns),
+                )
+            )
+        else:
+            if operation.run_id != run_id:
+                raise HTTPException(422, "Classifier operation belongs to different run")
+            operation.category = "classifier"
+            operation.status = record.status
+            if operation.ended_at is None:
+                operation.ended_at = at_ns(record.timestamp_ns)
         fields = {
             "run_id": run_id,
             "operation_id": record.operation_id,
@@ -444,9 +457,7 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
         delivery = await session.get(ToolContextDelivery, record.delivery_id)
         if delivery is None:
             existing = await session.scalar(
-                select(ToolContextDelivery).where(
-                    ToolContextDelivery.result_id == record.result_id
-                )
+                select(ToolContextDelivery).where(ToolContextDelivery.result_id == record.result_id)
             )
             if existing is not None:
                 verify_same(existing, fields)
@@ -482,9 +493,7 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
             if operation is None or operation.run_id != run_id:
                 raise HTTPException(422, "Consuming operation must belong to run")
             delivery = await session.scalar(
-                select(ToolContextDelivery).where(
-                    ToolContextDelivery.result_id == record.result_id
-                )
+                select(ToolContextDelivery).where(ToolContextDelivery.result_id == record.result_id)
             )
             if delivery is not None:
                 delivery_fields = {
@@ -520,7 +529,7 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
             verify_same(row, fields)
         else:
             session.add(ConversationMessage(id=record.id, **fields))
-    else:
+    elif isinstance(record, (OperationStarted, OperationEnded)):
         fields = dict(
             run_id=run_id,
             exchange_id=record.exchange_id,
@@ -572,6 +581,8 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
             if row.attributes is not None:
                 verify_same(row, {"attributes": record.attributes})
             row.attributes = record.attributes
+    else:
+        raise TypeError(f"Evidence mapping is missing for {type(record).__name__}")
     await session.flush()
 
 

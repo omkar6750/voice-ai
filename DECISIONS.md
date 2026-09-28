@@ -10,3 +10,5 @@
 | [ADR-0006](docs/adr/ADR-0006-versioned-configuration.md) | Published configuration, draft concurrency and mutable KB; revision 2 per user request | Accepted |
 | [ADR-0007](docs/adr/ADR-0007-exchanges-and-integration-secrets.md) | Run-owned evidence, provider-neutral calls and encrypted integrations; revision 2 per user request | Accepted |
 | [ADR-0017](docs/adr/ADR-0017-on-demand-endpoint-probing.md) | On-demand modem probe with five-second monitoring while connected | Accepted |
+| [ADR-0020](docs/adr/ADR-0020-node-scoped-transition-tool-schemas.md) | Scope `change_node` destinations to each flow node's transitions | Accepted |
+| [ADR-0021](docs/adr/ADR-0021-typed-evidence-and-shared-delivery.md) | Validate evidence events end-to-end, unify final draining, and recover durable spool records safely | Accepted |

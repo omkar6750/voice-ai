@@ -13,6 +13,7 @@ class TimelineRun(BaseModel):
     status: str
     agent_id: str
     agent_version_id: str
+    evidence_complete: bool | None = None
 
 
 class TimelineCall(BaseModel):

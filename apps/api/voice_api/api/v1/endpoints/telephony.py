@@ -33,8 +33,8 @@ from voice_api.services.call_service import (
 from voice_api.services.diagnostic_service import persist_diagnostic
 from voice_api.services.twilio_service import resolve_twilio_credentials
 from voice_runtime.diagnostics import text_error_diagnostic
-from voice_runtime.execution.delivery import stream_evidence
-from voice_runtime.execution.evidence_client import ApiEvidenceIngestor
+from voice_runtime.execution.delivery import finalize_evidence, stream_evidence, supervise_execution
+from voice_runtime.execution.evidence_client import ApiEvidenceIngestor, EvidenceDeliveryError
 from voice_runtime.execution.exchange import ExchangeTracker
 from voice_runtime.execution.native import NativePipelineHost
 from voice_runtime.execution.spool import DurableSpool
@@ -275,21 +275,25 @@ async def twilio_media_endpoint(
     ) as client:
         ingestor = ApiEvidenceIngestor(client, run_id, settings.operator_token or "")
         delivery_task = asyncio.create_task(stream_evidence(spool, ingestor))
+        execution_failed = False
 
         try:
-            await host.prepare(snapshot, tracker, transport=transport)
-            await host.converse(lifecycle)
+
+            async def execute_pipeline() -> None:
+                await host.prepare(snapshot, tracker, transport=transport)
+                await host.converse(lifecycle)
+
+            await supervise_execution(execute_pipeline(), delivery_task)
         except Exception as exc:
+            execution_failed = True
             logger.exception("Twilio pipeline failed during run {}: {}", run_id, exc)
             async with SessionFactory() as session:
                 r = await session.get(Run, run_id)
-                if r:
+                if r and not isinstance(exc, EvidenceDeliveryError):
                     await persist_diagnostic(
                         session,
                         run_id,
-                        DiagnosticInput.model_validate(
-                            text_error_diagnostic(str(exc))
-                        ),
+                        DiagnosticInput.model_validate(text_error_diagnostic(str(exc))),
                     )
                 if r and r.status not in ("completed", "canceled"):
                     r.status = "failed"
@@ -302,18 +306,36 @@ async def twilio_media_endpoint(
                 await session.commit()
         finally:
             lifecycle.mark_ended()
-            await host.close()
-            delivery_task.cancel()
+            try:
+                await host.close()
+            except Exception:
+                execution_failed = True
+                logger.exception("Twilio runtime cleanup failed for run {}", run_id)
+            finalization = await finalize_evidence(spool, ingestor, delivery_task)
 
             async with SessionFactory() as session:
                 r = await session.get(Run, run_id)
+                if finalization.diagnostic:
+                    await persist_diagnostic(
+                        session,
+                        run_id,
+                        DiagnosticInput.model_validate(finalization.diagnostic),
+                    )
                 if r and r.status in ("claimed", "running"):
-                    r.status = "completed"
+                    r.status = "failed" if execution_failed else "completed"
+                    r.final_state = {"evidence_incomplete": finalization.incomplete}
+                    if execution_failed and not r.error:
+                        r.error = "Twilio pipeline stopped before normal completion"
                     if not r.ended_at:
                         r.ended_at = now()
+                elif r:
+                    r.final_state = {
+                        **(r.final_state or {}),
+                        "evidence_incomplete": finalization.incomplete,
+                    }
                 c = await session.get(Call, call_id)
                 if c and c.status in ("dialing", "ringing", "active"):
-                    c.status = "completed"
+                    c.status = "failed" if execution_failed else "completed"
                     if not c.ended_at:
                         c.ended_at = now()
                 await session.commit()

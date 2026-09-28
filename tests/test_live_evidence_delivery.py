@@ -6,10 +6,26 @@ import threading
 
 import httpx
 import pytest
-from voice_runtime.execution.delivery import stream_evidence
+from voice_runtime.execution.delivery import (
+    finalize_evidence,
+    stream_evidence,
+    supervise_execution,
+)
 from voice_runtime.execution.evidence_client import ApiEvidenceIngestor, EvidenceDeliveryError
 from voice_runtime.execution.runner import execute_call
 from voice_runtime.execution.spool import DurableSpool
+
+
+def valid_record(record_id="stable"):
+    return {
+        "id": record_id,
+        "run_id": "run",
+        "kind": "exchange",
+        "exchange_id": "exchange",
+        "timestamp_ns": 1,
+        "origin": "greeting",
+        "sequence": 1,
+    }
 
 
 class FakeControl:
@@ -89,7 +105,7 @@ async def test_spool_close_failure_reports_terminal_failure(tmp_path, monkeypatc
     monkeypatch.setattr(DurableSpool, "close", broken_close)
     control = FakeControl()
     driver = WaitingDriver(control)
-    assert await run(control, driver, tmp_path / "call.jsonl") == "failed"
+    assert await run(control, driver, tmp_path / "call.jsonl") == "completed"
     assert driver.closed
     terminal = control.progress[-1]
     assert terminal["transport_released"]
@@ -153,9 +169,31 @@ async def test_http_failures_have_explicit_retry_policy(status, retryable):
     assert "secret" not in str(caught.value)
 
 
+async def test_invalid_legacy_event_fails_locally_with_safe_coordinates():
+    requests = []
+
+    def receive(request):
+        requests.append(request)
+        return httpx.Response(200, json={"accepted": 1})
+
+    invalid = {**valid_record(), "occurred_at": "2026-09-27T13:00:00Z"}
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(receive), base_url="http://test"
+    ) as client:
+        with pytest.raises(EvidenceDeliveryError) as caught:
+            await ApiEvidenceIngestor(client, "run", "secret").ingest([invalid])
+
+    assert not requests
+    assert caught.value.failure_kind == "invalid_record"
+    assert caught.value.event_index == 0
+    assert caught.value.event_kind == "exchange"
+    assert caught.value.validation_location == "records.0.exchange.occurred_at"
+    assert "secret" not in str(caught.value)
+
+
 async def test_transient_failure_replays_same_batch(tmp_path):
     spool = DurableSpool(tmp_path / "call.jsonl")
-    spool.submit({"id": "stable"})
+    spool.submit(valid_record())
     await spool.flush()
     seen = []
     delivered = asyncio.Event()
@@ -176,16 +214,95 @@ async def test_transient_failure_replays_same_batch(tmp_path):
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         # Cancellation may precede acknowledgement. Replaying remains safe.
-        assert seen[:2] == [[{"id": "stable"}], [{"id": "stable"}]]
+        assert seen[:2] == [[valid_record()], [valid_record()]]
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         await spool.close()
 
 
+async def test_final_drain_reports_permanent_failure_without_acknowledging(tmp_path):
+    spool = DurableSpool(tmp_path / "call.jsonl")
+    spool.submit(valid_record())
+    await spool.flush()
+
+    class Ingestor:
+        async def ingest(self, records):
+            failed.set()
+            raise EvidenceDeliveryError(
+                retryable=False,
+                failure_kind="invalid_record",
+                event_index=0,
+                event_kind="diagnostic",
+                validation_location="records.0.occurred_at",
+            )
+
+    failed = asyncio.Event()
+    delivery_task = asyncio.create_task(stream_evidence(spool, Ingestor(), poll_seconds=0.01))
+    async with asyncio.timeout(3):
+        await failed.wait()
+        await asyncio.gather(delivery_task, return_exceptions=True)
+    finalized = await finalize_evidence(spool, Ingestor(), delivery_task)
+
+    assert finalized.incomplete
+    assert finalized.diagnostic["metadata"] == {
+        "failure_kind": "invalid_record",
+        "event_index": 0,
+        "event_kind": "diagnostic",
+        "validation_location": "records.0.occurred_at",
+    }
+    assert not (tmp_path / "call.ack").exists()
+
+
+async def test_invalid_producer_record_is_not_appended_and_marks_evidence_incomplete(tmp_path):
+    spool = DurableSpool(tmp_path / "call.jsonl")
+    spool.submit(valid_record())
+    await spool.flush()
+    size_before = spool.path.stat().st_size
+    invalid = {**valid_record("bad-record"), "occurred_at": "wrong-envelope"}
+
+    with pytest.raises(ValueError):
+        spool.submit(invalid)
+
+    assert spool.path.stat().st_size == size_before
+    assert spool.error is not None
+
+    class Ingestor:
+        async def ingest(self, records):
+            pytest.fail("A latched producer validation failure must not upload")
+
+    finalized = await finalize_evidence(spool, Ingestor(), None)
+
+    assert finalized.incomplete
+    assert finalized.diagnostic["metadata"] == {
+        "failure_kind": "invalid_record",
+        "event_kind": "exchange",
+        "validation_location": "exchange.occurred_at",
+    }
+    assert not (tmp_path / "call.ack").exists()
+
+
+async def test_delivery_failure_cancels_active_execution():
+    stopped = asyncio.Event()
+
+    async def live_execution():
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    async def failed_delivery():
+        raise EvidenceDeliveryError(retryable=False, failure_kind="invalid_record")
+
+    delivery = asyncio.create_task(failed_delivery())
+    with pytest.raises(EvidenceDeliveryError):
+        await asyncio.wait_for(supervise_execution(live_execution(), delivery), timeout=3)
+    assert stopped.is_set()
+
+
 async def test_disk_failure_detected_while_http_is_blocked(tmp_path):
     spool = DurableSpool(tmp_path / "call.jsonl")
-    spool.submit({"id": "stable"})
+    spool.submit(valid_record())
     await spool.flush()
     started = asyncio.Event()
     cancelled = asyncio.Event()
@@ -235,7 +352,7 @@ async def test_permanent_rejection_stops_call_without_retry(tmp_path):
 
 async def test_cancellation_waits_for_cursor_thread(tmp_path, monkeypatch):
     spool = DurableSpool(tmp_path / "call.jsonl")
-    spool.submit({"id": "stable"})
+    spool.submit(valid_record())
     await spool.flush()
     started = threading.Event()
     release = threading.Event()

@@ -1,6 +1,7 @@
 """Off-audio-path HTTP adapter for DurableSpool; acknowledgement follows API commit."""
 
 import httpx
+from pydantic import ValidationError
 
 from voice_runtime.contracts.evidence import EvidenceBatch
 
@@ -8,9 +9,21 @@ from voice_runtime.contracts.evidence import EvidenceBatch
 class EvidenceDeliveryError(RuntimeError):
     """Sanitized failure; only transient, replay-safe ingestion may retry."""
 
-    def __init__(self, *, retryable: bool):
+    def __init__(
+        self,
+        *,
+        retryable: bool,
+        failure_kind: str | None = None,
+        event_index: int | None = None,
+        event_kind: str | None = None,
+        validation_location: str | None = None,
+    ):
         super().__init__("Evidence delivery failed; spool remains unacknowledged")
         self.retryable = retryable
+        self.failure_kind = failure_kind
+        self.event_index = event_index
+        self.event_kind = event_kind
+        self.validation_location = validation_location
 
 
 class ApiEvidenceIngestor:
@@ -20,7 +33,21 @@ class ApiEvidenceIngestor:
         self._token = operator_token
 
     async def ingest(self, records: list[dict]) -> None:
-        batch = EvidenceBatch(records=records)
+        try:
+            batch = EvidenceBatch(records=records)
+        except ValidationError as exc:
+            # Pydantic errors can contain transcript input; retain safe coordinates only.
+            first = exc.errors(include_input=False)[0]
+            event_index = _record_index(first["loc"])
+            event_kind = _record_kind(records, event_index)
+            location = ".".join(str(part) for part in first["loc"])
+            raise EvidenceDeliveryError(
+                retryable=False,
+                failure_kind="invalid_record",
+                event_index=event_index,
+                event_kind=event_kind,
+                validation_location=location,
+            ) from None
         if any(record.run_id != self._run_id for record in batch.records):
             raise ValueError("Spool contains a different run")
         try:
@@ -42,3 +69,14 @@ class ApiEvidenceIngestor:
             raise EvidenceDeliveryError(retryable=True) from None
         except (httpx.HTTPError, ValueError):
             raise EvidenceDeliveryError(retryable=False) from None
+
+
+def _record_index(location: tuple) -> int | None:
+    return location[1] if len(location) > 1 and isinstance(location[1], int) else None
+
+
+def _record_kind(records: list[dict], index: int | None) -> str | None:
+    if index is None or index >= len(records):
+        return None
+    kind = records[index].get("kind")
+    return kind if isinstance(kind, str) else None

@@ -32,11 +32,6 @@ export type CadenceConfig = {
   node_entries?: string[];
   node_exits?: string[];
   every_n_exchanges?: number | null;
-  interval_secs?: number | null;
-  explicit_requests?: boolean;
-  on_finalization?: boolean;
-  cooldown_secs?: number;
-  max_attempts?: number;
 };
 
 export type JevQuestion = {
@@ -64,13 +59,6 @@ export type ClassifierConfig = CadenceConfig & {
   };
   jev?: JevClassifierConfig & { output_fields?: string[] };
   max_result_chars?: number;
-  include_confidence?: boolean;
-  include_probabilities?: boolean;
-  answer_signals?: string[];
-  topic_signals?: string[];
-  keywords?: string[];
-  confidence_threshold?: number;
-  consecutive_verdicts?: number;
 };
 
 export type SummarizerConfig = AgentConfig["context"]["summarizer"];

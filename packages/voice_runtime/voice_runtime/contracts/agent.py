@@ -68,9 +68,16 @@ class FlowConfig(ConfigModel):
 
 
 class ContextConfig(ConfigModel):
-    prune_node_ids: list[Identifier] = Field(default_factory=lambda: ["greeting"])
-    remove_transition_tool_pairs: bool = True
     summarizer: SummarizerConfig = Field(default_factory=SummarizerConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_unsupported_pruning_controls(cls, value):
+        if isinstance(value, dict):
+            value = dict(value)
+            value.pop("prune_node_ids", None)
+            value.pop("remove_transition_tool_pairs", None)
+        return value
 
 
 class LanguageConfig(ConfigModel):

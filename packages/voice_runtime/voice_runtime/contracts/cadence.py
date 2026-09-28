@@ -13,11 +13,36 @@ class CadenceConfig(ConfigModel):
     node_entries: list[Identifier] = Field(default_factory=list)
     node_exits: list[Identifier] = Field(default_factory=list)
     every_n_exchanges: int | None = Field(default=None, gt=0)
-    interval_secs: float | None = Field(default=None, gt=0)
-    explicit_requests: bool = True
-    on_finalization: bool = False
-    cooldown_secs: float = Field(default=0, ge=0)
-    max_attempts: int = Field(default=100, gt=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_unsupported_legacy_controls(cls, value):
+        """Keep old drafts readable while removing controls with no runtime owner."""
+        if isinstance(value, dict):
+            value = dict(value)
+            for key in (
+                "interval_secs",
+                "explicit_requests",
+                "on_finalization",
+                "cooldown_secs",
+                "max_attempts",
+                "include_confidence",
+                "include_probabilities",
+                "answer_signals",
+                "topic_signals",
+                "keywords",
+                "confidence_threshold",
+                "consecutive_verdicts",
+                "unsummarized_messages",
+                "unsummarized_exchanges",
+                "token_threshold",
+                "compaction_threshold",
+                "hard_ceiling",
+                "target_ratio",
+                "preserve_opening_messages",
+            ):
+                value.pop(key, None)
+        return value
 
 
 class JevQuestion(ConfigModel):
@@ -91,13 +116,6 @@ class ClassifierConfig(CadenceConfig):
     llm: ClassifierLLMConfig | None = Field(default_factory=ClassifierLLMConfig)
     jev: JevClassifierConfig | None = None
     max_result_chars: int = Field(default=512, gt=0, le=4096)
-    include_confidence: bool = False
-    include_probabilities: bool = False
-    answer_signals: list[str] = Field(default_factory=list)
-    topic_signals: list[str] = Field(default_factory=list)
-    keywords: list[str] = Field(default_factory=list)
-    confidence_threshold: float = Field(default=0.8, ge=0, le=1)
-    consecutive_verdicts: int = Field(default=1, gt=0)
 
     @model_validator(mode="before")
     @classmethod
@@ -133,24 +151,18 @@ class ClassifierConfig(CadenceConfig):
 
 class SummarizerConfig(CadenceConfig):
     enabled: bool = False
+    every_n_exchanges: int = Field(default=10, gt=0)
     model: LLMConfig = Field(default_factory=lambda: LLMConfig(max_tokens=512))
     prompt: str = "Summarize the supplied history faithfully; preserve decisions and facts."
-    answer_signals: list[str] = Field(default_factory=list)
-    topic_signals: list[str] = Field(default_factory=list)
-    keywords: list[str] = Field(default_factory=list)
-    unsummarized_messages: int = Field(default=20, gt=0)
-    unsummarized_exchanges: int | None = Field(default=None, gt=0)
-    token_threshold: int | None = Field(default=None, gt=0)
     context_window_tokens: int = Field(default=8192, gt=0)
-    compaction_threshold: float = Field(default=0.7, gt=0, lt=1)
-    hard_ceiling: float = Field(default=0.9, gt=0, le=1)
-    target_ratio: float = Field(default=0.4, gt=0, lt=1)
     output_budget_tokens: int = Field(default=512, gt=0)
-    preserve_opening_messages: int = Field(default=2, ge=0)
     preserve_recent_messages: int = Field(default=6, ge=0)
 
-    @model_validator(mode="after")
-    def ordered_budgets(self):
-        if not self.target_ratio < self.compaction_threshold < self.hard_ceiling:
-            raise ValueError("require target_ratio < compaction_threshold < hard_ceiling")
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_exchange_cadence(cls, value):
+        """Treat historical JSON null as the current summarizer default."""
+        if isinstance(value, dict) and value.get("every_n_exchanges") is None:
+            value = dict(value)
+            value.pop("every_n_exchanges", None)
+        return value

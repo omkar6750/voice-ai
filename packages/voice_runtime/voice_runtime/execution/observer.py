@@ -290,7 +290,8 @@ class EvidenceObserver(BaseObserver):
         self.tracker.finish_operation(
             self.stt_operation,
             "failed",
-            output_state="missing_final_transcription",
+            output_state="failed",
+            failure_reason="missing_final_transcription",
         )
         self.tracker.diagnostic(
             severity="warning",

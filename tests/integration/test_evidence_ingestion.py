@@ -5,7 +5,20 @@ from time import time_ns
 
 import pytest
 from sqlalchemy import func, select
-from voice_api.models import ConversationMessage, Exchange, TraceSpan
+from voice_api.models import (
+    ClassifierContextDelivery,
+    ClassifierResult,
+    ConversationMessage,
+    Exchange,
+    FlowNodeVisit,
+    InterruptionEvent,
+    Run,
+    RunDiagnostic,
+    ToolContextDelivery,
+    ToolInvocation,
+    ToolInvocationResult,
+    TraceSpan,
+)
 from voice_api.models.common import new_id
 from voice_runtime.execution.evidence_client import ApiEvidenceIngestor
 from voice_runtime.execution.exchange import ExchangeTracker
@@ -123,7 +136,203 @@ async def test_spool_delivery_and_replay(client, database, tmp_path):
         await spool.close()
 
 
-async def test_batch_failure_rolls_back_and_does_not_ack(client, database, tmp_path):
+async def test_every_evidence_variant_maps_to_its_database_row(client, database):
+    run_id = await browser_run(client)
+    run = await database.get(Run, run_id)
+    config = dict(run.resolved_config)
+    config["_resolved"] = {
+        "tools": {"send_message": {"version_id": "tool-v1", "definition": {}}}
+    }
+    run.resolved_config = config
+    await database.commit()
+
+    now_ns = time_ns()
+    exchange_id, llm_id, consume_id = new_id(), new_id(), new_id()
+    classifier_id, invocation_id, result_id = new_id(), new_id(), new_id()
+    visit_id, flow_span_id = new_id(), new_id()
+    classifier_result_id = new_id()
+
+    def record(kind, **values):
+        return {
+            "id": new_id(),
+            "run_id": run_id,
+            "timestamp_ns": now_ns,
+            "kind": kind,
+            **values,
+        }
+
+    def operation(operation_id, name, category, status, index):
+        start = now_ns + index * 1_000_000
+        start_record = record(
+            "operation_started",
+            operation_id=operation_id,
+            name=name,
+            category=category,
+            started_ns=start,
+        )
+        ended_record = {
+            **start_record,
+            "id": new_id(),
+            "kind": "span",
+            "timestamp_ns": start + 100_000_000,
+            "ended_ns": start + 100_000_000,
+            "duration_ms": 100,
+            "status": status,
+        }
+        return start_record, ended_record
+
+    llm_start, llm_end = operation(llm_id, "agent inference", "llm", "completed", 1)
+    consume_start, consume_end = operation(
+        consume_id, "tool follow-up", "llm", "completed", 2
+    )
+    classifier_start, classifier_end = operation(
+        classifier_id, "entry classifier", "classifier", "completed", 3
+    )
+    records = [
+        record("exchange", exchange_id=exchange_id, sequence=1, origin="greeting"),
+        record(
+            "flow_visit_started",
+            visit_id=visit_id,
+            span_id=flow_span_id,
+            sequence=1,
+            node_key="greeting",
+            started_ns=now_ns,
+        ),
+        llm_start,
+        llm_end,
+        record(
+            "tool_started",
+            invocation_id=invocation_id,
+            exchange_id=exchange_id,
+            binding_key="send_message",
+            tool_version_id="tool-v1",
+            function_call_id="function-1",
+            llm_operation_id=llm_id,
+            arguments={},
+            started_ns=now_ns + 10_000_000,
+        ),
+        record(
+            "tool_result",
+            id=result_id,
+            invocation_id=invocation_id,
+            sequence=1,
+            payload={"status": "sent"},
+            is_final=True,
+        ),
+        record(
+            "tool_result_context_updated",
+            delivery_id=new_id(),
+            invocation_id=invocation_id,
+            result_id=result_id,
+            function_call_id="function-1",
+            is_final=True,
+            context_message_index=4,
+        ),
+        record(
+            "tool_ended",
+            invocation_id=invocation_id,
+            ended_ns=now_ns + 20_000_000,
+            status="completed",
+            result={"status": "sent"},
+        ),
+        consume_start,
+        consume_end,
+        record(
+            "tool_result_consumed",
+            result_id=result_id,
+            exchange_id=exchange_id,
+            invocation_id=invocation_id,
+            consuming_operation_id=consume_id,
+        ),
+        classifier_start,
+        classifier_end,
+        record(
+            "classifier_result",
+            result_id=classifier_result_id,
+            operation_id=classifier_id,
+            phase="entry",
+            node_key="greeting",
+            classifier_type="llm",
+            status="completed",
+            result={"lead_temperature": "warm"},
+            transcript_sha256="a" * 64,
+        ),
+        record(
+            "classifier_context_updated",
+            delivery_id=new_id(),
+            result_id=classifier_result_id,
+            operation_id=classifier_id,
+            phase="entry",
+            node_key="greeting",
+            context_message_index=5,
+        ),
+        record(
+            "classifier_result_consumed",
+            result_id=classifier_result_id,
+            exchange_id=exchange_id,
+            consuming_operation_id=consume_id,
+        ),
+        record(
+            "interruption",
+            interruption_id=new_id(),
+            exchange_id=exchange_id,
+            source="caller",
+            reason="barge in",
+            frame_type="InterruptionFrame",
+        ),
+        record(
+            "diagnostic",
+            diagnostic_id=new_id(),
+            severity="warning",
+            category="provider_warning",
+            source="provider",
+            message="Provider warning",
+        ),
+        record(
+            "message",
+            exchange_id=exchange_id,
+            sequence=1,
+            role="assistant",
+            content="Hello",
+            source_timestamp=datetime.now(UTC).isoformat(),
+        ),
+        record("exchange_ended", exchange_id=exchange_id, status="completed"),
+        record(
+            "flow_visit_ended",
+            visit_id=visit_id,
+            ended_ns=now_ns + 100_000_000,
+            duration_ms=100,
+            status="completed",
+        ),
+    ]
+    # Exercise every discriminant through API parsing, storage, then idempotent replay.
+    endpoint = f"/api/runs/{run_id}/evidence"
+    body = {"records": records}
+    for _ in range(2):
+        response = await client.post(endpoint, json=body)
+        assert response.status_code == 200, response.text
+        assert response.json()["accepted"] == len(records)
+
+    expected = {
+        Exchange: 1,
+        ConversationMessage: 1,
+        TraceSpan: 4,
+        FlowNodeVisit: 1,
+        ToolInvocation: 1,
+        ToolInvocationResult: 1,
+        ToolContextDelivery: 1,
+        ClassifierResult: 1,
+        ClassifierContextDelivery: 1,
+        InterruptionEvent: 1,
+        RunDiagnostic: 1,
+    }
+    for model, count in expected.items():
+        assert await database.scalar(
+            select(func.count()).select_from(model).where(model.run_id == run_id)
+        ) == count
+
+
+async def test_invalid_record_is_rejected_before_spool_append(client, database, tmp_path):
     run_id = await browser_run(client)
     spool = DurableSpool(tmp_path / "invalid.jsonl")
     try:
@@ -142,10 +351,13 @@ async def test_batch_failure_rolls_back_and_does_not_ack(client, database, tmp_p
             "content": "Missing exchange",
             "source_timestamp": datetime.now(UTC).isoformat(),
         }
-        spool.submit(invalid)
-        await spool.flush()
-        with pytest.raises(RuntimeError, match="unacknowledged"):
-            await spool.deliver_once(ApiEvidenceIngestor(client, run_id, "test-only"))
+        size_before = spool.path.stat().st_size
+        with pytest.raises(ValueError):
+            spool.submit(invalid)
+        assert spool.path.stat().st_size == size_before
+        persisted, _ = spool._read_batch(100)
+        assert len(persisted) == 1
+        assert persisted[0]["kind"] == "exchange"
         assert not spool.cursor_path.exists()
         assert (
             await database.scalar(
@@ -154,4 +366,8 @@ async def test_batch_failure_rolls_back_and_does_not_ack(client, database, tmp_p
             == 0
         )
     finally:
-        await spool.close()
+        if spool.error:
+            with pytest.raises(RuntimeError, match="durable evidence spool failed"):
+                await spool.close()
+        else:
+            await spool.close()

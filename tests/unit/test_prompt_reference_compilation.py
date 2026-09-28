@@ -37,6 +37,7 @@ def test_native_node_compiles_marker_without_changing_saved_prompt():
         "id": "opening",
         "prompt": "Call #change_node(node='closing').",
         "tool_bindings": ["change_node"],
+        "transitions": ["closing"],
         "respond_immediately": True,
         "context_strategy": "append",
         "terminal": False,

@@ -108,13 +108,6 @@ export function ClassifierPanel({
     update({ [listKey]: next });
   }
 
-  function parseList(str: string): string[] {
-    return str
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-  }
-
   // Jev Questions helpers
   const currentJev: NonNullable<typeof classifier.jev> = classifier.jev ?? {
     model: "jev-latest",
@@ -410,55 +403,7 @@ export function ClassifierPanel({
               </div>
             </Field>
 
-            <Field>
-              <FieldLabel htmlFor="classifier-keywords">Trigger keywords</FieldLabel>
-              <Input
-                id="classifier-keywords"
-                placeholder="e.g. urgent, cancel, pricing, discount"
-                value={(classifier.keywords ?? []).join(", ")}
-                disabled={disabled}
-                onChange={(e) => update({ keywords: parseList(e.target.value) })}
-              />
-              <FieldDescription>
-                Comma-separated words that automatically trigger out-of-band evaluation
-              </FieldDescription>
-            </Field>
-
             <div className="grid grid-cols-2 gap-4">
-              <NumberField
-                id="classifier-cooldown"
-                label="Cooldown (seconds)"
-                value={classifier.cooldown_secs ?? 0}
-                min={0}
-                max={300}
-                disabled={disabled}
-                onChange={(val) => update({ cooldown_secs: val })}
-                hint="Minimum seconds between evaluations"
-              />
-              <NumberField
-                id="classifier-confidence"
-                label="Confidence threshold"
-                value={classifier.confidence_threshold ?? 0.8}
-                min={0}
-                max={1}
-                step={0.05}
-                disabled={disabled}
-                onChange={(val) => update({ confidence_threshold: val })}
-                hint="Minimum confidence (0.0 – 1.0)"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <NumberField
-                id="classifier-consecutive"
-                label="Consecutive verdicts"
-                value={classifier.consecutive_verdicts ?? 1}
-                min={1}
-                max={10}
-                disabled={disabled}
-                onChange={(val) => update({ consecutive_verdicts: val })}
-                hint="Verdicts required before state change"
-              />
               <NumberField
                 id="classifier-every-n"
                 label="Every N exchanges"
@@ -467,7 +412,7 @@ export function ClassifierPanel({
                 max={50}
                 disabled={disabled}
                 onChange={(val) => update({ every_n_exchanges: val > 0 ? val : null })}
-                hint="Optional periodic trigger (0 to disable)"
+                hint="Runs after each N completed caller exchanges"
               />
             </div>
           </FieldGroup>
@@ -552,29 +497,6 @@ export function ClassifierPanel({
                   </Field>
                 </div>
 
-                <Field>
-                  <FieldLabel htmlFor="classifier-answer-signals">Answer signals</FieldLabel>
-                  <Input
-                    id="classifier-answer-signals"
-                    placeholder="e.g. agreed_to_demo, requested_callback, declined_offer"
-                    value={(classifier.answer_signals ?? []).join(", ")}
-                    disabled={disabled}
-                    onChange={(e) => update({ answer_signals: parseList(e.target.value) })}
-                  />
-                  <FieldDescription>Comma-separated list of expected answer signals</FieldDescription>
-                </Field>
-
-                <Field>
-                  <FieldLabel htmlFor="classifier-topic-signals">Topic signals</FieldLabel>
-                  <Input
-                    id="classifier-topic-signals"
-                    placeholder="e.g. pricing, integration, timeline, security"
-                    value={(classifier.topic_signals ?? []).join(", ")}
-                    disabled={disabled}
-                    onChange={(e) => update({ topic_signals: parseList(e.target.value) })}
-                  />
-                  <FieldDescription>Comma-separated list of topic signals to monitor</FieldDescription>
-                </Field>
               </FieldGroup>
             </>
           ) : (

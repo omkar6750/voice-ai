@@ -39,7 +39,7 @@ def _host() -> NativePipelineHost:
         "closing": {
             "id": "closing",
             "prompt": "Thank them and end the call.",
-            "tool_bindings": [],
+            "tool_bindings": ["change_node"],
             "transitions": [],
             "respond_immediately": True,
             "context_strategy": "reset",
@@ -64,6 +64,34 @@ def test_saved_node_is_adapted_to_pipecat_node_config_and_function_schema():
     assert len(node["functions"]) == 1
     assert isinstance(node["functions"][0], FlowsFunctionSchema)
     assert node["functions"][0].name == "change_node"
+    assert node["functions"][0].properties["node"]["enum"] == ["closing"]
+    serialized = node["functions"][0].to_function_schema().to_default_dict()
+    assert serialized["parameters"]["properties"]["node"]["enum"] == ["closing"]
+
+
+def test_change_node_schema_is_per_node_and_does_not_mutate_tool_definition():
+    host = _host()
+    host._nodes["alternate"] = {
+        **host._nodes["opening"],
+        "id": "alternate",
+        "transitions": ["opening", "closing"],
+    }
+
+    opening_function = host._node("opening")["functions"][0]
+    alternate_function = host._node("alternate")["functions"][0]
+    definition = host._snapshot["_resolved"]["tools"]["change_node"]["definition"]
+
+    assert opening_function.properties["node"]["enum"] == ["closing"]
+    assert alternate_function.properties["node"]["enum"] == ["opening", "closing"]
+    assert "enum" not in definition["parameters"]["properties"]["node"]
+
+
+def test_change_node_is_not_advertised_on_node_without_transitions():
+    host = _host()
+
+    node = host._node("closing")
+
+    assert node["functions"] == []
 
 
 @pytest.mark.asyncio

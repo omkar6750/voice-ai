@@ -18,6 +18,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
+from voice_runtime.contracts.evidence import validate_evidence_record
+
 
 class BatchIngestor(Protocol):
     async def ingest(self, records: list[dict[str, Any]]) -> None:
@@ -52,17 +54,28 @@ class DurableSpool:
         if self.error:
             raise RuntimeError("durable evidence spool failed") from self.error
 
+    def fail(self, error: Exception) -> None:
+        """Latch an upstream contract failure so delivery health stops execution."""
+        self.error = error
+
     def submit(self, record: Mapping[str, Any]) -> None:
         self.check()
         if self.closed:
             raise RuntimeError("spool is closed")
         try:
+            typed_record = validate_evidence_record(dict(record))
             payload = (
-                json.dumps(dict(record), ensure_ascii=False, allow_nan=False) + "\n"
+                json.dumps(
+                    typed_record.model_dump(mode="json"), ensure_ascii=False, allow_nan=False
+                )
+                + "\n"
             ).encode()
             if len(payload) > self.max_record_bytes:
                 raise BufferError("evidence record exceeds size bound")
             self._queue.put_nowait(payload)
+        except ValueError as exc:
+            self.error = exc
+            raise
         except Exception as exc:
             self.error = exc
             raise
@@ -91,6 +104,15 @@ class DurableSpool:
                         self._queue.task_done()
         except Exception as exc:
             self.error = exc
+            # Release joiners even when storage has failed; none of the remaining
+            # in-memory records are acknowledged, and the durable prefix is retained.
+            while True:
+                try:
+                    self._queue.get_nowait()
+                except queue.Empty:
+                    break
+                else:
+                    self._queue.task_done()
 
     async def flush(self):
         while self._queue.unfinished_tasks:
@@ -144,9 +166,14 @@ class DurableSpool:
             return
         self.closed = True
         try:
-            await self.flush()
+            if not self.error:
+                await self.flush()
+            else:
+                # A producer contract error stops new admission, but already queued
+                # valid records must still reach disk before the spool is retained.
+                await asyncio.to_thread(self._queue.join)
         finally:
-            if self._thread.is_alive() and not self.error:
-                self._queue.put_nowait(None)
+            if self._thread.is_alive():
+                await asyncio.to_thread(self._queue.put, None)
             await asyncio.to_thread(self._thread.join, 5)
         self.check()

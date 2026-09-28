@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 from voice_runtime.contracts.evidence import EvidenceBatch
 from voice_runtime.diagnostics import (
+    exception_diagnostic,
     provider_error_diagnostic,
     provider_exception_diagnostic,
     text_error_diagnostic,
@@ -112,4 +113,27 @@ def test_runtime_diagnostic_is_valid_evidence_and_keeps_timestamp_contract():
     assert records[0].diagnostic_id == "diagnostic-1"
     assert records[0].uncertain is True
     assert records[0].metadata["rssi"] == 3
-    assert records[0].timestamp_ns > int(occurred_at.timestamp() * 1_000_000_000)
+    assert records[0].timestamp_ns > 0
+    assert (
+        abs(records[0].timestamp_ns - int(occurred_at.timestamp() * 1_000_000_000)) < 1_000_000_000
+    )
+
+
+def test_exception_diagnostic_progress_envelope_is_adapted_before_spool_submission():
+    sink = MemorySink()
+    tracker = ExchangeTracker("run-1", sink)
+    diagnostic = exception_diagnostic(
+        ValueError("Transition is not allowed"),
+        category="tool_failure",
+        code="tool_error",
+        message="Tool change_node failed",
+    )
+
+    tracker.diagnostic(**diagnostic)
+    records = EvidenceBatch(records=sink.records).records
+
+    assert len(records) == 1
+    assert records[0].kind == "diagnostic"
+    assert records[0].diagnostic_id == diagnostic["diagnostic_id"]
+    assert records[0].timestamp_ns > 0
+    assert "occurred_at" not in sink.records[0]

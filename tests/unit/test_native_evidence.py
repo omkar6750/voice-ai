@@ -188,6 +188,27 @@ async def test_configured_node_classifier_runs_once_and_returns_context_message(
     assert sum(record["kind"] == "classifier_result" for record in sink.records) == 2
 
 
+@pytest.mark.asyncio
+async def test_classifier_cadence_runs_after_every_n_exchanges_and_updates_context(tmp_path):
+    host = NativePipelineHost("run-1", tmp_path, object())
+    host.context = LLMContext([])
+    host.flow = SimpleNamespace(current_node="qualification")
+    host._snapshot = {"classifier": {"enabled": True, "every_n_exchanges": 2}}
+    host._exchange_count = 1
+    host._run_node_classifier = AsyncMock(
+        return_value=("result-1", {"role": "system", "content": "classifier result"})
+    )
+
+    await host._run_classifier_cadence()
+    assert host._run_node_classifier.await_count == 0
+
+    host._exchange_count = 2
+    await host._run_classifier_cadence()
+
+    host._run_node_classifier.assert_awaited_once_with("entry", "qualification", force=True)
+    assert host.context.get_messages() == [{"role": "system", "content": "classifier result"}]
+
+
 def test_node_configuration_is_scoped_to_published_bindings(tmp_path):
     host = NativePipelineHost("run-1", tmp_path, object())
     host._snapshot = {
@@ -214,6 +235,7 @@ def test_node_configuration_is_scoped_to_published_bindings(tmp_path):
             "id": "greeting",
             "prompt": "Say hello",
             "tool_bindings": ["change_node"],
+            "transitions": ["closing"],
             "respond_immediately": True,
         }
     }

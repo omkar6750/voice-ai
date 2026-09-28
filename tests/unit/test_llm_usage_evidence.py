@@ -178,7 +178,8 @@ def test_new_caller_turn_closes_previous_unfinalized_stt_operation_as_incomplete
         and record.get("operation_id") == previous_stt["operation_id"]
     )
     assert prior_span["status"] == "failed"
-    assert prior_span["output_state"] == "missing_final_transcription"
+    assert prior_span["output_state"] == "failed"
+    assert prior_span["attributes"]["failure_reason"] == "missing_final_transcription"
     assert any(
         record.get("kind") == "diagnostic" and record.get("code") == "final_transcription_missing"
         for record in sink.records

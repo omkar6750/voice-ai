@@ -10,7 +10,7 @@ import httpx
 from loguru import logger
 
 from voice_runtime.diagnostics import diagnostic_dict, exception_diagnostic
-from voice_runtime.execution.delivery import stream_evidence
+from voice_runtime.execution.delivery import finalize_evidence, stream_evidence
 from voice_runtime.execution.evidence_client import ApiEvidenceIngestor
 from voice_runtime.execution.exchange import ExchangeTracker
 from voice_runtime.execution.spool import DurableSpool
@@ -84,16 +84,23 @@ async def execute_call(
         done, _ = await asyncio.wait(
             (call_task, heartbeat_task, delivery_task), return_when=asyncio.FIRST_COMPLETED
         )
-        if heartbeat_task in done:
-            await heartbeat_task
-        if delivery_task in done:
-            await delivery_task
-        final_state = await call_task
+        if call_task in done:
+            # If call completion races evidence shutdown, preserve the call outcome;
+            # finalization reports evidence completeness independently.
+            final_state = await call_task
+        else:
+            if heartbeat_task in done:
+                await heartbeat_task
+            if delivery_task in done:
+                await delivery_task
+            final_state = await call_task
         outcome = "completed"
     except Exception as exc:
         logger.exception("Call task raised exception during run {}: {}", run_id, exc)
         error = f"Call execution failed: {exc}"
-        diagnostics.append(exception_diagnostic(exc, code="call_execution_failed", message="Call execution failed"))
+        diagnostics.append(
+            exception_diagnostic(exc, code="call_execution_failed", message="Call execution failed")
+        )
     except asyncio.CancelledError:
         error = "Call execution cancelled"
         raise
@@ -133,64 +140,18 @@ async def execute_call(
                         message="Call artifacts could not be finalized",
                     )
                 )
-        # Stop and await uploader before final drain: only one cursor owner at a time.
-        if delivery_task:
-            delivery_task.cancel()
-            delivery_result = await asyncio.gather(delivery_task, return_exceptions=True)
-            if isinstance(delivery_result[0], Exception):
-                incomplete = True
-                outcome, error = "failed", "Evidence delivery failed; durable spool requires review"
-                diagnostics.append(
-                    diagnostic_dict(
-                        severity="error",
-                        category="evidence_delivery",
-                        source="evidence",
-                        code="evidence_delivery_failed",
-                        message="Evidence delivery failed; durable spool requires review",
-                        retryable=True,
-                    )
-                )
-        try:
-            if spool is None:
-                raise RuntimeError("Evidence spool was not created")
-            async with asyncio.timeout(15):
-                await spool.flush()
-                if not incomplete:
-                    while await spool.deliver_once(ingestor):
-                        pass
-        except Exception:
+        if spool is None:
             incomplete = True
-            outcome, error = "failed", "Evidence incomplete; durable spool requires replay"
-            diagnostics.append(
-                diagnostic_dict(
-                    severity="error",
-                    category="evidence_delivery",
-                    source="evidence",
-                    code="evidence_incomplete",
-                    message="Evidence is incomplete and requires spool replay",
-                    retryable=True,
-                )
-            )
-        finally:
-            try:
-                if spool is not None:
-                    await spool.close()
-            except Exception:
-                incomplete = True
-                outcome, error = "failed", "Evidence storage failed; durable spool requires review"
-                diagnostics.append(
-                    diagnostic_dict(
-                        severity="error",
-                        category="evidence_storage",
-                        source="evidence",
-                        code="evidence_storage_failed",
-                        message="Evidence spool storage failed; durable review is required",
-                    )
-                )
-            finally:
-                if heartbeat_task:
-                    heartbeat_task.cancel()
-                    await asyncio.gather(heartbeat_task, return_exceptions=True)
+        else:
+            finalization = await finalize_evidence(spool, ingestor, delivery_task)
+            incomplete = incomplete or finalization.incomplete
+            if finalization.diagnostic:
+                diagnostics.append(finalization.diagnostic)
+        if incomplete and outcome != "completed":
+            error = error or "Evidence incomplete; durable spool requires replay"
+        if heartbeat_task:
+            heartbeat_task.cancel()
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
         if released:
             await post(
                 "progress",
