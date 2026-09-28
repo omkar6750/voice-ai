@@ -9,6 +9,8 @@ from voice_api.models import (
     Agent,
     AgentVersion,
     AgentVersionTool,
+    IntegrationConnection,
+    IntegrationMedia,
     Tool,
     ToolInvocation,
     ToolVersion,
@@ -41,6 +43,38 @@ from voice_runtime.contracts.prompt_references import tool_references
 router = APIRouter(tags=["tools"])
 Session = Depends(get_session)
 Operator = Depends(require_operator)
+
+
+async def _whatsapp_media_issue(session: AsyncSession, config: ToolConfig) -> str | None:
+    whatsapp = config.whatsapp
+    if whatsapp is None:
+        return None
+    connection = await session.get(IntegrationConnection, whatsapp.connection_id)
+    if (
+        connection is None
+        or connection.provider != "whatsapp"
+        or not connection.enabled
+        or connection.deleted_at is not None
+    ):
+        return "WhatsApp tool requires an enabled WhatsApp integration connection"
+    header = whatsapp.header
+    if header is None:
+        return None
+    media = await session.scalar(
+        select(IntegrationMedia)
+        .where(
+            IntegrationMedia.connection_id == whatsapp.connection_id,
+            IntegrationMedia.provider_media_id == header.media_id,
+            IntegrationMedia.status == "available",
+        )
+        .with_for_update()
+    )
+    if media is None:
+        return "Configured Meta media ID is unavailable on the selected WhatsApp connection"
+    expected_type = {"IMAGE": "image", "VIDEO": "video", "DOCUMENT": "document"}[header.format]
+    if media.media_type != expected_type:
+        return f"Configured Meta media type must be {expected_type} for this template header"
+    return None
 
 
 def _remove_deleted_tool_references(
@@ -116,9 +150,7 @@ def _remove_deleted_tool_references(
 @router.get("/tools", response_model=ToolListResponse)
 async def tools(session: AsyncSession = Session, _: None = Operator) -> ToolListResponse:
     rows = (await session.scalars(select(Tool).order_by(Tool.name))).all()
-    return ToolListResponse(
-        tools=[ToolSummaryResponse(id=row.id, name=row.name) for row in rows]
-    )
+    return ToolListResponse(tools=[ToolSummaryResponse(id=row.id, name=row.name) for row in rows])
 
 
 @router.get("/tools/handlers")
@@ -333,6 +365,9 @@ async def create_tool(
     config = body.config.model_dump(mode="json")
     if config["name"] != body.name:
         raise HTTPException(422, "Tool name must match configuration name")
+    media_issue = await _whatsapp_media_issue(session, body.config)
+    if media_issue:
+        raise HTTPException(422, media_issue)
     tool = Tool(id=new_id(), name=body.name)
     version = ToolVersion(id=new_id(), tool_id=tool.id, version=1, config=config)
     session.add(tool)
@@ -382,6 +417,9 @@ async def update_tool_version(
         raise HTTPException(409, "Published versions are immutable")
     if row.revision != body.revision:
         raise HTTPException(409, "Draft changed by another operator")
+    media_issue = await _whatsapp_media_issue(session, body.config)
+    if media_issue:
+        raise HTTPException(422, media_issue)
     row.config = body.config.model_dump(mode="json")
     row.revision += 1
     await session.commit()
@@ -418,6 +456,23 @@ async def validate_tool_version(
                 }
             ],
         )
+    media_issue = await _whatsapp_media_issue(session, config)
+    if media_issue:
+        return ToolValidationResponse(
+            id=row.id,
+            valid=False,
+            revision=row.revision,
+            config=config,
+            issues=[
+                {
+                    "severity": "error",
+                    "code": "invalid_whatsapp_media_reference",
+                    "scope": "tool_version",
+                    "record_id": row.id,
+                    "message": media_issue,
+                }
+            ],
+        )
     return ToolValidationResponse(
         id=row.id,
         valid=True,
@@ -436,9 +491,12 @@ async def publish_tool(
         raise HTTPException(404, "Tool version not found")
     if row.status != "draft":
         raise HTTPException(409, "Version is already published")
-    ToolConfig.model_validate(row.config)
     if row.revision != body.revision:
         raise HTTPException(409, "Draft changed; reload before publishing")
+    config = ToolConfig.model_validate(row.config)
+    media_issue = await _whatsapp_media_issue(session, config)
+    if media_issue:
+        raise HTTPException(422, media_issue)
     row.status, row.published_at = "published", datetime.now(UTC)
     await session.commit()
     return ToolVersionMutationResponse(id=row.id, status=row.status, revision=row.revision)
@@ -448,7 +506,9 @@ async def publish_tool(
 async def clone_tool(
     version_id: str, body: ExpectedRevision, session: AsyncSession = Session, _: None = Operator
 ) -> ToolVersionMutationResponse:
-    return ToolVersionMutationResponse(**await clone_version(session, version_id, "tool", body.revision))
+    return ToolVersionMutationResponse(
+        **await clone_version(session, version_id, "tool", body.revision)
+    )
 
 
 @router.get("/tools/{tool_id}/impact", response_model=ToolImpactResponse)
@@ -529,9 +589,7 @@ async def delete_tool(tool_id: str, session: AsyncSession = Session, _: None = O
     tool_version_ids = set(tv_ids)
     if tool_version_ids:
         await session.execute(
-            delete(AgentVersionTool).where(
-                AgentVersionTool.tool_version_id.in_(tool_version_ids)
-            )
+            delete(AgentVersionTool).where(AgentVersionTool.tool_version_id.in_(tool_version_ids))
         )
 
     agent_versions = (await session.scalars(select(AgentVersion))).all()

@@ -100,6 +100,70 @@ def render_opening(text: str, state: dict[str, Any]) -> str:
     return _OPENING_PLACEHOLDER.sub(replace, text)
 
 
+def whatsapp_template_header_component(header: dict[str, Any] | None) -> dict | None:
+    """Build Meta's template header component from a pinned provider reference."""
+    if header is None:
+        return None
+    if not isinstance(header, dict):
+        raise ValueError("WhatsApp template header configuration is invalid")
+    header_type = {"IMAGE": "image", "VIDEO": "video", "DOCUMENT": "document"}.get(
+        header.get("format")
+    )
+    media_id = header.get("media_id")
+    if not header_type or not isinstance(media_id, str) or not media_id:
+        raise ValueError("WhatsApp template header configuration is invalid")
+    return {
+        "type": "header",
+        "parameters": [{"type": header_type, header_type: {"id": media_id}}],
+    }
+
+
+def build_whatsapp_template_payload(
+    *,
+    destination: str,
+    template_name: str,
+    language: str,
+    header: dict[str, Any] | None,
+    parameter_mappings: dict[str, str],
+    arguments: dict[str, Any],
+    caller_name: str,
+) -> dict:
+    """Build the provider request without resolving or rewriting media references."""
+    components = []
+    header_component = whatsapp_template_header_component(header)
+    if header_component is not None:
+        components.append(header_component)
+    if arguments.get("components"):
+        components.extend(arguments["components"])
+    elif parameter_mappings:
+        body_params = [
+            {"type": "text", "text": str(arguments[argument])[:1024]}
+            for index, argument in sorted(parameter_mappings.items(), key=lambda item: int(item[0]))
+            if arguments.get(argument) is not None
+        ]
+        components.append({"type": "body", "parameters": body_params})
+    else:
+        body_params = [{"type": "text", "text": caller_name}]
+        if arguments.get("message"):
+            body_params.append(
+                {"type": "text", "text": " ".join(str(arguments["message"]).split())[:1024]}
+            )
+        for key in sorted(arguments):
+            if key.startswith("param_") and key != "param_1":
+                body_params.append({"type": "text", "text": str(arguments[key])[:1024]})
+        components.append({"type": "body", "parameters": body_params})
+    return {
+        "messaging_product": "whatsapp",
+        "to": destination,
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {"code": language or "en"},
+            "components": components,
+        },
+    }
+
+
 def trim_classifier_result(res: dict) -> dict:
     """Backward-compatible name for the context-safe classifier normalizer."""
     return normalize_classifier_result(res)
@@ -326,6 +390,7 @@ class TracedFlowManager(FlowManager):
         *,
         tracker: ExchangeTracker,
         bindings: dict,
+        snapshot: dict,
         observer: EvidenceObserver,
         context: LLMContext,
         classifier_runner: Callable[[str, str], Awaitable[tuple[str, dict[str, str]] | None]],
@@ -334,6 +399,7 @@ class TracedFlowManager(FlowManager):
         super().__init__(**kwargs)
         self.tracker = tracker
         self.bindings = bindings
+        self._snapshot = snapshot
         self.observer = observer
         self._context_for_evidence = context
         self._classifier_runner = classifier_runner
@@ -506,9 +572,7 @@ class NativePipelineHost:
             role_message = node.get("prompt", "")
         transitions = node.get("transitions", [])
         node_bindings = [
-            name
-            for name in node["tool_bindings"]
-            if name != "change_node" or transitions
+            name for name in node["tool_bindings"] if name != "change_node" or transitions
         ]
         exposed_tools = set(node_bindings)
         role_message = compile_tool_references(role_message or "", exposed_tools)
@@ -691,85 +755,65 @@ class NativePipelineHost:
         self,
         *,
         connection_id: str | None = None,
-        local_media_id: str | None = None,
-    ) -> tuple[str, str, str | None, str, str | None, str | None]:
-        """Resolve WhatsApp credentials and an optional catalog media record."""
+    ) -> tuple[str, str, str | None, str]:
+        """Resolve a pinned integration; template media IDs are already provider IDs."""
         access_token = getattr(self.settings, "whatsapp_access_token", None) or os.getenv(
             "VOICE_WHATSAPP_ACCESS_TOKEN", ""
         )
         phone_number_id = getattr(self.settings, "whatsapp_phone_number_id", None) or os.getenv(
             "VOICE_WHATSAPP_PHONE_NUMBER_ID", ""
         )
-        connection_id = None
+        if connection_id:
+            # An explicitly pinned tool must fail closed instead of falling back
+            # to unrelated process-wide WhatsApp credentials.
+            access_token = ""
+            phone_number_id = ""
         api_version = "v21.0"
-        header_media_id = None
-        header_media_type = None
-        if phone_number_id:
-            try:
-                from sqlalchemy import select
-                from voice_api.db.session import SessionFactory
-                from voice_api.models import (
-                    IntegrationConnection,
-                    IntegrationMedia,
-                    IntegrationSecret,
-                )
-                from voice_api.services.vault_service import CredentialVault
+        try:
+            from sqlalchemy import select
+            from voice_api.db.session import SessionFactory
+            from voice_api.models import IntegrationConnection, IntegrationSecret
+            from voice_api.services.vault_service import CredentialVault
 
-                async with SessionFactory() as session:
-                    query = select(IntegrationConnection).where(
-                        IntegrationConnection.provider == "whatsapp",
-                        IntegrationConnection.enabled.is_(True),
+            async with SessionFactory() as session:
+                query = select(IntegrationConnection).where(
+                    IntegrationConnection.provider == "whatsapp",
+                    IntegrationConnection.enabled.is_(True),
+                    IntegrationConnection.deleted_at.is_(None),
+                )
+                if connection_id:
+                    query = query.where(IntegrationConnection.id == connection_id)
+                elif phone_number_id:
+                    query = query.where(
+                        IntegrationConnection.config["phone_number_id"].astext == phone_number_id
                     )
-                    if connection_id:
-                        query = query.where(IntegrationConnection.id == connection_id)
-                    rows = (await session.scalars(query)).all()
-                    for row in rows:
-                        if connection_id or str(row.config.get("phone_number_id", "")) == str(
-                            phone_number_id
-                        ):
-                            connection_id = str(row.id)
-                            phone_number_id = str(
-                                row.config.get("phone_number_id") or phone_number_id
-                            )
-                            api_version = str(row.config.get("api_version") or api_version)
-                            if local_media_id:
-                                media = await session.scalar(
-                                    select(IntegrationMedia).where(
-                                        IntegrationMedia.id == local_media_id,
-                                        IntegrationMedia.connection_id == row.id,
-                                        IntegrationMedia.status == "available",
-                                    )
-                                )
-                                header_media_id = (
-                                    media.provider_media_id if media is not None else None
-                                )
-                                header_media_type = media.media_type if media is not None else None
-                            if not access_token:
-                                secret = await session.scalar(
-                                    select(IntegrationSecret).where(
-                                        IntegrationSecret.connection_id == row.id,
-                                        IntegrationSecret.name == "access_token",
-                                    )
-                                )
-                                if secret is not None:
-                                    try:
-                                        access_token = CredentialVault.from_env().decrypt(
-                                            secret.ciphertext, secret.key_id
-                                        )
-                                    except Exception as exc:
-                                        logger.warning(
-                                            "Could not decrypt stored WhatsApp token: {}", exc
-                                        )
-                            break
-            except Exception as exc:
-                logger.warning("Could not resolve WhatsApp integration metadata: {}", exc)
+                rows = (
+                    await session.scalars(query.order_by(IntegrationConnection.created_at))
+                ).all()
+                row = rows[0] if rows else None
+                if row is not None:
+                    connection_id = str(row.id)
+                    phone_number_id = str(row.config.get("phone_number_id") or "")
+                    api_version = str(row.config.get("api_version") or api_version)
+                    # A pinned template tool must use the secret belonging to that exact
+                    # connection, never a process-wide token for another WhatsApp account.
+                    secret = await session.scalar(
+                        select(IntegrationSecret).where(
+                            IntegrationSecret.connection_id == row.id,
+                            IntegrationSecret.name == "access_token",
+                        )
+                    )
+                    if secret is not None:
+                        access_token = CredentialVault.from_env().decrypt(
+                            secret.ciphertext, secret.key_id
+                        )
+        except Exception:
+            logger.warning("Could not resolve configured WhatsApp integration")
         return (
             access_token,
             phone_number_id,
             connection_id,
             api_version,
-            header_media_id,
-            header_media_type,
         )
 
     def _handler(self, name: str):
@@ -891,8 +935,6 @@ class NativePipelineHost:
                     phone_number_id,
                     connection_id,
                     api_version,
-                    _db_header_media_id,
-                    _db_header_media_type,
                 ) = await self._whatsapp_runtime_config()
                 if not access_token or not phone_number_id:
                     logger.warning(
@@ -986,17 +1028,13 @@ class NativePipelineHost:
                             retryable=False,
                         ),
                     }
-                local_media_id = whatsapp_config.get("header_media_id")
                 (
                     access_token,
                     phone_number_id,
                     connection_id,
                     api_version,
-                    db_header_media_id,
-                    db_header_media_type,
                 ) = await self._whatsapp_runtime_config(
                     connection_id=whatsapp_config.get("connection_id"),
-                    local_media_id=local_media_id,
                 )
                 if not access_token or not phone_number_id:
                     logger.warning(
@@ -1011,20 +1049,6 @@ class NativePipelineHost:
                             body={"message": "API key is not configured"},
                         ),
                     }
-                if local_media_id and not db_header_media_id:
-                    return {
-                        "status": "error",
-                        "error": "Configured WhatsApp media is unavailable",
-                        "_diagnostic": exception_diagnostic(
-                            ValueError("configured WhatsApp media is unavailable"),
-                            source="runtime",
-                            category="tool_configuration",
-                            code="whatsapp_media_unavailable",
-                            message="Configured WhatsApp media is unavailable",
-                            retryable=False,
-                        ),
-                    }
-
                 contact = (
                     self._snapshot.get("_resolved", {}).get("contact")
                     or self._snapshot.get("contact_snapshot")
@@ -1056,69 +1080,30 @@ class NativePipelineHost:
                             retryable=False,
                         ),
                     }
-                header_media_id = db_header_media_id
-
-                summary = f"Thank you for speaking with Northstar Software Studio, {caller_name}! We have prepared your custom development overview and pricing catalog."
-                if name == "send_followup" and args.get("message"):
-                    summary = args["message"]
-                elif args.get("message"):
-                    summary = args["message"]
-
-                components = []
-                if header_media_id:
-                    header_type = db_header_media_type or "image"
-                    components.append(
-                        {
-                            "type": "header",
-                            "parameters": [
-                                {
-                                    "type": header_type,
-                                    header_type: {"id": header_media_id},
-                                }
-                            ],
-                        }
+                header = whatsapp_config.get("header")
+                try:
+                    payload = build_whatsapp_template_payload(
+                        destination=recipient,
+                        template_name=template_name,
+                        language=str(whatsapp_config.get("language") or "en"),
+                        header=header,
+                        parameter_mappings=whatsapp_config.get("parameter_mappings") or {},
+                        arguments=args,
+                        caller_name=caller_name,
                     )
-                if args.get("components"):
-                    components.extend(args["components"])
-                else:
-                    mappings = whatsapp_config.get("parameter_mappings") or {}
-                    if mappings:
-                        body_params = [
-                            {"type": "text", "text": str(args[argument])[:1024]}
-                            for index, argument in sorted(
-                                mappings.items(), key=lambda item: int(item[0])
-                            )
-                            if args.get(argument) is not None
-                        ]
-                    else:
-                        body_params = [{"type": "text", "text": caller_name}]
-                        if args.get("message"):
-                            body_params.append(
-                                {"type": "text", "text": " ".join(summary.split())[:1024]}
-                            )
-                        for k in sorted(args.keys()):
-                            if k.startswith("param_") and k != "param_1":
-                                body_params.append({"type": "text", "text": str(args[k])[:1024]})
-                    components.append({"type": "body", "parameters": body_params})
-
-                template_lang = str(whatsapp_config.get("language") or "en")
-                if len(template_lang) > 2 and "_" in template_lang:
-                    pass
-                elif len(template_lang) == 2:
-                    pass
-                else:
-                    template_lang = "en"
-
-                payload = {
-                    "messaging_product": "whatsapp",
-                    "to": recipient,
-                    "type": "template",
-                    "template": {
-                        "name": template_name,
-                        "language": {"code": template_lang},
-                        "components": components,
-                    },
-                }
+                except (TypeError, ValueError):
+                    return {
+                        "status": "error",
+                        "error": "WhatsApp template configuration is invalid",
+                        "_diagnostic": exception_diagnostic(
+                            ValueError("invalid WhatsApp template configuration"),
+                            source="runtime",
+                            category="tool_configuration",
+                            code="whatsapp_template_invalid",
+                            message="WhatsApp template configuration is invalid",
+                            retryable=False,
+                        ),
+                    }
 
                 try:
                     logger.info("WHATSAPP sending template '{}' to {}", template_name, recipient)
@@ -1149,12 +1134,15 @@ class NativePipelineHost:
                         data = resp.json()
                         msg_id = (data.get("messages") or [{}])[0].get("id", "unknown")
                         logger.info("WhatsApp template sent successfully: msg_id={}", msg_id)
-                        return {
+                        result = {
                             "status": "ok",
                             "message_id": msg_id,
                             "_connection_id": connection_id,
                             "_provider_message_id": msg_id,
                         }
+                        if isinstance(header, dict):
+                            result["media_id"] = header["media_id"]
+                        return result
                 except Exception as exc:
                     logger.error("WhatsApp dispatch exception: {}", exc)
                     return {
@@ -1207,10 +1195,15 @@ class NativePipelineHost:
                 )
 
             if name in ("check_callback_availability", "book_callback"):
+                api_base_url = (
+                    getattr(self.settings, "api_base_url", None)
+                    or os.getenv("VOICE_API_BASE_URL")
+                    or "http://localhost:8000"
+                ).rstrip("/")
                 endpoint = (
-                    "http://localhost:8000/api/v1/callback-scheduling/availability"
+                    f"{api_base_url}/api/v1/callback-scheduling/availability"
                     if name == "check_callback_availability"
-                    else "http://localhost:8000/api/v1/callback-scheduling/book"
+                    else f"{api_base_url}/api/v1/callback-scheduling/book"
                 )
                 contact = (
                     self._snapshot.get("_resolved", {}).get("contact")
@@ -1432,9 +1425,7 @@ class NativePipelineHost:
             required_credentials.append(("groq_api_key", self.settings.groq_api_key))
         summarizer_cfg = snapshot.get("context", {}).get("summarizer", {})
         if summarizer_cfg.get("enabled"):
-            summary_provider = (summarizer_cfg.get("model") or {}).get(
-                "provider", llm_provider
-            )
+            summary_provider = (summarizer_cfg.get("model") or {}).get("provider", llm_provider)
             required_credentials.append(
                 (
                     "gemini_api_key" if summary_provider == "gemini" else "groq_api_key",
@@ -1662,9 +1653,10 @@ class NativePipelineHost:
             llm=llm,
             context_aggregator=aggregators,
             transport=transport,
-            tracker=tracker,
-            bindings=snapshot["_resolved"]["tools"],
-            observer=self.observer,
+                    tracker=tracker,
+                    bindings=snapshot["_resolved"]["tools"],
+                    snapshot=snapshot,
+                    observer=self.observer,
             context=context,
             classifier_runner=self._run_node_classifier,
         )

@@ -29,17 +29,20 @@ class RetryConfig(ConfigModel):
     provider_idempotency_supported: bool = False
 
 
-class WhatsAppTemplateConfig(ConfigModel):
-    """Account-scoped WhatsApp template settings for a registered tool.
+class WhatsAppTemplateHeader(ConfigModel):
+    """Meta-hosted media reference used directly by a template send."""
 
-    ``header_media_id`` is the local IntegrationMedia record ID.  The runtime
-    resolves it to Meta's provider media ID only when the tool executes.
-    """
+    format: Literal["IMAGE", "VIDEO", "DOCUMENT"]
+    media_id: str = Field(min_length=1, max_length=120, pattern=r"^[0-9]+$")
+
+
+class WhatsAppTemplateConfig(ConfigModel):
+    """Account-scoped WhatsApp template settings for a registered tool."""
 
     connection_id: Identifier
     template_name: str = Field(min_length=1, max_length=512)
     language: str = Field(min_length=2, max_length=32)
-    header_media_id: Identifier | None = None
+    header: WhatsAppTemplateHeader | None = None
     parameter_mappings: dict[str, Identifier] = Field(default_factory=dict)
 
 

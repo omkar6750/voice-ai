@@ -15,14 +15,13 @@ import {
   NativeSelectOption,
 } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
-import { useResource } from "@/lib/resources";
+import { WhatsAppMediaPicker } from "@/pages/integrations/WhatsAppMediaPicker";
 
 type ToolVersion = components["schemas"]["ToolVersionResponse"];
 type ToolConfig = components["schemas"]["ToolConfig"];
 type HandlerCatalog = components["schemas"]["ToolHandlerCatalog"];
 type ValidationResponse = components["schemas"]["ToolValidationResponse"];
 type WhatsAppConfig = NonNullable<ToolConfig["whatsapp"]>;
-type MediaListResponse = components["schemas"]["MediaListResponse"];
 type EditableToolConfig = Omit<ToolConfig, "parameters" | "wait"> & {
   parameters: Record<string, unknown>;
   wait: NonNullable<ToolConfig["wait"]>;
@@ -598,14 +597,6 @@ function WhatsAppDraftFields({
   onMappingChange: (value: string) => void;
   onChange: (value: WhatsAppConfig) => void;
 }) {
-  const { data, loading } = useResource<MediaListResponse>(
-    `/integrations/${config.connection_id}/media`,
-  );
-  const media = data?.media ?? [];
-  const selectedMediaExists = media.some(
-    (item) => item.id === config.header_media_id,
-  );
-
   return (
     <div className="flex flex-col gap-4 rounded-md border p-3">
       <div>
@@ -617,37 +608,22 @@ function WhatsAppDraftFields({
         </p>
       </div>
       <Field>
-        <FieldLabel htmlFor={`whatsapp-media-${versionId}`}>
-          Header media
-        </FieldLabel>
-        <NativeSelect
-          id={`whatsapp-media-${versionId}`}
-          value={config.header_media_id ?? ""}
-          onChange={(event) =>
-            onChange({ ...config, header_media_id: event.target.value || null })
+        <FieldLabel>Image header</FieldLabel>
+        <WhatsAppMediaPicker
+          connectionId={config.connection_id}
+          selectedProviderId={
+            config.header?.format === "IMAGE" ? config.header.media_id : null
           }
-          disabled={loading}
-        >
-          <NativeSelectOption value="">No header media</NativeSelectOption>
-          {config.header_media_id && !selectedMediaExists && (
-            <NativeSelectOption value={config.header_media_id}>
-              Currently selected media (not in catalog)
-            </NativeSelectOption>
-          )}
-          {media.map((item) => (
-            <NativeSelectOption
-              key={item.id}
-              value={item.id}
-              disabled={item.status !== "available"}
-            >
-              {item.display_name} · {item.media_type} · {item.status}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
+          onSelect={(mediaId) =>
+            onChange({
+              ...config,
+              header: mediaId ? { format: "IMAGE", media_id: mediaId } : null,
+            })
+          }
+        />
         <FieldDescription>
-          Select an available media record from this WhatsApp connection. The
-          draft stores its local catalog ID; the runtime resolves Meta’s media
-          ID when sending.
+          The draft stores the Meta media ID directly. Only the local catalog
+          UUID is used to request an authenticated preview.
         </FieldDescription>
       </Field>
       <Field>

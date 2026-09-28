@@ -8,12 +8,12 @@ def whatsapp_config() -> dict:
         "connection_id": "connection-1",
         "template_name": "dialtone_followup",
         "language": "en",
-        "header_media_id": "media-1",
+        "header": {"format": "IMAGE", "media_id": "74506"},
         "parameter_mappings": {"1": "caller_name", "2": "param_2"},
     }
 
 
-def test_whatsapp_template_tool_uses_local_media_reference() -> None:
+def test_whatsapp_template_tool_uses_meta_media_reference() -> None:
     config = ToolConfig.model_validate(
         {
             "name": "whatsapp_template_dialtone_followup",
@@ -32,7 +32,9 @@ def test_whatsapp_template_tool_uses_local_media_reference() -> None:
     )
 
     assert config.whatsapp is not None
-    assert config.whatsapp.header_media_id == "media-1"
+    assert config.whatsapp.header is not None
+    assert config.whatsapp.header.format == "IMAGE"
+    assert config.whatsapp.header.media_id == "74506"
     assert config.whatsapp.parameter_mappings["2"] == "param_2"
 
 

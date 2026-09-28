@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from voice_runtime.contracts import ToolConfig
 
 
 class WhatsAppConfig(BaseModel):
@@ -65,7 +66,7 @@ class SecretBody(BaseModel):
 class MediaImportBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    provider_media_id: str = Field(min_length=1, max_length=120)
+    provider_media_id: str = Field(pattern=r"^[0-9]{1,120}$")
     display_name: str = Field(min_length=1, max_length=255)
     media_type: Literal["image", "video", "document", "audio"]
     mime_type: str = Field(default="application/octet-stream", min_length=1, max_length=100)
@@ -109,7 +110,11 @@ class GenerateTemplateToolBody(BaseModel):
     language: str = Field(default="en_US")
     tool_name: str | None = None
     description: str | None = None
-    header_media_id: str | None = None
+    header_media_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9]{1,120}$",
+        description="Meta provider media ID, not the local IntegrationMedia UUID.",
+    )
     parameter_descriptions: dict[str, str] = Field(default_factory=dict)
     parameter_mappings: dict[str, str] = Field(default_factory=dict)
 
@@ -122,4 +127,4 @@ class GeneratedTemplateToolResponse(BaseModel):
     version: int
     version_number: int
     extracted_variables: list[str]
-    config: dict[str, Any]
+    config: ToolConfig

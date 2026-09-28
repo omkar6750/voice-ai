@@ -49,7 +49,6 @@ class IntegrationMedia(Identity, Base):
     mime_type: Mapped[str] = mapped_column(String(100))
     size_bytes: Mapped[int]
     sha256: Mapped[str | None] = mapped_column(String(64))
-    source_path: Mapped[str | None] = mapped_column(Text)
     source: Mapped[str] = mapped_column(String(30), default="uploaded")
     status: Mapped[str] = mapped_column(String(30), default="available")
     provider_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)

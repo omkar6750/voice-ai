@@ -4,6 +4,7 @@ import copy
 import hashlib
 import hmac
 import re
+from urllib.parse import urlparse
 
 import httpx
 from voice_runtime.execution.whatsapp import (
@@ -126,6 +127,72 @@ class WhatsAppAdapter:
         return await self._request(
             "GET", graph_id(media_id), params={"phone_number_id": self.phone_number_id}
         )
+
+    async def delete_media(self, media_id: str) -> None:
+        """Delete provider media; absence is idempotent success."""
+        try:
+            response = await self.client.delete(
+                graph_id(media_id), params={"phone_number_id": self.phone_number_id}
+            )
+        except httpx.RequestError:
+            raise ProviderError(uncertain=True) from None
+        if response.status_code == 404:
+            return
+        if not response.is_success:
+            raise ProviderError(response.status_code)
+        if response.status_code != 204:
+            try:
+                result = response.json()
+            except ValueError:
+                raise ProviderError(response.status_code) from None
+            if not isinstance(result, dict) or result.get("success") is not True:
+                raise ProviderError(response.status_code)
+
+    async def preview_image(self, media_id: str, *, max_bytes: int) -> tuple[bytes, str]:
+        """Fetch a short-lived Meta media URL without persisting bytes or URL."""
+        metadata = await self.check_media(media_id)
+        url = metadata.get("url")
+        mime_type = metadata.get("mime_type")
+        if mime_type not in {"image/png", "image/jpeg"} or not isinstance(url, str):
+            raise ProviderError()
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        allowed_host = (
+            host == "facebook.com"
+            or host.endswith(".facebook.com")
+            or host == "fbsbx.com"
+            or host.endswith(".fbsbx.com")
+        )
+        if (
+            parsed.scheme != "https"
+            or not allowed_host
+            or not parsed.path
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.port not in (None, 443)
+            or parsed.fragment
+        ):
+            raise ProviderError()
+        try:
+            async with self.client.stream("GET", url) as response:
+                if not response.is_success:
+                    raise ProviderError(response.status_code)
+                response_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
+                if response_type not in {"image/png", "image/jpeg"} or response_type != mime_type:
+                    raise ProviderError()
+                length = response.headers.get("content-length")
+                if length and int(length) > max_bytes:
+                    raise ProviderError()
+                chunks = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if len(chunks) + len(chunk) > max_bytes:
+                        raise ProviderError()
+                    chunks.extend(chunk)
+                if not chunks:
+                    raise ProviderError()
+                return bytes(chunks), response_type
+        except (httpx.RequestError, ValueError):
+            raise ProviderError(uncertain=True) from None
 
     async def send(self, payload: dict) -> str:
         result = await self._request("POST", f"{self.phone_number_id}/messages", json=payload)

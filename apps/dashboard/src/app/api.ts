@@ -41,3 +41,19 @@ export async function request<T>(
     ? (undefined as T)
     : (response.json() as Promise<T>);
 }
+
+export async function requestBlob(token: string, path: string): Promise<Blob> {
+  const response = await fetch(`/api/v1${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    const detail = payload?.detail;
+    throw new Error(
+      typeof detail === "string"
+        ? detail
+        : `Request failed (${response.status})`,
+    );
+  }
+  return response.blob();
+}

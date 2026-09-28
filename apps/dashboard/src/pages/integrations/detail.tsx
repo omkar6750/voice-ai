@@ -1,5 +1,10 @@
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import {
+  Link,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -45,7 +50,10 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@/components/ui/native-select";
 import {
   Sheet,
   SheetContent,
@@ -66,6 +74,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useResource } from "@/lib/resources";
 import { MediaPanel } from "./MediaPanel";
+import { WhatsAppMediaPicker } from "./WhatsAppMediaPicker";
 import { SecretsPanel } from "./SecretsPanel";
 import type { Connection } from "./index";
 
@@ -90,21 +99,39 @@ function templateParameterNames(template: Template | null): string[] {
   const matches = [...(body?.text?.matchAll(/\{\{(\d+)\}\}/g) ?? [])];
   const indexes = [...new Set(matches.map((match) => match[1]))];
   if (indexes.length > 1) {
-    return indexes.map((index) => (index === "1" ? "caller_name" : `param_${index}`));
+    return indexes.map((index) =>
+      index === "1" ? "caller_name" : `param_${index}`,
+    );
   }
   return indexes.length === 1 ? ["message"] : [];
 }
 
-function templateParameterMappings(template: Template | null): Record<string, string> {
+function templateParameterMappings(
+  template: Template | null,
+): Record<string, string> {
   const body = template?.components?.find((item) => item.type === "BODY");
-  const indexes = [...new Set([...(body?.text?.matchAll(/\{\{(\d+)\}\}/g) ?? [])].map((match) => match[1]))];
+  const indexes = [
+    ...new Set(
+      [...(body?.text?.matchAll(/\{\{(\d+)\}\}/g) ?? [])].map(
+        (match) => match[1],
+      ),
+    ),
+  ];
   if (indexes.length === 1) return { [indexes[0]]: "message" };
   return Object.fromEntries(
-    indexes.map((index) => [index, index === "1" ? "caller_name" : `param_${index}`]),
+    indexes.map((index) => [
+      index,
+      index === "1" ? "caller_name" : `param_${index}`,
+    ]),
   );
 }
 
-const whatsappSections = ["Account", "Credentials", "Media", "Templates"] as const;
+const whatsappSections = [
+  "Account",
+  "Credentials",
+  "Media",
+  "Templates",
+] as const;
 const twilioSections = ["Account", "Credentials", "Phone Numbers"] as const;
 
 export function IntegrationDetailPage() {
@@ -123,8 +150,9 @@ export function IntegrationDetailPage() {
   const sections = isTwilio ? twilioSections : whatsappSections;
 
   const section =
-    sections.find((item) => item.toLowerCase() === params.get("section")?.toLowerCase()) ??
-    "Account";
+    sections.find(
+      (item) => item.toLowerCase() === params.get("section")?.toLowerCase(),
+    ) ?? "Account";
 
   // Account editing state
   const [editOpen, setEditOpen] = useState(false);
@@ -203,11 +231,15 @@ export function IntegrationDetailPage() {
           );
         }
       } else {
-        toast.error(`Twilio verification failed: ${res.error || "Unknown error"}`);
+        toast.error(
+          `Twilio verification failed: ${res.error || "Unknown error"}`,
+        );
       }
       await reload();
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "Connection test failed");
+      toast.error(
+        cause instanceof Error ? cause.message : "Connection test failed",
+      );
     } finally {
       setTestBusy(false);
     }
@@ -228,7 +260,11 @@ export function IntegrationDetailPage() {
       toast.success(`Synchronized ${res.count} phone numbers from Twilio`);
       await reload();
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "Failed to refresh phone numbers");
+      toast.error(
+        cause instanceof Error
+          ? cause.message
+          : "Failed to refresh phone numbers",
+      );
     } finally {
       setSyncBusy(false);
     }
@@ -245,12 +281,11 @@ export function IntegrationDetailPage() {
   const [toolSheetOpen, setToolSheetOpen] = useState(false);
   const [toolName, setToolName] = useState("");
   const [toolDesc, setToolDesc] = useState("");
-  const [parameterDescriptions, setParameterDescriptions] = useState<Record<string, string>>({});
+  const [parameterDescriptions, setParameterDescriptions] = useState<
+    Record<string, string>
+  >({});
   const [headerMediaId, setHeaderMediaId] = useState("");
   const [toolBusy, setToolBusy] = useState(false);
-  const { data: mediaData } = useResource<components["schemas"]["MediaListResponse"]>(
-    `/integrations/${connectionId}/media`,
-  );
 
   function openEditSheet() {
     if (!connection) return;
@@ -345,9 +380,9 @@ export function IntegrationDetailPage() {
     if (!selectedTemplate) return;
     setToolBusy(true);
     try {
-      const result = await api<components["schemas"]["GeneratedTemplateToolResponse"]>(
-        `/integrations/${connectionId}/generate-template-tool`,
-        {
+      const result = await api<
+        components["schemas"]["GeneratedTemplateToolResponse"]
+      >(`/integrations/${connectionId}/generate-template-tool`, {
         method: "POST",
         body: JSON.stringify({
           template_name: selectedTemplate.name,
@@ -358,8 +393,7 @@ export function IntegrationDetailPage() {
           parameter_descriptions: parameterDescriptions,
           parameter_mappings: templateParameterMappings(selectedTemplate),
         }),
-        },
-      );
+      });
       toast.success(
         `Tool "${result.tool_name}" (v${result.version_number}) created with parameters: ${
           result.extracted_variables.length > 0
@@ -497,7 +531,10 @@ export function IntegrationDetailPage() {
                     value={
                       <div className="flex items-center gap-2">
                         {connection.deleted_at ? (
-                          <Badge variant="secondary" className="text-muted-foreground">
+                          <Badge
+                            variant="secondary"
+                            className="text-muted-foreground"
+                          >
                             Disconnected
                           </Badge>
                         ) : (
@@ -511,7 +548,9 @@ export function IntegrationDetailPage() {
                             isTwilio ? "auth_token" : "access_token",
                           ) && (
                             <span className="text-xs text-amber-500">
-                              (Requires {isTwilio ? "auth_token" : "access_token"} credential)
+                              (Requires{" "}
+                              {isTwilio ? "auth_token" : "access_token"}{" "}
+                              credential)
                             </span>
                           )}
                       </div>
@@ -535,11 +574,15 @@ export function IntegrationDetailPage() {
                             <div className="flex items-center gap-2">
                               <Badge variant="destructive">Trial</Badge>
                               <span className="text-xs text-amber-500">
-                                Twilio Media Streams are blocked on Trial accounts. Must upgrade to Full.
+                                Twilio Media Streams are blocked on Trial
+                                accounts. Must upgrade to Full.
                               </span>
                             </div>
                           ) : connection.config.account_type === "Full" ? (
-                            <Badge variant="outline" className="text-emerald-500 border-emerald-500/30">
+                            <Badge
+                              variant="outline"
+                              className="text-emerald-500 border-emerald-500/30"
+                            >
                               Full (Production)
                             </Badge>
                           ) : (
@@ -554,13 +597,16 @@ export function IntegrationDetailPage() {
                         value={
                           <div className="flex items-center gap-2">
                             <span className="text-xs font-medium">
-                              {connection.config.phone_numbers?.length ?? 0} numbers configured
+                              {connection.config.phone_numbers?.length ?? 0}{" "}
+                              numbers configured
                             </span>
                             <Button
                               variant="link"
                               size="sm"
                               className="h-auto p-0 text-xs"
-                              onClick={() => setParams({ section: "phone numbers" })}
+                              onClick={() =>
+                                setParams({ section: "phone numbers" })
+                              }
                             >
                               View all
                             </Button>
@@ -571,10 +617,13 @@ export function IntegrationDetailPage() {
                         label="Telephony Webhook URL"
                         value={
                           connection.webhook_url ? (
-                            <code className="break-all text-xs">{connection.webhook_url}</code>
+                            <code className="break-all text-xs">
+                              {connection.webhook_url}
+                            </code>
                           ) : (
                             <span className="text-amber-500">
-                              Set VOICE_PUBLIC_BASE_URL before dispatching Twilio calls.
+                              Set VOICE_PUBLIC_BASE_URL before dispatching
+                              Twilio calls.
                             </span>
                           )
                         }
@@ -610,7 +659,9 @@ export function IntegrationDetailPage() {
                         label="Webhook callback URL"
                         value={
                           connection.webhook_url ? (
-                            <code className="break-all text-xs">{connection.webhook_url}</code>
+                            <code className="break-all text-xs">
+                              {connection.webhook_url}
+                            </code>
                           ) : (
                             <span className="text-amber-500">
                               Set VOICE_PUBLIC_BASE_URL before configuring Meta.
@@ -689,7 +740,9 @@ export function IntegrationDetailPage() {
                             </NativeSelectOption>
                           </NativeSelect>
                           <FieldDescription>
-                            Must have `{isTwilio ? "auth_token" : "access_token"}` saved in Credentials to enable.
+                            Must have `
+                            {isTwilio ? "auth_token" : "access_token"}` saved in
+                            Credentials to enable.
                           </FieldDescription>
                         </Field>
 
@@ -727,7 +780,9 @@ export function IntegrationDetailPage() {
                             </Field>
 
                             <Field>
-                              <FieldLabel htmlFor="edit-waba-id">WABA ID</FieldLabel>
+                              <FieldLabel htmlFor="edit-waba-id">
+                                WABA ID
+                              </FieldLabel>
                               <Input
                                 id="edit-waba-id"
                                 inputMode="numeric"
@@ -790,9 +845,12 @@ export function IntegrationDetailPage() {
               <section className="flex flex-col gap-6">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <div>
-                    <h2 className="text-base font-semibold">Twilio Phone Numbers</h2>
+                    <h2 className="text-base font-semibold">
+                      Twilio Phone Numbers
+                    </h2>
                     <p className="text-xs text-muted-foreground">
-                      Voice-capable incoming phone numbers synchronized from this Twilio account.
+                      Voice-capable incoming phone numbers synchronized from
+                      this Twilio account.
                     </p>
                   </div>
                   <Button
@@ -809,12 +867,17 @@ export function IntegrationDetailPage() {
                   </Button>
                 </div>
 
-                {(!connection.config.phone_numbers || connection.config.phone_numbers.length === 0) ? (
+                {!connection.config.phone_numbers ||
+                connection.config.phone_numbers.length === 0 ? (
                   <Card className="border-dashed">
                     <CardHeader className="text-center">
-                      <CardTitle className="text-base">No Phone Numbers Synchronized</CardTitle>
+                      <CardTitle className="text-base">
+                        No Phone Numbers Synchronized
+                      </CardTitle>
                       <CardDescription>
-                        Configure your <code>auth_token</code> under Credentials and click "Refresh from Twilio" to fetch your voice phone numbers.
+                        Configure your <code>auth_token</code> under Credentials
+                        and click "Refresh from Twilio" to fetch your voice
+                        phone numbers.
                       </CardDescription>
                     </CardHeader>
                   </Card>
@@ -840,7 +903,10 @@ export function IntegrationDetailPage() {
                             </TableCell>
                             <TableCell>
                               {pn.voice ? (
-                                <Badge variant="secondary" className="text-emerald-500">
+                                <Badge
+                                  variant="secondary"
+                                  className="text-emerald-500"
+                                >
                                   Voice
                                 </Badge>
                               ) : (
@@ -859,7 +925,9 @@ export function IntegrationDetailPage() {
               </section>
             )}
 
-            {section === "Media" && !isTwilio && <MediaPanel connectionId={connectionId} />}
+            {section === "Media" && !isTwilio && (
+              <MediaPanel connectionId={connectionId} />
+            )}
 
             {section === "Templates" && !isTwilio && (
               <section className="flex flex-col gap-6">
@@ -997,37 +1065,46 @@ export function IntegrationDetailPage() {
                           />
                         </Field>
                         <Field>
-                          <FieldLabel htmlFor="header-media">Header image</FieldLabel>
-                          <NativeSelect id="header-media" value={headerMediaId} onChange={(e) => setHeaderMediaId(e.target.value)}>
-                            <NativeSelectOption value="">No image</NativeSelectOption>
-                            {mediaData?.media.filter((item) => item.status === "available").map((item) => (
-                              <NativeSelectOption key={item.id} value={item.id}>
-                                {item.display_name} · {item.provider_media_id} ({item.mime_type})
-                              </NativeSelectOption>
-                            ))}
-                          </NativeSelect>
+                          <FieldLabel>Header image</FieldLabel>
+                          <WhatsAppMediaPicker
+                            connectionId={connectionId}
+                            selectedProviderId={headerMediaId || null}
+                            onSelect={(mediaId) =>
+                              setHeaderMediaId(mediaId ?? "")
+                            }
+                          />
                           <FieldDescription>
-                            Required for templates with an image header. The local catalog record is pinned to this tool version and resolved to Meta's provider ID at runtime.
+                            Required for templates with an image header. The
+                            generated tool keeps the Meta media ID;
+                            authenticated preview uses the catalog record.
                           </FieldDescription>
                         </Field>
 
-                        {templateParameterNames(selectedTemplate).map((name) => (
-                          <Field key={name}>
-                            <FieldLabel htmlFor={`parameter-${name}`}>
-                              {name} description
-                            </FieldLabel>
-                            <Textarea
-                              id={`parameter-${name}`}
-                              value={parameterDescriptions[name] ?? ""}
-                              onChange={(e) => setParameterDescriptions((current) => ({ ...current, [name]: e.target.value }))}
-                              rows={2}
-                              required
-                            />
-                            <FieldDescription>
-                              Helps the agent provide the correct value for this template variable.
-                            </FieldDescription>
-                          </Field>
-                        ))}
+                        {templateParameterNames(selectedTemplate).map(
+                          (name) => (
+                            <Field key={name}>
+                              <FieldLabel htmlFor={`parameter-${name}`}>
+                                {name} description
+                              </FieldLabel>
+                              <Textarea
+                                id={`parameter-${name}`}
+                                value={parameterDescriptions[name] ?? ""}
+                                onChange={(e) =>
+                                  setParameterDescriptions((current) => ({
+                                    ...current,
+                                    [name]: e.target.value,
+                                  }))
+                                }
+                                rows={2}
+                                required
+                              />
+                              <FieldDescription>
+                                Helps the agent provide the correct value for
+                                this template variable.
+                              </FieldDescription>
+                            </Field>
+                          ),
+                        )}
                         <Field>
                           <FieldLabel htmlFor="tool-name">Tool Name</FieldLabel>
                           <Input
@@ -1101,8 +1178,9 @@ export function IntegrationDetailPage() {
           </DialogHeader>
           <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs text-muted-foreground space-y-2">
             <p>
-              Disconnecting will immediately disable active {isTwilio ? "call" : "message"} dispatch and
-              securely purge stored API access tokens and secrets.
+              Disconnecting will immediately disable active{" "}
+              {isTwilio ? "call" : "message"} dispatch and securely purge stored
+              API access tokens and secrets.
             </p>
             <p>
               The connection record will be preserved with a{" "}
@@ -1151,25 +1229,28 @@ export function IntegrationDetailPage() {
               {isTwilio ? (
                 <>
                   <li>
-                    Stored credentials and telephony connection configuration will be permanently destroyed.
+                    Stored credentials and telephony connection configuration
+                    will be permanently destroyed.
                   </li>
                   <li>
-                    Outbound calls can no longer be dispatched through this Twilio connection.
+                    Outbound calls can no longer be dispatched through this
+                    Twilio connection.
                   </li>
                 </>
               ) : (
                 <>
                   <li>
-                    All generated WhatsApp tools (e.g. template and direct message tools)
-                    will be permanently deleted from the Tools catalog.
+                    All generated WhatsApp tools (e.g. template and direct
+                    message tools) will be permanently deleted from the Tools
+                    catalog.
                   </li>
                   <li>
-                    These tools will be automatically unbound and removed from all agent
-                    configurations and flow nodes.
+                    These tools will be automatically unbound and removed from
+                    all agent configurations and flow nodes.
                   </li>
                   <li>
-                    Stored credentials, uploaded media, and webhook message logs for this
-                    connection will be permanently destroyed.
+                    Stored credentials, uploaded media, and webhook message logs
+                    for this connection will be permanently destroyed.
                   </li>
                 </>
               )}

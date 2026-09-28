@@ -10,7 +10,12 @@ from voice_api.api.v1.endpoints import calls
 from voice_api.schemas.call import StartCallBody
 from voice_runtime.contracts.evidence import EvidenceBatch
 from voice_runtime.execution.exchange import ExchangeTracker
-from voice_runtime.execution.native import NativePipelineHost, render_opening
+from voice_runtime.execution.native import (
+    NativePipelineHost,
+    build_whatsapp_template_payload,
+    render_opening,
+    whatsapp_template_header_component,
+)
 
 
 class MemorySink:
@@ -32,6 +37,37 @@ def test_verbatim_opening_renders_whitelisted_state_and_nested_contact_values() 
 def test_verbatim_opening_rejects_unavailable_state() -> None:
     with pytest.raises(ValueError, match="unavailable variable"):
         render_opening("Hello {{phone_number}}", {"name": "Maria"})
+
+
+def test_whatsapp_template_header_uses_exact_meta_media_id() -> None:
+    assert whatsapp_template_header_component({"format": "IMAGE", "media_id": "74506"}) == {
+        "type": "header",
+        "parameters": [{"type": "image", "image": {"id": "74506"}}],
+    }
+
+
+def test_whatsapp_template_header_rejects_incomplete_media_reference() -> None:
+    with pytest.raises(ValueError, match="header configuration is invalid"):
+        whatsapp_template_header_component({"format": "IMAGE", "media_id": ""})
+
+
+def test_whatsapp_send_payload_keeps_meta_id_language_and_body_order() -> None:
+    payload = build_whatsapp_template_payload(
+        destination="919876543210",
+        template_name="dialtone_followup",
+        language="en_US",
+        header={"format": "IMAGE", "media_id": "74506"},
+        parameter_mappings={"2": "param_2", "1": "caller_name"},
+        arguments={"caller_name": "Ava", "param_2": "Call summary"},
+        caller_name="Ava",
+    )
+    template = payload["template"]
+    assert template["language"] == {"code": "en_US"}
+    assert template["components"][0]["parameters"][0]["image"] == {"id": "74506"}
+    assert [item["text"] for item in template["components"][1]["parameters"]] == [
+        "Ava",
+        "Call summary",
+    ]
 
 
 def test_flow_tools_and_provider_evidence_round_trip():
@@ -85,15 +121,9 @@ def test_caller_barge_in_interrupts_active_generation_and_tools_once():
     tracker = ExchangeTracker("run-1", sink)
     tracker.begin("caller")
     speech = tracker.start_operation("caller speech", "speech")
-    tracker.start_operation(
-        "transcription", "stt", parent_operation_id=speech["operation_id"]
-    )
-    llm = tracker.start_operation(
-        "inference", "llm", parent_operation_id=speech["operation_id"]
-    )
-    tts = tracker.start_operation(
-        "synthesis", "tts", parent_operation_id=llm["operation_id"]
-    )
+    tracker.start_operation("transcription", "stt", parent_operation_id=speech["operation_id"])
+    llm = tracker.start_operation("inference", "llm", parent_operation_id=speech["operation_id"])
+    tts = tracker.start_operation("synthesis", "tts", parent_operation_id=llm["operation_id"])
     playback = tracker.start_operation(
         "serial playback", "playback", parent_operation_id=tts["operation_id"]
     )
@@ -149,11 +179,15 @@ def test_classifier_result_is_delivered_and_consumed_by_next_llm():
         "classifier_context_updated",
         "classifier_result_consumed",
     }
-    assert any(record.result_id == result_id for record in records if record.kind == "classifier_result")
+    assert any(
+        record.result_id == result_id for record in records if record.kind == "classifier_result"
+    )
 
 
 @pytest.mark.asyncio
-async def test_configured_node_classifier_runs_once_and_returns_context_message(monkeypatch, tmp_path):
+async def test_configured_node_classifier_runs_once_and_returns_context_message(
+    monkeypatch, tmp_path
+):
     host = NativePipelineHost("run-1", tmp_path, SimpleNamespace(groq_api_key="test-key"))
     host.context = LLMContext([{"role": "user", "content": "Caller: interested"}])
     sink = MemorySink()

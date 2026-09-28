@@ -3,12 +3,11 @@
 import hashlib
 import re
 from datetime import UTC, datetime
-from pathlib import Path
 from secrets import compare_digest
 from typing import Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_operator
@@ -20,6 +19,7 @@ from voice_api.models import (
     IntegrationConnection,
     IntegrationMedia,
     IntegrationSecret,
+    Run,
     Tool,
     ToolInvocation,
     ToolVersion,
@@ -43,6 +43,8 @@ router = APIRouter(tags=["integrations"])
 Session = Depends(get_session)
 
 Operator = Depends(require_operator)
+MAX_WHATSAPP_IMAGE_BYTES = 5 * 1024 * 1024
+ALLOWED_WHATSAPP_IMAGE_TYPES = {"image/png", "image/jpeg"}
 
 
 def webhook_url(connection_id: str) -> str | None:
@@ -522,14 +524,23 @@ async def upload_media(
     _: None = Operator,
 ) -> MediaResponse:
     connection = await connection_or_404(session, connection_id)
-    content = await file.read()
-    if not content or len(content) > 16 * 1024 * 1024:
-        raise HTTPException(422, "Media must be between 1 byte and 16 MiB")
-    filename = Path(file.filename or "upload").name
+    if connection.provider != "whatsapp" or not connection.enabled:
+        raise HTTPException(422, "An enabled WhatsApp connection is required")
+    content = await file.read(MAX_WHATSAPP_IMAGE_BYTES + 1)
+    await file.close()
+    if not content or len(content) > MAX_WHATSAPP_IMAGE_BYTES:
+        raise HTTPException(422, "Image must be between 1 byte and 5 MiB")
+    mime_type = (file.content_type or "").lower().split(";", 1)[0]
+    signatures = {
+        "image/png": content.startswith(b"\x89PNG\r\n\x1a\n"),
+        "image/jpeg": content.startswith(b"\xff\xd8\xff"),
+    }
+    if mime_type not in ALLOWED_WHATSAPP_IMAGE_TYPES or not signatures[mime_type]:
+        raise HTTPException(422, "Only valid PNG and JPEG images can be uploaded")
+    filename = (file.filename or "upload").replace("\\", "/").rsplit("/", 1)[-1]
     display_name = (display_name or filename).strip()
     if not display_name or len(display_name) > 255:
         raise HTTPException(422, "Display name must be between 1 and 255 characters")
-    mime_type = file.content_type or "application/octet-stream"
     adapter = await whatsapp(session, connection)
     async with adapter:
         provider = await adapter.upload_media(filename, mime_type, content)
@@ -537,21 +548,16 @@ async def upload_media(
     if not isinstance(provider_media_id, str):
         raise HTTPException(502, "WhatsApp did not return a media ID")
     digest = hashlib.sha256(content).hexdigest()
-    directory = Path(get_settings().integration_media_dir) / connection_id
-    directory.mkdir(parents=True, exist_ok=True)
-    source_path = directory / f"{digest}-{filename}"
-    source_path.write_bytes(content)
     row = IntegrationMedia(
         id=new_id(),
         connection_id=connection_id,
         provider_media_id=provider_media_id,
         filename=filename,
         display_name=display_name,
-        media_type=media_type_for_mime(mime_type),
+        media_type="image",
         mime_type=mime_type,
         size_bytes=len(content),
         sha256=digest,
-        source_path=str(source_path),
         source="uploaded",
         status="available",
         provider_metadata=safe_media_metadata(provider, provider_media_id=provider_media_id),
@@ -562,9 +568,134 @@ async def upload_media(
     return media_response(row)
 
 
-@router.patch(
-    "/integrations/{connection_id}/media/{media_id}", response_model=MediaResponse
+def _whatsapp_config_references_media(
+    config: Any, *, connection_id: str, media: IntegrationMedia
+) -> bool:
+    if not isinstance(config, dict) or config.get("connection_id") != connection_id:
+        return False
+    header = config.get("header")
+    provider_id = header.get("media_id") if isinstance(header, dict) else None
+    references = (provider_id, config.get("header_media_id"))
+    return any(
+        isinstance(value, str) and value in (media.id, media.provider_media_id)
+        for value in references
+    )
+
+
+def _snapshot_references_media(
+    snapshot: dict, *, connection_id: str, media: IntegrationMedia
+) -> bool:
+    resolved = snapshot.get("_resolved", {})
+    tools = resolved.get("tools", {}) if isinstance(resolved, dict) else {}
+    if not isinstance(tools, dict):
+        return False
+    for tool in tools.values():
+        definition = tool.get("definition", {}) if isinstance(tool, dict) else {}
+        config = definition.get("whatsapp", {}) if isinstance(definition, dict) else {}
+        if _whatsapp_config_references_media(config, connection_id=connection_id, media=media):
+            return True
+    return False
+
+
+@router.get(
+    "/integrations/{connection_id}/media/{media_id}/preview",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Meta-hosted PNG or JPEG image bytes (not persisted)",
+            "content": {
+                "image/png": {"schema": {"type": "string", "format": "binary"}},
+                "image/jpeg": {"schema": {"type": "string", "format": "binary"}},
+            },
+        }
+    },
 )
+async def preview_media(
+    connection_id: str,
+    media_id: str,
+    session: AsyncSession = Session,
+    _: None = Operator,
+) -> Response:
+    connection = await connection_or_404(session, connection_id)
+    media = await session.scalar(
+        select(IntegrationMedia).where(
+            IntegrationMedia.id == media_id,
+            IntegrationMedia.connection_id == connection_id,
+            IntegrationMedia.media_type == "image",
+            IntegrationMedia.status == "available",
+        )
+    )
+    if media is None:
+        raise HTTPException(404, "Available image media record not found")
+    adapter = await whatsapp(session, connection)
+    try:
+        async with adapter:
+            content, mime_type = await adapter.preview_image(
+                media.provider_media_id, max_bytes=MAX_WHATSAPP_IMAGE_BYTES
+            )
+    except Exception as error:
+        raise HTTPException(502, "Meta image preview is unavailable") from error
+    return Response(
+        content,
+        media_type=mime_type,
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.delete("/integrations/{connection_id}/media/{media_id}", status_code=204)
+async def delete_media(
+    connection_id: str,
+    media_id: str,
+    session: AsyncSession = Session,
+    _: None = Operator,
+) -> None:
+    connection = await connection_or_404(session, connection_id)
+    media = await session.scalar(
+        select(IntegrationMedia)
+        .where(
+            IntegrationMedia.id == media_id,
+            IntegrationMedia.connection_id == connection_id,
+        )
+        .with_for_update()
+    )
+    if media is None:
+        raise HTTPException(404, "Media record not found")
+    versions = (await session.scalars(select(ToolVersion))).all()
+    if any(
+        _whatsapp_config_references_media(
+            version.config.get("whatsapp") if isinstance(version.config, dict) else None,
+            connection_id=connection_id,
+            media=media,
+        )
+        for version in versions
+    ):
+        raise HTTPException(
+            409, "Replace or remove all tool-version references before deleting media"
+        )
+    runs = (
+        await session.scalars(
+            select(Run).where(Run.status.in_(("queued", "claimed", "running", "uncertain")))
+        )
+    ).all()
+    if any(
+        isinstance(run.resolved_config, dict)
+        and _snapshot_references_media(
+            run.resolved_config, connection_id=connection_id, media=media
+        )
+        for run in runs
+    ):
+        raise HTTPException(409, "An executable run snapshot still references this media")
+    adapter = await whatsapp(session, connection)
+    try:
+        async with adapter:
+            await adapter.delete_media(media.provider_media_id)
+    except Exception as error:
+        raise HTTPException(502, "Meta did not confirm media deletion") from error
+    await session.delete(media)
+    await session.commit()
+
+
+@router.patch("/integrations/{connection_id}/media/{media_id}", response_model=MediaResponse)
 async def update_media(
     connection_id: str,
     media_id: str,
@@ -586,9 +717,7 @@ async def update_media(
     return media_response(row)
 
 
-@router.post(
-    "/integrations/{connection_id}/media/{media_id}/verify", response_model=MediaResponse
-)
+@router.post("/integrations/{connection_id}/media/{media_id}/verify", response_model=MediaResponse)
 async def verify_media(
     connection_id: str,
     media_id: str,
@@ -615,7 +744,9 @@ async def verify_media(
         row.media_type = media_type_for_mime(row.mime_type)
     if isinstance(provider.get("file_size"), int):
         row.size_bytes = provider["file_size"]
-    if isinstance(provider.get("sha256"), str) and re.fullmatch(r"[a-f0-9]{64}", provider["sha256"]):
+    if isinstance(provider.get("sha256"), str) and re.fullmatch(
+        r"[a-f0-9]{64}", provider["sha256"]
+    ):
         row.sha256 = provider["sha256"]
     await session.commit()
     return media_response(row)
@@ -699,16 +830,25 @@ async def generate_template_tool(
             properties[key]["description"] = value.strip()
 
     header_media_id = body.header_media_id
+    header_config = None
     header_component = next(
         (c for c in match.get("components", []) if c.get("type") == "HEADER"), None
     )
+    allowed_header_formats = {"IMAGE", "VIDEO", "DOCUMENT"}
+    template_header_format = (
+        str(header_component.get("format", "")).upper() if header_component else None
+    )
+    if header_media_id and template_header_format not in allowed_header_formats:
+        raise HTTPException(422, "This template does not accept media in its header")
     if header_media_id:
         media = await session.scalar(
-            select(IntegrationMedia).where(
+            select(IntegrationMedia)
+            .where(
                 IntegrationMedia.connection_id == connection_id,
-                IntegrationMedia.id == header_media_id,
+                IntegrationMedia.provider_media_id == header_media_id,
                 IntegrationMedia.status == "available",
             )
+            .with_for_update()
         )
         if media is None:
             raise HTTPException(422, "Selected header media is not available for this integration")
@@ -716,17 +856,18 @@ async def generate_template_tool(
             "IMAGE": "image",
             "VIDEO": "video",
             "DOCUMENT": "document",
-        }.get(str(header_component.get("format", "")).upper()) if header_component else None
+        }.get(template_header_format or "")
         if expected_type and media.media_type != expected_type:
             raise HTTPException(
                 422,
                 f"Selected media is type '{media.media_type}', but this template requires '{expected_type}'",
             )
-    if header_component and str(header_component.get("format", "")).upper() in {
-        "IMAGE",
-        "VIDEO",
-        "DOCUMENT",
-    } and not header_media_id:
+        format_by_type = {"image": "IMAGE", "video": "VIDEO", "document": "DOCUMENT"}
+        header_format = format_by_type.get(media.media_type)
+        if header_format is None:
+            raise HTTPException(422, "Selected media type cannot be used as a template header")
+        header_config = {"format": header_format, "media_id": media.provider_media_id}
+    if template_header_format in allowed_header_formats and not header_media_id:
         raise HTTPException(422, "This template requires a matching header media record")
     description = (
         body.description
@@ -735,7 +876,9 @@ async def generate_template_tool(
 
     parameter_mappings = dict(body.parameter_mappings)
     if not parameter_mappings:
-        template_indexes = re.findall(r"\{\{(\d+)\}\}", body_component.get("text", "")) if body_component else []
+        template_indexes = (
+            re.findall(r"\{\{(\d+)\}\}", body_component.get("text", "")) if body_component else []
+        )
         if len(template_indexes) == 1:
             parameter_mappings = {template_indexes[0]: "message"}
         else:
@@ -749,9 +892,7 @@ async def generate_template_tool(
         if body_component
         else set()
     )
-    _validate_template_parameter_mappings(
-        parameter_mappings, template_indexes, set(properties)
-    )
+    _validate_template_parameter_mappings(parameter_mappings, template_indexes, set(properties))
 
     config = {
         "name": tool_name,
@@ -762,7 +903,7 @@ async def generate_template_tool(
             "connection_id": connection_id,
             "template_name": match.get("name"),
             "language": match.get("language") or body.language,
-            "header_media_id": header_media_id,
+            "header": header_config,
             "parameter_mappings": parameter_mappings,
         },
         "parameters": {
