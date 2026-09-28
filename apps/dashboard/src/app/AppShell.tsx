@@ -2,7 +2,7 @@ import {
   Activity, AudioLines, CalendarClock, Database, Link2, ListTodo,
   LogOut, Radio, Settings2, Users,
 } from "lucide-react";
-import { UserButton } from "@clerk/react";
+import { UserButton, useClerk } from "@clerk/react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { AppRoutes } from "./AppRoutes";
 import { QuickDial } from "./QuickDial";
@@ -29,7 +29,8 @@ const navigation = [
   { title: "Settings", path: "/settings", icon: Settings2 },
 ] as const;
 
-function SideNavigation({ disconnect }: { disconnect: () => void }) {
+function SideNavigation() {
+  const { signOut } = useClerk();
   const { pathname } = useLocation();
   return (
     <Sidebar collapsible="icon">
@@ -58,8 +59,8 @@ function SideNavigation({ disconnect }: { disconnect: () => void }) {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton onClick={disconnect} tooltip="Disconnect">
-              <LogOut aria-hidden="true" /><span>Disconnect</span>
+            <SidebarMenuButton onClick={() => void signOut()} tooltip="Sign out">
+              <LogOut aria-hidden="true" /><span>Sign out</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -91,10 +92,10 @@ function LocationTrail() {
   );
 }
 
-export function AppShell({ disconnect }: { disconnect: () => void }) {
+export function AppShell() {
   return (
     <SidebarProvider>
-      <SideNavigation disconnect={disconnect} />
+      <SideNavigation />
       <SidebarInset className="min-w-0">
         <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
           <SidebarTrigger />

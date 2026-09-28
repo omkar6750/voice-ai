@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from voice_api.api.deps import get_session, require_operator
+from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.models import WorkspaceSettings
 from voice_api.schemas.agent import RevisionBody
 from voice_runtime.contracts import WorkspaceConfig
 
 router = APIRouter(tags=["workspace"])
 Session = Depends(get_session)
-Operator = Depends(require_operator)
+Operator = Depends(require_legacy_owner)
 
 
 @router.get("/workspace")

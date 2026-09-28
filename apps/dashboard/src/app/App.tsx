@@ -1,37 +1,44 @@
 import { SignIn, SignUp, useAuth, UserButton } from "@clerk/react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { ApiContext, OperatorTokenContext, request } from "./api";
+import { ApiContext, request } from "./api";
 import { AppShell } from "./AppShell";
-import { Connect } from "./Connect";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 export function App() {
-  const { getToken, isLoaded, isSignedIn } = useAuth();
+  const { getToken, isLoaded, isSignedIn, userId } = useAuth();
   const { pathname } = useLocation();
-  const [token, setToken] = useState("");
-  const [identityStatus, setIdentityStatus] = useState<"checking" | "verified" | "unavailable">("checking");
+  const [accessStatus, setAccessStatus] = useState<"checking" | "allowed" | "denied">("checking");
+  const [authorizedUserId, setAuthorizedUserId] = useState<string | null>(null);
   useEffect(() => {
     if (!isSignedIn) return;
     let cancelled = false;
-    setIdentityStatus("checking");
+    setAccessStatus("checking");
+    setAuthorizedUserId(null);
     void (async () => {
       try {
         const sessionToken = await getToken();
         if (!sessionToken) throw new Error("No Clerk session token");
-        await request(sessionToken, "/auth/me");
-        if (!cancelled) setIdentityStatus("verified");
+        await request(sessionToken, "/auth/legacy-access");
+        if (!cancelled) {
+          setAuthorizedUserId(userId);
+          setAccessStatus("allowed");
+        }
       } catch {
-        if (!cancelled) setIdentityStatus("unavailable");
+        if (!cancelled) setAccessStatus("denied");
       }
     })();
     return () => { cancelled = true; };
-  }, [getToken, isSignedIn]);
+  }, [getToken, isSignedIn, userId]);
   const api = useCallback(
-    <T,>(path: string, init?: RequestInit) => request<T>(token, path, init),
-    [token],
+    async <T,>(path: string, init?: RequestInit) => {
+      const sessionToken = await getToken();
+      if (!sessionToken) throw new Error("Sign in required");
+      return request<T>(sessionToken, path, init);
+    },
+    [getToken],
   );
   if (!isLoaded) return <main className="grid min-h-svh place-items-center">Loading…</main>;
   if (!isSignedIn) {
@@ -56,18 +63,18 @@ export function App() {
   if (pathname.startsWith("/sign-")) return <Navigate to="/" replace />;
   return (
     <TooltipProvider>
-      <OperatorTokenContext.Provider value={token}>
-        <ApiContext.Provider value={api}>
-          {token ? (
-            <AppShell disconnect={() => setToken("")} />
-          ) : (
-            <>
-              <div className="absolute right-4 top-4"><UserButton /></div>
-              <Connect onConnect={setToken} identityStatus={identityStatus} />
-            </>
-          )}
-        </ApiContext.Provider>
-      </OperatorTokenContext.Provider>
+      <ApiContext.Provider value={api}>
+        {accessStatus === "allowed" && authorizedUserId === userId ? <AppShell /> : (
+          <main className="grid min-h-svh place-items-center px-4">
+            <div className="space-y-4 text-center">
+              <div className="mx-auto w-fit"><UserButton /></div>
+              <p role="status" className="text-sm text-muted-foreground">
+                {accessStatus === "checking" ? "Checking workspace access…" : "This account is not assigned to the existing workspace. Sign in with its verified owner email."}
+              </p>
+            </div>
+          </main>
+        )}
+      </ApiContext.Provider>
       <Toaster position="bottom-right" />
     </TooltipProvider>
   );

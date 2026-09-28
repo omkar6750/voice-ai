@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from voice_api.api.deps import get_session, require_operator
+from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.models import (
     Agent,
     AgentVersion,
@@ -27,7 +27,7 @@ from voice_runtime.contracts import AgentConfig
 
 router = APIRouter(tags=["agents"])
 Session = Depends(get_session)
-Operator = Depends(require_operator)
+Operator = Depends(require_legacy_owner)
 
 
 async def validate_callback_calendars(session: AsyncSession, config: AgentConfig) -> None:

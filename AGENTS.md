@@ -29,7 +29,8 @@ matching `VOICE_DATABASE_URL` for migrations.
 - `packages/voice_runtime/voice_runtime/telephony` owns modem protocols and adapters.
 - The standalone demo owns its provider settings and SDK setup. Configurable provider adapters remain pending; do not recreate an empty providers package.
 - `apps/dashboard` is a thin client. Generate API types from OpenAPI when API surface grows. Do not hand-maintain duplicate DTO contracts.
-- Dashboard sends `Authorization: Bearer $VOICE_OPERATOR_TOKEN` only from browser memory. It never receives provider keys or encrypted secrets.
+- Dashboard sends a short-lived Clerk session token from `getToken()` for API calls. It never receives provider keys, encrypted secrets, or runtime service credentials. Until tenant migration, unscoped APIs admit only the explicitly mapped verified Clerk owner.
+- Runtime ingestion and control writes require a distinct `VOICE_RUNTIME_SERVICE_TOKEN` in `X-Voice-Runtime-Token`; it never grants dashboard access. Keep this secret in local/deployment environment configuration, not the frontend.
 - STT, LLM, TTS and embedding credentials remain developer environment configuration. Dashboard action integrations use write-only Fernet-encrypted secrets.
 - Business code depends on local protocols, not vendor SDKs.
 - Keep units small. Add an ADR when a settled choice is not obvious from code.

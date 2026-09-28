@@ -433,15 +433,15 @@ async def _run_browser_pipeline(
         )
         if s
     )
-    tracker = ExchangeTracker(run_id, spool, secrets=(*secrets, settings.operator_token or ""))
+    tracker = ExchangeTracker(run_id, spool, secrets=(*secrets, settings.runtime_service_token or ""))
 
     from voice_api.main import app
 
-    headers = {"Authorization": f"Bearer {settings.operator_token}"}
+    headers = {"X-Voice-Runtime-Token": settings.runtime_service_token or ""}
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://runtime.local"
     ) as client:
-        ingestor = ApiEvidenceIngestor(client, run_id, settings.operator_token or "")
+        ingestor = ApiEvidenceIngestor(client, run_id, settings.runtime_service_token or "")
         delivery_task = asyncio.create_task(stream_evidence(spool, ingestor))
 
         try:

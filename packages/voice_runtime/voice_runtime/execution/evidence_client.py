@@ -14,10 +14,10 @@ class EvidenceDeliveryError(RuntimeError):
 
 
 class ApiEvidenceIngestor:
-    def __init__(self, client: httpx.AsyncClient, run_id: str, operator_token: str):
+    def __init__(self, client: httpx.AsyncClient, run_id: str, runtime_service_token: str):
         self._client = client
         self._run_id = run_id
-        self._token = operator_token
+        self._token = runtime_service_token
 
     async def ingest(self, records: list[dict]) -> None:
         batch = EvidenceBatch(records=records)
@@ -26,7 +26,7 @@ class ApiEvidenceIngestor:
         try:
             response = await self._client.post(
                 f"/api/runs/{self._run_id}/evidence",
-                headers={"Authorization": f"Bearer {self._token}"},
+                headers={"X-Voice-Runtime-Token": self._token},
                 json=batch.model_dump(mode="json"),
                 follow_redirects=False,
                 timeout=30,

@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
-from voice_api.api.deps import get_session, require_operator
+from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.core.config import Settings, get_settings
 from voice_api.schemas.browser_session import (
     BrowserSessionResponse,
@@ -19,7 +19,7 @@ from voice_api.services.browser_session_service import (
 
 router = APIRouter(prefix="/browser-sessions", tags=["browser-sessions"])
 Session = Depends(get_session)
-Operator = Depends(require_operator)
+Operator = Depends(require_legacy_owner)
 Config = Depends(get_settings)
 
 

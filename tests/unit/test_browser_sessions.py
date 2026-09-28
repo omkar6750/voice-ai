@@ -8,7 +8,7 @@ import httpx
 import pytest
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from voice_api.api.deps import get_session, require_operator
+from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.core.config import get_settings
 from voice_api.main import app
 from voice_api.models import Agent, AgentVersion, BrowserSession, Contact, Run
@@ -240,7 +240,7 @@ async def test_browser_session_api_create_and_delete():
         yield session_mock
 
     app.dependency_overrides[get_session] = mock_get_session
-    app.dependency_overrides[require_operator] = lambda: None
+    app.dependency_overrides[require_legacy_owner] = lambda: None
 
     try:
         with patch(
@@ -252,7 +252,7 @@ async def test_browser_session_api_create_and_delete():
                 res = await client.post(
                     "/api/v1/browser-sessions",
                     json={"agent_version_id": "av1"},
-                    headers={"Authorization": "Bearer test-operator-token"},
+                    headers={"Authorization": "Bearer test-clerk-session"},
                 )
                 assert res.status_code == 201
                 data = res.json()
@@ -268,7 +268,7 @@ async def test_browser_session_api_create_and_delete():
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
                 del_res = await client.delete(
                     f"/api/v1/browser-sessions/{session_id}",
-                    headers={"Authorization": "Bearer test-operator-token"},
+                    headers={"Authorization": "Bearer test-clerk-session"},
                 )
                 assert del_res.status_code == 200
                 assert del_res.json()["status"] == "disconnected"
@@ -457,14 +457,14 @@ async def test_runs_list_normalizes_transport_provider():
         yield session_mock
 
     app.dependency_overrides[get_session] = mock_get_session
-    app.dependency_overrides[require_operator] = lambda: None
+    app.dependency_overrides[require_legacy_owner] = lambda: None
 
     try:
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             res = await client.get(
                 "/api/v1/runs",
-                headers={"Authorization": "Bearer test-operator-token"},
+                headers={"Authorization": "Bearer test-clerk-session"},
             )
             assert res.status_code == 200
             runs = res.json()["runs"]

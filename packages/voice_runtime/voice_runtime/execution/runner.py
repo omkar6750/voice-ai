@@ -24,7 +24,7 @@ class CallDriver(Protocol):
 
 async def execute_call(
     client: httpx.AsyncClient,
-    operator_token: str,
+    runtime_service_token: str,
     run_id: str,
     endpoint_id: str,
     driver: CallDriver,
@@ -37,7 +37,7 @@ async def execute_call(
     if not 0 < heartbeat_seconds <= 20:
         raise ValueError("Heartbeat interval must be within 20 seconds")
     token = str(uuid4())
-    headers = {"Authorization": f"Bearer {operator_token}"}
+    headers = {"X-Voice-Runtime-Token": runtime_service_token}
 
     async def post(suffix: str, body: dict) -> dict:
         response = await client.post(
@@ -62,7 +62,7 @@ async def execute_call(
     released, incomplete = False, False
     call_task = heartbeat_task = delivery_task = None
     spool = None
-    ingestor = ApiEvidenceIngestor(client, run_id, operator_token)
+    ingestor = ApiEvidenceIngestor(client, run_id, runtime_service_token)
 
     async def heartbeat():
         while True:
@@ -78,7 +78,7 @@ async def execute_call(
     try:
         heartbeat_task = asyncio.create_task(heartbeat())
         spool = DurableSpool(spool_path)
-        tracker = ExchangeTracker(run_id, spool, secrets=(*secrets, operator_token))
+        tracker = ExchangeTracker(run_id, spool, secrets=(*secrets, runtime_service_token))
         delivery_task = asyncio.create_task(stream_evidence(spool, ingestor))
         call_task = asyncio.create_task(work())
         done, _ = await asyncio.wait(

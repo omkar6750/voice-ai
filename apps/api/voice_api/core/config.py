@@ -23,7 +23,9 @@ class Settings(BaseSettings):
     recordings_dir: str = "data/recordings"
     integration_keys: str | None = None
     integration_active_key: str | None = None
-    operator_token: str | None = None
+    clerk_legacy_owner_user_id: str | None = None
+    clerk_legacy_owner_email: str | None = None
+    runtime_service_token: str | None = None
     clerk_secret_key: str | None = Field(default=None, validation_alias="CLERK_SECRET_KEY")
     clerk_publishable_key: str | None = Field(
         default=None, validation_alias="CLERK_PUBLISHABLE_KEY"

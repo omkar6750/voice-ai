@@ -18,8 +18,12 @@ launch. Add quota tiers after the access boundary and call economics are measure
 Implementation began in the `codex/clerk-integration` worktree. The new Clerk
 development application is linked, Organizations are enabled, and the React/Python
 identity foundation is wired: sign-in/sign-up, a verified `/api/v1/auth/me`
-endpoint, and a session-verification check in the signed-in preview. Existing
-operator endpoints still require the original operator token. No tenant migration,
+endpoint, and a server-side legacy-owner gate. The dashboard no longer asks for
+or stores the operator token; it sends Clerk session tokens. Runtime writes use a
+separate service token on designated routes. The temporary owner mapping uses
+`VOICE_CLERK_LEGACY_OWNER_EMAIL`, with a verified primary email lookup, until the
+account is created and `VOICE_CLERK_LEGACY_OWNER_USER_ID` can be pinned. Missing
+`VOICE_RUNTIME_SERVICE_TOKEN` intentionally disables runtime writes. No tenant migration,
 seed, or live call has
 been performed yet. This branch merged committed `main` through `0a7a446`; any
 later changes must be merged, never rebased. Preserve the protected demo.

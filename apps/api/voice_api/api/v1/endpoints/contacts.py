@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from voice_api.api.deps import get_session, require_operator
+from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.models import Call, Callback, Contact, ContactFact, Run
 from voice_api.schemas.contact import (
     ContactBody,
@@ -12,7 +12,7 @@ from voice_api.schemas.contact import (
 
 router = APIRouter(tags=["contacts"])
 Session = Depends(get_session)
-Operator = Depends(require_operator)
+Operator = Depends(require_legacy_owner)
 
 BLOCKED_CONTACT_FIELDS = {"id", "phone_number", "metadata_json", "created_at"}
 

@@ -8,7 +8,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from voice_api.api.deps import get_session, require_operator
+from voice_api.api.deps import get_session, require_runtime_service
 from voice_api.core.security import safe_evidence
 from voice_api.models import (
     ClassifierContextDelivery,
@@ -46,7 +46,7 @@ from voice_runtime.contracts.evidence import (
 
 router = APIRouter(tags=["evidence"])
 Session = Depends(get_session)
-Operator = Depends(require_operator)
+Operator = Depends(require_runtime_service)
 Id = Annotated[str, Field(min_length=1, max_length=36)]
 
 

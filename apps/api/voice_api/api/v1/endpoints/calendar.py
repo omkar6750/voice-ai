@@ -12,7 +12,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from voice_api.api.deps import get_session, require_operator
+from voice_api.api.deps import get_session, require_legacy_owner, require_runtime_service
 from voice_api.models import (
     AgentVersion,
     CalendarIntegration,
@@ -37,7 +37,8 @@ from voice_runtime.contracts import AgentConfig
 
 router = APIRouter(tags=["calendar"])
 Session = Depends(get_session)
-Operator = Depends(require_operator)
+Operator = Depends(require_legacy_owner)
+Runtime = Depends(require_runtime_service)
 
 
 class CreateCalendar(BaseModel):
@@ -254,7 +255,7 @@ async def disconnect(
 
 @router.post("/callback-scheduling/availability")
 async def availability(
-    body: AvailabilityRequest, session: AsyncSession = Session, _: None = Operator
+    body: AvailabilityRequest, session: AsyncSession = Session, _: None = Runtime
 ) -> dict:
     version = await session.get(AgentVersion, body.agent_version_id)
     if version is None:
@@ -325,7 +326,7 @@ async def availability(
 
 
 @router.post("/callback-scheduling/book")
-async def book(body: BookRequest, session: AsyncSession = Session, _: None = Operator) -> dict:
+async def book(body: BookRequest, session: AsyncSession = Session, _: None = Runtime) -> dict:
     try:
         payload = verify_slot(body.slot_id)
     except SchedulingError as exc:

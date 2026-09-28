@@ -8,7 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFi
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from voice_api.api.deps import get_session, require_operator
+from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.core.config import get_settings
 from voice_api.db.session import SessionFactory
 from voice_api.knowledge.embeddings import GeminiEmbedder
@@ -21,7 +21,7 @@ from voice_runtime.contracts.knowledge import KnowledgeConfig
 
 router = APIRouter(tags=["knowledge"])
 Session = Depends(get_session)
-Operator = Depends(require_operator)
+Operator = Depends(require_legacy_owner)
 
 
 class BaseUpdate(BaseModel):

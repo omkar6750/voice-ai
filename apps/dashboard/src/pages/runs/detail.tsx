@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useAuth } from "@clerk/react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Activity, ArrowLeft, FileAudio, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
-import { useApi, useOperatorToken } from "@/app/api";
+import { useApi } from "@/app/api";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -34,7 +35,7 @@ import type {
 } from "./types";
 
 function AudioTrack({ artifact }: { artifact: Artifact }) {
-  const token = useOperatorToken();
+  const { getToken } = useAuth();
   const [url, setUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(
@@ -46,10 +47,12 @@ function AudioTrack({ artifact }: { artifact: Artifact }) {
   async function load() {
     setBusy(true);
     try {
+      const sessionToken = await getToken();
+      if (!sessionToken) throw new Error("Sign in required");
       const response = await fetch(
         "/api/v1/artifacts/" + artifact.id + "/file",
         {
-          headers: { Authorization: "Bearer " + token },
+          headers: { Authorization: "Bearer " + sessionToken },
         },
       );
       if (!response.ok)

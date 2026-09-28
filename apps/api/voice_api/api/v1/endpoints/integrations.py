@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from voice_api.api.deps import get_session, require_operator
+from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.core.config import get_settings
 from voice_api.models import (
     AgentVersion,
@@ -42,7 +42,7 @@ from voice_api.services.whatsapp_service import WhatsAppAdapter, _inbound_window
 router = APIRouter(tags=["integrations"])
 Session = Depends(get_session)
 
-Operator = Depends(require_operator)
+Operator = Depends(require_legacy_owner)
 
 
 def webhook_url(connection_id: str) -> str | None:

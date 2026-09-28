@@ -1270,13 +1270,13 @@ class NativePipelineHost:
                             "reason": args.get("reason", "Customer requested callback"),
                         }
                     )
-                token = getattr(self.settings, "operator_token", None) or os.getenv(
-                    "VOICE_OPERATOR_TOKEN", ""
+                token = getattr(self.settings, "runtime_service_token", None) or os.getenv(
+                    "VOICE_RUNTIME_SERVICE_TOKEN", ""
                 )
                 try:
                     async with httpx.AsyncClient(timeout=20) as client:
                         response = await client.post(
-                            endpoint, json=payload, headers={"Authorization": f"Bearer {token}"}
+                            endpoint, json=payload, headers={"X-Voice-Runtime-Token": token}
                         )
                     return response.json()
                 except Exception as exc:

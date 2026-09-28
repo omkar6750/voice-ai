@@ -56,6 +56,17 @@ run evidence, and historical links stay intact. New customer workspaces receive
 copies of approved starter agents and seeded tools; they never share mutable agent
 or tool rows across tenants.
 
+Before tenant backfill, the shared operator bearer token is removed. Every
+interactive legacy route is limited to one verified Clerk owner. The configured
+owner email is checked against the primary, verified email returned by Clerk's
+Backend API; once the account exists, pinning its Clerk user ID avoids a lookup
+on every request. Other signed-in users cannot access the unscoped legacy data.
+Runtime writes use a distinct `VOICE_RUNTIME_SERVICE_TOKEN` presented only in
+`X-Voice-Runtime-Token` on designated routes. The service credential never grants
+browser/dashboard access, and a Clerk session never grants runtime ingestion.
+Missing owner mapping or runtime credential fails closed. Public provider callbacks
+retain their existing signed-state/provider-signature verification.
+
 # Why
 
 The current `workspace_settings` table is a singleton; roots such as agents,

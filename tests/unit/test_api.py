@@ -4,7 +4,17 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from voice_api.core.config import Settings
+from voice_api.core.security import require_legacy_owner
 from voice_api.main import DashboardFiles, app
+
+
+@pytest.fixture(autouse=True)
+def allow_legacy_owner_for_legacy_api_tests():
+    previous = app.dependency_overrides.copy()
+    app.dependency_overrides[require_legacy_owner] = lambda: None
+    yield
+    app.dependency_overrides.clear()
+    app.dependency_overrides.update(previous)
 
 
 @pytest.mark.asyncio
@@ -35,12 +45,8 @@ async def test_dashboard_deep_links_do_not_hide_missing_api_or_assets(tmp_path) 
 
 @pytest.mark.asyncio
 async def test_providers_and_config_schema_routes(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "voice_api.core.security.get_settings", lambda: Settings(operator_token="test-token")
-    )
-    monkeypatch.setattr(
-        "voice_api.api.deps.get_settings", lambda: Settings(operator_token="test-token")
-    )
+    monkeypatch.setattr("voice_api.core.security.get_settings", lambda: Settings(_env_file=None))
+    monkeypatch.setattr("voice_api.api.deps.get_settings", lambda: Settings(_env_file=None))
     headers = {"Authorization": "Bearer test-token"}
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -186,12 +192,8 @@ async def test_contacts_variables_endpoint(monkeypatch) -> None:
 
     from voice_api.api.deps import get_session
 
-    monkeypatch.setattr(
-        "voice_api.core.security.get_settings", lambda: Settings(operator_token="test-token")
-    )
-    monkeypatch.setattr(
-        "voice_api.api.deps.get_settings", lambda: Settings(operator_token="test-token")
-    )
+    monkeypatch.setattr("voice_api.core.security.get_settings", lambda: Settings(_env_file=None))
+    monkeypatch.setattr("voice_api.api.deps.get_settings", lambda: Settings(_env_file=None))
 
     mock_session = AsyncMock()
     mock_result = MagicMock()
@@ -244,12 +246,8 @@ async def test_create_and_patch_contact_with_metadata(monkeypatch) -> None:
     from voice_api.api.deps import get_session
     from voice_api.models.configuration import Contact
 
-    monkeypatch.setattr(
-        "voice_api.core.security.get_settings", lambda: Settings(operator_token="test-token")
-    )
-    monkeypatch.setattr(
-        "voice_api.api.deps.get_settings", lambda: Settings(operator_token="test-token")
-    )
+    monkeypatch.setattr("voice_api.core.security.get_settings", lambda: Settings(_env_file=None))
+    monkeypatch.setattr("voice_api.api.deps.get_settings", lambda: Settings(_env_file=None))
 
     mock_session = AsyncMock()
     mock_session.add = MagicMock()
@@ -338,7 +336,9 @@ def test_verbatim_opening_requires_initial_node_to_wait() -> None:
         "greeting": "Hello {{name}}",
         "flow": {
             "initial_node": "greeting",
-            "nodes": [{"id": "greeting", "prompt": "Continue after the caller answers", "terminal": True}],
+            "nodes": [
+                {"id": "greeting", "prompt": "Continue after the caller answers", "terminal": True}
+            ],
         },
     }
     with pytest.raises(ValidationError, match="verbatim opening"):
@@ -360,4 +360,3 @@ def test_legacy_persona_is_ignored_and_empty_greeting_keeps_immediate_default() 
     )
     assert config.flow.nodes[0].respond_immediately is True
     assert "persona" not in config.model_dump()
-

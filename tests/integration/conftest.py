@@ -6,7 +6,7 @@ import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
-from voice_api.core.security import require_operator
+from voice_api.core.security import require_legacy_owner, require_runtime_service
 from voice_api.db.session import get_session
 from voice_api.main import app
 
@@ -38,12 +38,13 @@ async def client(database):
     async def session_override():
         yield database
 
-    async def operator_override():
+    async def owner_override():
         return None
 
     previous = app.dependency_overrides.copy()
     app.dependency_overrides[get_session] = session_override
-    app.dependency_overrides[require_operator] = operator_override
+    app.dependency_overrides[require_legacy_owner] = owner_override
+    app.dependency_overrides[require_runtime_service] = owner_override
     try:
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"

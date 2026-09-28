@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from voice_api.api.deps import get_session, require_operator
+from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.core.config import get_settings
 from voice_api.models import Call, Run
 from voice_api.schemas.call import StartCallBody
@@ -20,7 +20,7 @@ from voice_runtime.telephony.driver import Sim7600CallDriver
 
 router = APIRouter(tags=["calls"])
 Session = Depends(get_session)
-Operator = Depends(require_operator)
+Operator = Depends(require_legacy_owner)
 _background_call_tasks: set[asyncio.Task] = set()
 
 
@@ -30,7 +30,7 @@ async def _run_live_call_background(run_id: str, endpoint_id: str) -> None:
     settings = get_settings()
     host = NativePipelineHost(run_id, Path(settings.recordings_dir), settings)
     driver = Sim7600CallDriver(host)
-    headers = {"Authorization": f"Bearer {settings.operator_token}"}
+    headers = {"X-Voice-Runtime-Token": settings.runtime_service_token or ""}
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://runtime.local"
@@ -57,7 +57,7 @@ async def _run_live_call_background(run_id: str, endpoint_id: str) -> None:
         try:
             await execute_call(
                 client,
-                settings.operator_token,
+                settings.runtime_service_token or "",
                 run_id,
                 endpoint_id,
                 driver,
@@ -96,8 +96,8 @@ async def start_call(
                 raise HTTPException(422, "Twilio dispatch requires VOICE_PUBLIC_BASE_URL")
         else:
             endpoint = body.telephony.endpoint_id if body.telephony else body.endpoint_id
-            if not endpoint or not get_settings().operator_token:
-                raise HTTPException(422, "Dispatch needs an endpoint and operator token")
+            if not endpoint or not get_settings().runtime_service_token:
+                raise HTTPException(422, "Dispatch needs an endpoint and runtime service token")
 
     run, call = await queue_call(
         session,
@@ -249,8 +249,8 @@ async def dispatch_queued_call(
             "target": call.target_snapshot,
         }
 
-    if not run.endpoint_id or not get_settings().operator_token:
-        raise HTTPException(422, "Dispatch needs an endpoint and operator token")
+    if not run.endpoint_id or not get_settings().runtime_service_token:
+        raise HTTPException(422, "Dispatch needs an endpoint and runtime service token")
     _spawn_call_task(run.id, run.endpoint_id)
     return {
         "run_id": run.id,

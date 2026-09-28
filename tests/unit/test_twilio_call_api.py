@@ -450,7 +450,7 @@ async def test_exception_sanitization_on_dial_failure():
         patch("voice_api.api.v1.endpoints.calls.queue_call", return_value=(run_mock, call_mock)),
         patch(
             "voice_api.api.v1.endpoints.calls.get_settings",
-            return_value=SimpleNamespace(public_base_url="https://test.com", operator_token="tok"),
+            return_value=SimpleNamespace(public_base_url="https://test.com", runtime_service_token="tok"),
         ),
         patch(
             "voice_api.services.twilio_service.resolve_twilio_credentials",

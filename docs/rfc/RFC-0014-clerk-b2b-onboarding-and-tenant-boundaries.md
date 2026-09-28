@@ -20,6 +20,9 @@ The new Clerk development app is `Voice AI B2B`, application ID
 `app_3Jutc4GvIX2mItzJoPGOxccUsYi`. Organizations are enabled with forced
 selection and up to 20 members. A production instance and domain are pending.
 Development keys are in ignored `.env.local` files, never in source or docs.
+The interim single-workspace dashboard now accepts only its verified Clerk owner;
+workers have a separate runtime-only credential. Other Clerk users remain signed in
+but cannot see legacy resources until the tenant migration is complete.
 
 # User journeys
 

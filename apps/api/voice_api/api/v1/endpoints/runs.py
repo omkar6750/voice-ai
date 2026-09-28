@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from voice_api.api.deps import get_session, require_operator
+from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.models import (
     AgentVersion,
     Call,
@@ -24,7 +24,7 @@ from voice_api.services.resolution_service import resolve
 
 router = APIRouter(tags=["runs"])
 Session = Depends(get_session)
-Operator = Depends(require_operator)
+Operator = Depends(require_legacy_owner)
 
 
 class BrowserRunRequest(BaseModel):
