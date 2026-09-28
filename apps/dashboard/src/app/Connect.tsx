@@ -13,7 +13,7 @@ import {
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 
-export function Connect({ onConnect }: { onConnect: (token: string) => void }) {
+export function Connect({ onConnect, identityStatus }: { onConnect: (token: string) => void; identityStatus: "checking" | "verified" | "unavailable" }) {
   const [candidate, setCandidate] = useState("");
   const [busy, setBusy] = useState(false);
   async function submit(event: FormEvent) {
@@ -38,8 +38,11 @@ export function Connect({ onConnect }: { onConnect: (token: string) => void }) {
             <Headphones aria-hidden="true" /> Voice AI
           </CardTitle>
           <CardDescription>
-            Operator token remains in this tab's memory only.
+            Internal preview access while workspace authorization is being migrated. The operator token remains in this tab only.
           </CardDescription>
+          <p className="text-xs text-muted-foreground" role="status">
+            {identityStatus === "verified" ? "Clerk session verified by API" : identityStatus === "checking" ? "Verifying Clerk session…" : "Clerk session could not be verified by API"}
+          </p>
         </CardHeader>
         <CardContent>
           <form onSubmit={submit} className="flex flex-col gap-4">

@@ -2,6 +2,7 @@ import {
   Activity, AudioLines, CalendarClock, Database, Link2, ListTodo,
   LogOut, Radio, Settings2, Users,
 } from "lucide-react";
+import { UserButton } from "@clerk/react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { AppRoutes } from "./AppRoutes";
 import { QuickDial } from "./QuickDial";
@@ -101,6 +102,7 @@ export function AppShell({ disconnect }: { disconnect: () => void }) {
           <div className="ml-auto flex items-center gap-2">
             <TestAgentModal />
             <QuickDial />
+            <UserButton />
           </div>
         </header>
         <main className="min-w-0 flex-1"><AppRoutes /></main>

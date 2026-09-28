@@ -1,10 +1,16 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
-_ENV_FILES = (str(_REPO_ROOT / ".env"), ".env")
+_ENV_FILES = (
+    str(_REPO_ROOT / ".env"),
+    str(_REPO_ROOT / ".env.local"),
+    ".env",
+    ".env.local",
+)
 
 
 class Settings(BaseSettings):
@@ -18,6 +24,11 @@ class Settings(BaseSettings):
     integration_keys: str | None = None
     integration_active_key: str | None = None
     operator_token: str | None = None
+    clerk_secret_key: str | None = Field(default=None, validation_alias="CLERK_SECRET_KEY")
+    clerk_publishable_key: str | None = Field(
+        default=None, validation_alias="CLERK_PUBLISHABLE_KEY"
+    )
+    clerk_authorized_parties: str = "http://localhost:5173,http://localhost:8000"
     public_base_url: str | None = None
     gemini_api_key: str | None = None
     integration_media_dir: str = "data/integration-media"
