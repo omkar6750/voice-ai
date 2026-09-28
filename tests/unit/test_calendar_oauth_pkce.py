@@ -1,6 +1,21 @@
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
+import pytest
 from voice_api.services.calendar_service import google_flow
+
+
+@pytest.fixture(autouse=True)
+def configured_calendar(monkeypatch):
+    """PKCE URL construction needs fake configuration, never local credentials."""
+    monkeypatch.setattr(
+        "voice_api.services.calendar_service.get_settings",
+        lambda: SimpleNamespace(
+            google_calendar_client_id="test-client-id",
+            google_calendar_client_secret="test-client-secret",
+            google_calendar_redirect_uri="http://localhost/test/calendar/callback",
+        ),
+    )
 
 
 def test_google_authorization_url_contains_pkce_challenge_without_verifier():

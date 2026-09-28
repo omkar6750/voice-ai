@@ -23,7 +23,7 @@ from voice_runtime.telephony.twilio import TwilioCredentials
 
 @pytest.mark.asyncio
 async def test_queue_call_twilio():
-    session = AsyncMock()
+    session = AsyncMock(spec=AsyncSession)
     contact_id = new_id()
     version_id = new_id()
     conn_id = new_id()

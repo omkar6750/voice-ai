@@ -15,6 +15,9 @@ venv/
 .pytest_temp/
 .pytest_temp-*/
 .pytest_tmp/
+.pytest_*_verify/
+.pytest_*_baseline/
+.pytest_*_suite/
 .ruff_cache/
 .mypy_cache/
 .coverage
