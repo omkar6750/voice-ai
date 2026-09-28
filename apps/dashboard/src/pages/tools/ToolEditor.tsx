@@ -22,9 +22,8 @@ type ToolConfig = components["schemas"]["ToolConfig"];
 type HandlerCatalog = components["schemas"]["ToolHandlerCatalog"];
 type ValidationResponse = components["schemas"]["ToolValidationResponse"];
 type WhatsAppConfig = NonNullable<ToolConfig["whatsapp"]>;
-type EditableToolConfig = Omit<ToolConfig, "parameters" | "wait"> & {
+type EditableToolConfig = Omit<ToolConfig, "parameters"> & {
   parameters: Record<string, unknown>;
-  wait: NonNullable<ToolConfig["wait"]>;
 };
 
 type ParameterRow = {
@@ -52,7 +51,7 @@ function editableConfig(config: ToolConfig): EditableToolConfig {
   return {
     ...config,
     parameters: config.parameters ?? { type: "object", properties: {} },
-    wait: config.wait ?? { mode: "silent_wait", acknowledgement: null },
+    wait: { mode: "silent_wait", acknowledgement: null },
   } as EditableToolConfig;
 }
 
@@ -130,13 +129,6 @@ export function ToolEditor({
 
   function setField<K extends keyof ToolConfig>(key: K, value: ToolConfig[K]) {
     setConfig((current) => ({ ...current, [key]: value }));
-  }
-
-  function setWaitField(key: "mode" | "acknowledgement", value: string | null) {
-    setConfig((current) => ({
-      ...current,
-      wait: { ...current.wait, [key]: value },
-    }));
   }
 
   function setHttpField(key: string, value: unknown) {
@@ -303,40 +295,6 @@ export function ToolEditor({
                 onMappingChange={setWhatsappMapping}
                 onChange={(whatsapp) => setField("whatsapp", whatsapp)}
               />
-            )}
-            <Field>
-              <FieldLabel htmlFor={`tool-wait-${version.id}`}>
-                Wait mode
-              </FieldLabel>
-              <NativeSelect
-                id={`tool-wait-${version.id}`}
-                value={config.wait.mode}
-                onChange={(event) => setWaitField("mode", event.target.value)}
-              >
-                <NativeSelectOption value="silent_wait">
-                  Silent wait
-                </NativeSelectOption>
-                <NativeSelectOption value="acknowledge_then_wait">
-                  Acknowledge, then wait
-                </NativeSelectOption>
-                <NativeSelectOption value="continue_conversation">
-                  Continue conversation
-                </NativeSelectOption>
-              </NativeSelect>
-            </Field>
-            {config.wait.mode === "acknowledge_then_wait" && (
-              <Field>
-                <FieldLabel htmlFor={`tool-ack-${version.id}`}>
-                  Acknowledgement
-                </FieldLabel>
-                <Input
-                  id={`tool-ack-${version.id}`}
-                  value={config.wait.acknowledgement ?? ""}
-                  onChange={(event) =>
-                    setWaitField("acknowledgement", event.target.value)
-                  }
-                />
-              </Field>
             )}
           </>
         )}

@@ -70,7 +70,7 @@ async def test_receipts_are_account_scoped_and_deduplicated(client, database, mo
     database.add_all(tools)
     await database.flush()
 
-    async def receipt(account, status, phone_id="222"):
+    async def receipt(account, status, phone_id="222", timestamp="1"):
         payload = {
             "entry": [
                 {
@@ -80,7 +80,16 @@ async def test_receipts_are_account_scoped_and_deduplicated(client, database, mo
                             "value": {
                                 "metadata": {"phone_number_id": phone_id},
                                 "statuses": [
-                                    {"id": "same-external-id", "status": status, "timestamp": "1"}
+                                    {
+                                        "id": "same-external-id",
+                                        "status": status,
+                                        "timestamp": timestamp,
+                                        **(
+                                            {"errors": [{"code": 131026, "title": "Undeliverable"}]}
+                                            if status == "failed"
+                                            else {}
+                                        ),
+                                    }
                                 ],
                             }
                         }
@@ -105,6 +114,13 @@ async def test_receipts_are_account_scoped_and_deduplicated(client, database, mo
     assert len(tools[0].receipts) == 1 and tools[1].receipts == []
     assert (await receipt(connection_ids[1], "sent")).status_code == 204
     assert tools[1].receipts[0]["status"] == "sent"
+    assert (await receipt(connection_ids[1], "failed", timestamp="2")).status_code == 204
+
+    timeline = await client.get(f"/api/v1/runs/{run.id}/timeline")
+    assert timeline.status_code == 200
+    whatsapp_tool = next(item for item in timeline.json()["tools"] if item["id"] == tools[1].id)
+    assert [item["status"] for item in whatsapp_tool["receipts"]] == ["sent", "failed"]
+    assert whatsapp_tool["receipts"][1]["errors"][0]["title"] == "Undeliverable"
 
 
 async def test_invalid_credentials_not_echoed_in_validation(client):

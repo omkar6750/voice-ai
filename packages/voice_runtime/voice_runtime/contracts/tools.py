@@ -13,7 +13,7 @@ class ToolBinding(ConfigModel):
 
 
 class WaitConfig(ConfigModel):
-    mode: Literal["silent_wait", "acknowledge_then_wait", "continue_conversation"] = "silent_wait"
+    mode: Literal["silent_wait", "acknowledge_then_wait"] = "silent_wait"
     acknowledgement: str | None = None
 
     @model_validator(mode="after")

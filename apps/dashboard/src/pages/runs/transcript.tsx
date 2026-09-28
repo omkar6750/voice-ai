@@ -23,7 +23,14 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
-import { clock, consumingLlm, deliveryFor, resultsFor } from "./model";
+import {
+  clock,
+  consumingLlm,
+  deliveryFor,
+  resultsFor,
+  whatsappReceiptHistory,
+  whatsappDeliveryStatus,
+} from "./model";
 import type { Selection, Timeline, Tool } from "./types";
 
 function ToolActivity({
@@ -45,6 +52,16 @@ function ToolActivity({
         <MessageHeader>
           Agent tool activity · {clock(tool.started_at)}
         </MessageHeader>
+        {whatsappDeliveryStatus(timeline, tool) && (
+          <p className="text-xs text-muted-foreground">
+            {whatsappDeliveryStatus(timeline, tool)}
+          </p>
+        )}
+        {whatsappReceiptHistory(tool).length > 0 && (
+          <p className="max-w-full text-right text-xs text-muted-foreground">
+            Delivery events: {whatsappReceiptHistory(tool).join(" → ")}
+          </p>
+        )}
         <Bubble align="end" variant="secondary">
           <BubbleContent asChild>
             <button

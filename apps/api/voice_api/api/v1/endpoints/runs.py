@@ -263,6 +263,16 @@ async def timeline(
                 "started_at": x.started_at,
                 "ended_at": x.ended_at,
                 "provider_message_id": x.provider_message_id,
+                "receipts": [
+                    {
+                        "status": receipt.get("status", "unknown"),
+                        "timestamp": receipt.get("timestamp"),
+                        "recipient_id": receipt.get("recipient_id"),
+                        "errors": receipt.get("errors", []),
+                    }
+                    for receipt in (x.receipts or [])
+                    if isinstance(receipt, dict)
+                ],
             }
             for x in tools
         ],

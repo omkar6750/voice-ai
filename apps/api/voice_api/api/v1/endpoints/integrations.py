@@ -910,10 +910,7 @@ async def generate_template_tool(
             "type": "object",
             "properties": properties,
         },
-        "wait": {
-            "mode": "acknowledge_then_wait",
-            "acknowledgement": "I'm sending that to your WhatsApp right now.",
-        },
+        "wait": {"mode": "silent_wait"},
     }
 
     existing_tool = await session.scalar(select(Tool).where(Tool.name == tool_name))

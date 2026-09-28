@@ -90,8 +90,7 @@ async def create_base(
                 "required": ["query"],
             },
             "wait": {
-                "mode": "acknowledge_then_wait",
-                "acknowledgement": f"Let me check our {body.name} for that.",
+                "mode": "silent_wait",
             },
         }
         version = ToolVersion(

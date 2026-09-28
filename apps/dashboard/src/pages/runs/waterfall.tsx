@@ -24,6 +24,8 @@ import {
   resultsFor,
   spanDepth,
   timingWindow,
+  whatsappReceiptHistory,
+  whatsappDeliveryStatus,
 } from "./model";
 import type { Selection, Span, Timeline, Tool } from "./types";
 
@@ -183,7 +185,7 @@ export function Waterfall({
                     }
                   >
                     <Zap data-icon="inline-start" />
-                    Barge-in · {interruption.reason} · interrupted {" "}
+                    Barge-in · {interruption.reason} · interrupted{" "}
                     {interruption.interrupted_operation_ids.length} operations
                     {interruption.interrupted_tool_invocation_ids.length
                       ? ` · ${interruption.interrupted_tool_invocation_ids.length} tools`
@@ -250,22 +252,40 @@ export function Waterfall({
                           kind={op.kind}
                         />
                       </div>
-                      {op.kind === "span" && op.item.category === "classifier" &&
-                        classifierResultsFor(timeline, op.item).map((result) => {
-                          const delivery = classifierDeliveryFor(timeline, result);
-                          return (
-                            <div
-                              key={result.id}
-                              className="pl-9 text-xs text-muted-foreground"
-                            >
-                              Classifier {result.phase} · {result.status} · context{" "}
-                              {delivery?.status ?? "not recorded"}
-                              {delivery?.consuming_operation_id
-                                ? ` · consumed by ${delivery.consuming_operation_id}`
-                                : ""}
-                            </div>
-                          );
-                        })}
+                      {op.kind === "tool" &&
+                        whatsappDeliveryStatus(timeline, op.item) && (
+                          <div className="pl-9 pb-2 text-xs text-muted-foreground">
+                            <p>{whatsappDeliveryStatus(timeline, op.item)}</p>
+                            {whatsappReceiptHistory(op.item).length > 0 && (
+                              <p>
+                                Delivery events:{" "}
+                                {whatsappReceiptHistory(op.item).join(" → ")}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      {op.kind === "span" &&
+                        op.item.category === "classifier" &&
+                        classifierResultsFor(timeline, op.item).map(
+                          (result) => {
+                            const delivery = classifierDeliveryFor(
+                              timeline,
+                              result,
+                            );
+                            return (
+                              <div
+                                key={result.id}
+                                className="pl-9 text-xs text-muted-foreground"
+                              >
+                                Classifier {result.phase} · {result.status} ·
+                                context {delivery?.status ?? "not recorded"}
+                                {delivery?.consuming_operation_id
+                                  ? ` · consumed by ${delivery.consuming_operation_id}`
+                                  : ""}
+                              </div>
+                            );
+                          },
+                        )}
                       {op.kind === "tool" &&
                         resultsFor(timeline, op.item).map((result) => (
                           <Button
@@ -276,7 +296,7 @@ export function Waterfall({
                             onClick={() =>
                               onSelect({ kind: "result", id: result.id })
                             }
-                        >
+                          >
                             Result {result.sequence}
                             {result.is_final ? " · final" : " · intermediate"}
                             {deliveryFor(timeline, result) ? (
@@ -347,6 +367,14 @@ export function Waterfall({
               onClick={() => onSelect({ kind: item.kind, id: item.id })}
             >
               {item.label}
+              {item.kind === "tool" &&
+                (() => {
+                  const tool = timeline.tools.find(
+                    (entry) => entry.id === item.id,
+                  );
+                  const status = tool && whatsappDeliveryStatus(timeline, tool);
+                  return status ? ` · ${status}` : "";
+                })()}
             </Button>
           ))}
         </div>

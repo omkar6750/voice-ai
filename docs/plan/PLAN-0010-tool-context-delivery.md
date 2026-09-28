@@ -75,3 +75,47 @@ generated API contract includes `ToolContextDeliveryResponse`.
 
 Plan 0010 is complete. Plan 0011 (classifier entry/exit execution) has not been
 started in this boundary.
+
+## Deferred follow-up: asynchronous provider receipts and confirmations
+
+- Defer a mode that speaks an acknowledgement, lets the conversation continue,
+  then injects a later completion into the active agent. That requires explicit
+  async-job ownership, safe context re-entry, and call-end/interruption rules.
+- Current runtime handlers execute synchronously and wait for their provider
+  request. Wait/acknowledgement settings are not runtime behavior, so they are
+  no longer editable in the dashboard. Existing persisted fields remain
+  readable for published-version compatibility until a deliberate data cleanup.
+- Tool descriptions and each input property's JSON Schema description are the
+  model-facing guidance. Native flow construction passes them to Pipecat's
+  `FlowsFunctionSchema`; agent-wide instructions remain in the role/system and
+  node prompts. Regression coverage asserts these values survive construction.
+- WhatsApp status webhooks already correlate provider message IDs and persist
+  receipts on the originating tool invocation. Expose those receipts in the
+  typed timeline and show the full ordered receipt history (`sent`,
+  `delivered`, `read`, `failed`) plus latest state in waterfall, transcript, and
+  inspector. Show provider send errors separately from delivery errors. Missing
+  receipt means unconfirmed/not available, not delivery failure; this is expected
+  until the operator configures and Meta reaches the status webhook.
+- Remove the unused `continue_conversation` wait value from the contract.
+  Existing `silent_wait` and synchronous `acknowledge_then_wait` contract values
+  remain readable, but the dashboard does not offer wait controls because the
+  native runtime does not execute those acknowledgement settings.
+- A future caller-facing completion message can be considered only after the
+  asynchronous result/context lifecycle is designed. For now the webhook status
+  is observability evidence, not a second Pipecat tool result or an automatic
+  spoken message.
+
+### Manual receipt verification
+
+- With Meta status webhooks configured and publicly reachable, send a controlled
+  WhatsApp template to a test recipient and refresh the run timeline.
+- Confirm `sent` is not presented as delivered; verify later `delivered` and
+  `read` callbacks append to the status history.
+- Use a controlled provider rejection/undeliverable test to confirm `failed`
+  displays the provider's error details in the waterfall, transcript, and
+  inspector.
+- Disable/omit the webhook and confirm the dashboard reports delivery as
+  unconfirmed/unavailable, not failed. Refresh a completed run after a delayed
+  callback to load its receipt.
+- Confirm no webhook callback creates a spoken agent response or changes tool
+  context; asynchronous caller-facing confirmation remains deferred.

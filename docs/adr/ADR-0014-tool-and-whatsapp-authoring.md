@@ -178,7 +178,12 @@ instructions: the runtime passes them as the function description and parameter
 descriptions in `FlowsFunctionSchema`. Agent-wide behavior belongs in the agent
 system/role prompt. For approved WhatsApp templates, Meta owns the literal body;
 the model supplies mapped placeholder values and cannot rewrite the template.
-The acknowledgement is a spoken wait message, not a tool-use prompt.
+Wait-mode and acknowledgement fields are retained only for reading existing
+published configurations; the current runtime does not speak the configured
+acknowledgement or implement background continuation. The dashboard therefore
+does not offer those ineffective controls. Tool descriptions and input
+parameter descriptions are passed to Pipecat as function schema metadata and
+are the tool-specific guidance the model receives.
 
 The editor clarifies these boundaries and preserves local media IDs in the draft;
 runtime media resolution remains connection-scoped as described above.

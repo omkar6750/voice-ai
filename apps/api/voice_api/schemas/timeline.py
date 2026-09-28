@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, Field, JsonValue
 
 from voice_api.schemas.diagnostics import DiagnosticResponse
 
@@ -78,6 +78,15 @@ class TimelineSpan(BaseModel):
     output: JsonValue | None
 
 
+class TimelineToolReceipt(BaseModel):
+    """Sanitized WhatsApp delivery status received for an outbound message."""
+
+    status: str
+    timestamp: str | None = None
+    recipient_id: str | None = None
+    errors: list[JsonValue] = Field(default_factory=list)
+
+
 class TimelineTool(BaseModel):
     id: str
     exchange_id: str | None
@@ -91,6 +100,7 @@ class TimelineTool(BaseModel):
     started_at: datetime
     ended_at: datetime | None
     provider_message_id: str | None
+    receipts: list[TimelineToolReceipt]
 
 
 class TimelineToolResult(BaseModel):

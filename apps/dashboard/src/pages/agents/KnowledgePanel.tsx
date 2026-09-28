@@ -1,8 +1,6 @@
 import { LoadState, ReadOnlyValue } from "@/components/record-page";
 import { Button } from "@/components/ui/button";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import { NativeSelect } from "@/components/ui/native-select";
+import { FieldGroup } from "@/components/ui/field";
 import { useResource } from "@/lib/resources";
 import { NumberField } from "./ConfigFields";
 import type { AgentConfig } from "./types";
@@ -129,53 +127,6 @@ export function KnowledgePanel({
             disabled={disabled}
             onChange={(timeout_secs) => updateRetrieval({ timeout_secs })}
           />
-          <Field>
-            <FieldLabel htmlFor="wait-mode">Tool wait mode</FieldLabel>
-            <NativeSelect
-              id="wait-mode"
-              value={config.retrieval.wait.mode}
-              disabled={disabled}
-              onChange={(event) =>
-                updateRetrieval({
-                  wait: {
-                    ...config.retrieval.wait,
-                    mode: event.target.value as AgentConfig["retrieval"]["wait"]["mode"],
-                    acknowledgement:
-                      event.target.value === "acknowledge_then_wait"
-                        ? config.retrieval.wait.acknowledgement ||
-                          "Let me check that for you."
-                        : null,
-                  },
-                })
-              }
-            >
-              <option value="silent_wait">Silent wait</option>
-              <option value="acknowledge_then_wait">
-                Acknowledge then wait
-              </option>
-              <option value="continue_conversation">
-                Continue conversation
-              </option>
-            </NativeSelect>
-          </Field>
-          {config.retrieval.wait.mode === "acknowledge_then_wait" && (
-            <Field>
-              <FieldLabel htmlFor="retrieval-ack">Acknowledgement</FieldLabel>
-              <Input
-                id="retrieval-ack"
-                value={config.retrieval.wait.acknowledgement ?? ""}
-                disabled={disabled}
-                onChange={(event) =>
-                  updateRetrieval({
-                    wait: {
-                      ...config.retrieval.wait,
-                      acknowledgement: event.target.value,
-                    },
-                  })
-                }
-              />
-            </Field>
-          )}
         </FieldGroup>
         <ReadOnlyValue
           label="Minimum vector similarity"

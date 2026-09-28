@@ -97,6 +97,7 @@ export type Tool = {
   started_at: string;
   ended_at: string | null;
   provider_message_id: string | null;
+  receipts: components["schemas"]["TimelineTool"]["receipts"];
 };
 
 export type ToolResult = {

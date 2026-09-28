@@ -1,6 +1,6 @@
 import pytest
 from pydantic import ValidationError
-from voice_runtime.contracts import ToolConfig
+from voice_runtime.contracts import ToolConfig, WaitConfig
 
 
 def whatsapp_config() -> dict:
@@ -59,3 +59,19 @@ def test_http_tool_cannot_carry_whatsapp_settings() -> None:
                 "whatsapp": whatsapp_config(),
             }
         )
+
+
+def test_continue_conversation_wait_mode_is_rejected_until_async_results_exist() -> None:
+    with pytest.raises(ValidationError, match="mode"):
+        WaitConfig.model_validate({"mode": "continue_conversation"})
+
+
+def test_synchronous_wait_contract_remains_explicit() -> None:
+    assert WaitConfig().mode == "silent_wait"
+    assert (
+        WaitConfig(
+            mode="acknowledge_then_wait",
+            acknowledgement="Please wait while I check that.",
+        ).acknowledgement
+        == "Please wait while I check that."
+    )

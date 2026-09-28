@@ -16,6 +16,7 @@ import {
   duration,
   resultsFor,
   stamp,
+  whatsappDeliveryStatus,
 } from "./model";
 import type { RunDetail, Selection, Timeline } from "./types";
 
@@ -359,7 +360,10 @@ function Evidence({
           {classifierResults.map((result) => {
             const delivery = classifierDeliveryFor(timeline, result);
             return (
-              <div key={result.id} className="flex flex-col gap-2 rounded-md border p-3">
+              <div
+                key={result.id}
+                className="flex flex-col gap-2 rounded-md border p-3"
+              >
                 <Value label="Classifier phase">
                   {result.phase} · {result.node_key}
                 </Value>
@@ -374,7 +378,9 @@ function Evidence({
                   {delivery?.consuming_operation_id ?? "Not recorded"}
                 </Value>
                 <Json label="Classifier result" value={result.result} />
-                {result.error && <Json label="Classifier error" value={result.error} />}
+                {result.error && (
+                  <Json label="Classifier error" value={result.error} />
+                )}
               </div>
             );
           })}
@@ -454,7 +460,13 @@ function Evidence({
             <Value label="Provider msg">
               {tool.provider_message_id ?? "Not recorded"}
             </Value>
+            <Value label="WhatsApp delivery">
+              {whatsappDeliveryStatus(timeline, tool) ?? "Not applicable"}
+            </Value>
           </dl>
+          {tool.receipts.length > 0 && (
+            <Json label="WhatsApp delivery receipts" value={tool.receipts} />
+          )}
           {tool.llm_operation_id && (
             <Button
               variant="outline"
@@ -539,7 +551,8 @@ function Evidence({
                 First later LLM request · {clock(next.started_at)}
               </Button>
               <p className="text-xs text-muted-foreground">
-                Linked to the exact consuming LLM operation from runtime evidence.
+                Linked to the exact consuming LLM operation from runtime
+                evidence.
               </p>
             </>
           )}

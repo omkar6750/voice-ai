@@ -37,6 +37,89 @@ export function resultsFor(timeline: Timeline, tool: Tool): ToolResult[] {
     .sort((a, b) => a.sequence - b.sequence);
 }
 
+export function whatsappDeliveryStatus(
+  timeline: Timeline,
+  tool: Tool,
+): string | null {
+  if (
+    !tool.binding_key.startsWith("whatsapp_") &&
+    !tool.provider_message_id &&
+    !tool.receipts.length
+  )
+    return null;
+  const receipts = [...tool.receipts].sort(
+    (left, right) => Number(right.timestamp ?? 0) - Number(left.timestamp ?? 0),
+  );
+  const latest = receipts[0];
+  if (!latest) {
+    if (!tool.provider_message_id || tool.provider_message_id === "unknown") {
+      const result =
+        tool.result &&
+        typeof tool.result === "object" &&
+        !Array.isArray(tool.result)
+          ? (tool.result as Record<string, unknown>)
+          : null;
+      if (tool.status === "failed" || result?.status === "error") {
+        const error = typeof result?.error === "string" ? result.error : null;
+        return `WhatsApp send failed${error ? ` · ${error}` : ""}`;
+      }
+      if (["pending", "queued", "running"].includes(tool.status))
+        return "WhatsApp send in progress · waiting for Meta response";
+      if (result?.status === "ok")
+        return "Meta response received without a message ID · delivery status unavailable";
+      return "WhatsApp send/delivery status unavailable · no provider message ID recorded";
+    }
+    return isActive(timeline.run.status)
+      ? "Meta accepted the message · waiting for delivery webhook"
+      : "Meta accepted the message · delivery status unavailable (no webhook receipt received)";
+  }
+  if (latest.status === "failed") {
+    const details = (latest.errors ?? [])
+      .map((error) => {
+        if (!error || typeof error !== "object" || Array.isArray(error))
+          return null;
+        const item = error as Record<string, unknown>;
+        return [item.title, item.message]
+          .filter((value): value is string => typeof value === "string")
+          .join(": ");
+      })
+      .filter(Boolean)
+      .join("; ");
+    return `WhatsApp delivery failed${details ? ` · ${details}` : ""}`;
+  }
+  if (latest.status === "read") return "WhatsApp message read";
+  if (latest.status === "delivered") return "WhatsApp message delivered";
+  if (latest.status === "sent")
+    return "WhatsApp message sent · recipient delivery not confirmed";
+  return `WhatsApp status: ${latest.status}`;
+}
+
+export function whatsappReceiptHistory(tool: Tool): string[] {
+  return [...tool.receipts]
+    .sort(
+      (left, right) =>
+        Number(left.timestamp ?? 0) - Number(right.timestamp ?? 0),
+    )
+    .map((receipt) => {
+      const timestamp = Number(receipt.timestamp);
+      const time = Number.isFinite(timestamp)
+        ? new Date(timestamp * 1000).toLocaleTimeString()
+        : "time unavailable";
+      const errors = (receipt.errors ?? [])
+        .map((error) => {
+          if (!error || typeof error !== "object" || Array.isArray(error))
+            return null;
+          const item = error as Record<string, unknown>;
+          return [item.title, item.message]
+            .filter((value): value is string => typeof value === "string")
+            .join(": ");
+        })
+        .filter(Boolean)
+        .join("; ");
+      return `${receipt.status} · ${time}${errors ? ` · ${errors}` : ""}`;
+    });
+}
+
 export function deliveryFor(
   timeline: Timeline,
   result: ToolResult,

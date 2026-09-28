@@ -256,7 +256,12 @@ def test_node_configuration_is_scoped_to_published_bindings(tmp_path):
                         "description": "Move",
                         "parameters": {
                             "type": "object",
-                            "properties": {"node": {"type": "string"}},
+                            "properties": {
+                                "node": {
+                                    "type": "string",
+                                    "description": "Destination node identifier",
+                                }
+                            },
                             "required": ["node"],
                         },
                     },
@@ -277,6 +282,8 @@ def test_node_configuration_is_scoped_to_published_bindings(tmp_path):
     assert node["role_message"] == "Global"
     assert node["task_messages"] == [{"role": "user", "content": "Say hello"}]
     assert [tool.name for tool in node["functions"]] == ["change_node"]
+    assert node["functions"][0].description == "Move"
+    assert node["functions"][0].properties["node"]["description"] == ("Destination node identifier")
     host._nodes["greeting"]["role_prompt"] = "Node role"
     host._nodes["greeting"]["context_strategy"] = "reset"
     overridden = host._node("greeting")
