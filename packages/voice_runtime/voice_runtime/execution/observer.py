@@ -9,6 +9,7 @@ from pathlib import Path
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    ErrorFrame,
     FunctionCallsStartedFrame,
     InterruptionFrame,
     LLMContextFrame,
@@ -19,6 +20,8 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import (
     LLMUsageMetricsData,
@@ -30,6 +33,10 @@ from pipecat.metrics.metrics import (
 from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
 from pipecat.processors.frame_processor import FrameDirection
 
+from voice_runtime.diagnostics import (
+    provider_error_diagnostic,
+    provider_exception_diagnostic,
+)
 from voice_runtime.execution.exchange import ExchangeTracker
 
 
@@ -44,6 +51,8 @@ class EvidenceObserver(BaseObserver):
         stt,
         tts,
         llm_provider: str = "groq",
+        stt_provider: str = "sarvam",
+        tts_provider: str = "sarvam",
         llm_model: str,
         stt_model: str,
         tts_model: str,
@@ -52,7 +61,7 @@ class EvidenceObserver(BaseObserver):
         super().__init__()
         self.tracker = tracker
         self.llm, self.stt, self.tts = llm, stt, tts
-        self.providers = {"llm": llm_provider, "stt": type(stt).__name__, "tts": type(tts).__name__}
+        self.providers = {"llm": llm_provider, "stt": stt_provider, "tts": tts_provider}
         self.models = {"llm": llm_model, "stt": stt_model, "tts": tts_model}
         self.llm_operation: dict | None = None
         self.stt_operation: dict | None = None
@@ -124,8 +133,46 @@ class EvidenceObserver(BaseObserver):
     async def on_push_frame(self, data: FramePushed) -> None:
         frame = data.frame
         source = data.source
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            self._mark("vad_speech_started", processor=type(source).__name__)
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            self._mark("vad_speech_stopped", processor=type(source).__name__)
         if isinstance(frame, MetricsFrame):
             self._metrics(source, frame)
+        if isinstance(frame, ErrorFrame):
+            processor = getattr(frame, "processor", None) or source
+            operation_name = (
+                "llm" if processor is self.llm else "stt" if processor is self.stt else "tts"
+            )
+            exception = getattr(frame, "exception", None)
+            provider = self.providers.get(operation_name, type(processor).__name__)
+            if exception is not None:
+                diagnostic = provider_exception_diagnostic(
+                    exception, provider=provider, operation=operation_name
+                )
+            else:
+                diagnostic = provider_error_diagnostic(provider=provider, body=str(frame.error))
+                diagnostic["metadata"]["operation"] = operation_name
+            self.tracker.diagnostic(**diagnostic)
+            active = getattr(self, f"{operation_name}_operation", None)
+            if active is not None:
+                self.tracker.finish_operation(
+                    active,
+                    "failed",
+                    output_payload={"error": diagnostic["message"]},
+                    output_state="failed",
+                    **self.metrics[operation_name],
+                )
+                setattr(self, f"{operation_name}_operation", None)
+            self._mark(
+                "provider_error",
+                provider=provider,
+                operation=operation_name,
+                code=diagnostic.get("code"),
+                http_status=diagnostic.get("http_status"),
+                provider_request_id=diagnostic.get("provider_request_id"),
+                failed_generation=diagnostic.get("metadata", {}).get("failed_generation"),
+            )
         if source is self.llm:
             if (
                 data.direction == FrameDirection.DOWNSTREAM
@@ -186,6 +233,7 @@ class EvidenceObserver(BaseObserver):
                 self.tts_operation = None
                 self.playback_operation = None
         if isinstance(frame, UserStartedSpeakingFrame) and self.speech_operation is None:
+            self._finish_missing_stt()
             self.speech_operation = self.tracker.start_operation("caller speech", "speech")
             self.last_speech_operation_id = self.speech_operation["operation_id"]
             self.stt_operation = self.tracker.start_operation(
@@ -218,6 +266,42 @@ class EvidenceObserver(BaseObserver):
             self._mark("playback_stopped")
         if isinstance(frame, InterruptionFrame):
             self._mark("interrupted", reason="caller_barge_in")
+
+    def record_turn_event(self, event: str, *, strategy: str | None = None) -> None:
+        """Record Pipecat's selected turn strategy without copying caller content."""
+        timeout = event == "user_turn_stop_timeout"
+        self.tracker.diagnostic(
+            severity="warning" if timeout else "info",
+            category="turn_decision",
+            source="runtime",
+            code=event,
+            message=(
+                "Pipecat ended the caller turn using its fallback timeout"
+                if timeout
+                else f"Pipecat {event.replace('_', ' ')}"
+            ),
+            metadata={"strategy": strategy} if strategy else {},
+        )
+        self._mark(event, strategy=strategy)
+
+    def _finish_missing_stt(self) -> None:
+        if self.stt_operation is None:
+            return
+        self.tracker.finish_operation(
+            self.stt_operation,
+            "failed",
+            output_state="missing_final_transcription",
+        )
+        self.tracker.diagnostic(
+            severity="warning",
+            category="stt_incomplete_turn",
+            source="runtime",
+            code="final_transcription_missing",
+            message="No finalized transcription was received for a caller turn",
+            detail="The STT operation remained open when another turn started or the pipeline ended.",
+        )
+        self.stt_operation = None
+        self._mark("stt_missing_final")
 
     def _metrics(self, source, frame: MetricsFrame) -> None:
         category = (
@@ -271,6 +355,7 @@ class EvidenceObserver(BaseObserver):
 
     def close(self) -> None:
         self._finish_llm("cancelled")
+        self._finish_missing_stt()
         for name in ("stt_operation", "speech_operation", "tts_operation", "playback_operation"):
             operation = getattr(self, name)
             if operation is not None:

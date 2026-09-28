@@ -17,10 +17,12 @@ from voice_api.models import (
 from voice_api.models.common import new_id
 from voice_api.schemas.agent import (
     ActivateAgentBody,
+    AgentVersionsResponse,
     BindToolBody,
     CreateBody,
     ExpectedRevision,
     RevisionBody,
+    UpdatedAgentVersionResponse,
 )
 from voice_api.services.publication_service import clone_version, sync_bindings
 from voice_runtime.contracts import AgentConfig
@@ -91,7 +93,7 @@ async def create_agent(
 ) -> dict:
     config_model = AgentConfig.model_validate(body.config)
     await validate_callback_calendars(session, config_model)
-    config = config_model.model_dump(mode="json")
+    config = config_model.model_dump(mode="json", exclude_none=True)
     agent = Agent(id=new_id(), name=body.name)
     version = AgentVersion(id=new_id(), agent_id=agent.id, version=1, config=config)
     session.add(agent)
@@ -103,7 +105,7 @@ async def create_agent(
     return {"agent_id": agent.id, "version_id": version.id}
 
 
-@router.get("/agents/{agent_id}/versions")
+@router.get("/agents/{agent_id}/versions", response_model=AgentVersionsResponse)
 async def agent_versions(
     agent_id: str, session: AsyncSession = Session, _: None = Operator
 ) -> dict:
@@ -129,7 +131,7 @@ async def agent_versions(
     }
 
 
-@router.patch("/agent-versions/{version_id}")
+@router.patch("/agent-versions/{version_id}", response_model=UpdatedAgentVersionResponse)
 async def update_agent_version(
     version_id: str, body: RevisionBody, session: AsyncSession = Session, _: None = Operator
 ) -> dict:
@@ -142,7 +144,7 @@ async def update_agent_version(
         raise HTTPException(409, "Draft changed by another operator")
     config_model = AgentConfig.model_validate(body.config)
     await validate_callback_calendars(session, config_model)
-    row.config = config_model.model_dump(mode="json")
+    row.config = config_model.model_dump(mode="json", exclude_none=True)
     row.note = body.note
     row.revision += 1
     await sync_bindings(session, row)
@@ -222,7 +224,9 @@ async def bind_tool(
         session.add(row)
     else:
         row.tool_version_id, row.config = tool_version.id, body.config
-    config = AgentConfig.model_validate(agent_version.config).model_dump(mode="json")
+    config = AgentConfig.model_validate(agent_version.config).model_dump(
+        mode="json", exclude_none=True
+    )
     config["tool_bindings"][body.binding_key] = {
         "tool_id": tool_version.tool_id,
         "tool_version_id": tool_version.id,

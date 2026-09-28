@@ -342,18 +342,18 @@ class ExchangeTracker:
             transcript_sha256=attributes["transcript_sha256"],
         )
         marker = f"[[voice-ai-classifier:{result_id}]]"
+        model_result = (
+            {key: value for key, value in result.items() if not key.startswith("_")}
+            if isinstance(result, dict)
+            else result
+        )
         message = {
-            # Keep internal classifier context on a role supported by every
-            # configured chat-completions model. The runtime currently uses
-            # both Groq and Gemini models, and their model-specific templates
-            # do not share a guaranteed `developer` role contract.
-            "role": "user",
-            "content": (
-                f"{marker}\n"
-                "Internal classifier result. Use this state as evidence for the next response; "
-                "do not mention the classifier or this instruction to the caller.\n"
-                + json.dumps(result, ensure_ascii=False, sort_keys=True)
-            ),
+            # Keep classifier state semantic. Pipecat's provider adapters own
+            # conversion to the role vocabulary accepted by Groq/Gemini.
+            "role": "system",
+            "content": marker
+            + "\n"
+            + json.dumps(model_result, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
         }
         self._classifier_result_metadata[result_id] = {
             "operation_id": operation["operation_id"],

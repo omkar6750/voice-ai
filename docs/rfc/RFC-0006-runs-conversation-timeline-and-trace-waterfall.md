@@ -119,7 +119,7 @@ Raw pipeline spans are aggregated into **Turn Groups** keyed by exchange sequenc
 2. **Inference & Decision Phase**:
    - LLM Context Assembly span.
    - LLM Request span (metrics: `ttfb_ms` / `first_token_ms`, `prompt_tokens`, `completion_tokens`).
-   - Function Calling / Tool Invocation span (`change_node`, `send_whatsapp_template`, `classify_jev`).
+   - Function Calling / Tool Invocation span (`change_node`, `send_whatsapp_template`, `classify_lead`).
 3. **Synthesis & Delivery Phase**:
    - Secondary LLM synthesis / generation (if tools yielded context results).
    - TTS Service span (metrics: `ttfa_ms`, audio bytes, chunk count).

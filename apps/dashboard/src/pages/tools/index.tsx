@@ -30,7 +30,9 @@ type ToolImpact = components["schemas"]["ToolImpactResponse"];
 
 export function ToolsPage() {
   const api = useApi();
-  const { data, loading, error, reload } = useResource<{ tools: Tool[] }>("/tools");
+  const { data, loading, error, reload } = useResource<{ tools: Tool[] }>(
+    "/tools",
+  );
 
   const [toolToDelete, setToolToDelete] = useState<Tool | null>(null);
   const [impact, setImpact] = useState<ToolImpact | null>(null);
@@ -46,7 +48,9 @@ export function ToolsPage() {
       setImpact(data);
     } catch (cause) {
       toast.error(
-        cause instanceof Error ? cause.message : "Could not inspect tool impact",
+        cause instanceof Error
+          ? cause.message
+          : "Could not inspect tool impact",
       );
     } finally {
       setLoadingImpact(false);
@@ -104,7 +108,10 @@ export function ToolsPage() {
                   </TableCell>
                   <TableCell>
                     {isSystemTool ? (
-                      <Badge variant="secondary" className="gap-1 font-normal text-xs">
+                      <Badge
+                        variant="secondary"
+                        className="gap-1 font-normal text-xs"
+                      >
                         <Lock className="size-3 text-muted-foreground" />
                         Core System Tool
                       </Badge>
@@ -186,14 +193,20 @@ export function ToolsPage() {
                     ))}
                   </ul>
                   <p className="mt-2 text-muted-foreground">
-                    Deleting this tool will automatically remove its binding
-                    and node assignment from these agents.
+                    Deleting removes its bindings, flow actions, and explicit
+                    prompt references from every affected draft and published
+                    agent version. Published versions are updated in this dev
+                    workspace; historical call evidence is retained.
                   </p>
                 </div>
               ) : (
-                <p className="text-muted-foreground">
-                  This tool is not currently bound to any active agents.
-                </p>
+                <div className="text-muted-foreground">
+                  <p>No saved agent versions currently reference this tool.</p>
+                  <p className="mt-2">
+                    Deletion still checks and removes stale prompt/config
+                    references; historical call evidence is retained.
+                  </p>
+                </div>
               )}
             </div>
           ) : null}

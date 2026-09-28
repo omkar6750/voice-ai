@@ -101,18 +101,8 @@ _HANDLER_SPECS: tuple[RegisteredHandlerSpec, ...] = (
         category="messaging",
     ),
     RegisteredHandlerSpec(
-        name="classify_jev",
-        description="Execute TypeSafe AI Jev System One multi-choice classification against configured question criteria on the live call state.",
-        category="classification",
-    ),
-    RegisteredHandlerSpec(
-        name="classify_llm",
-        description="Execute fast LLM multi-choice categorization or custom prompt analysis on the live call state.",
-        category="classification",
-    ),
-    RegisteredHandlerSpec(
         name="classify_lead",
-        description="Alias for classify_jev multi-choice lead classification.",
+        description="Classify the live lead using the classifier backend configured for this agent.",
         category="classification",
     ),
     RegisteredHandlerSpec(

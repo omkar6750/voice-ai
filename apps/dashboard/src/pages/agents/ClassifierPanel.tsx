@@ -73,6 +73,17 @@ export function ClassifierPanel({
 }) {
   const classifier = config.classifier;
   const classifierType = classifier.classifier_type ?? "llm";
+  const currentLlm: NonNullable<typeof classifier.llm> = classifier.llm ?? {
+    provider: "groq",
+    model: "qwen/qwen3.8-27b",
+    temperature: 0.2,
+    max_tokens: 256,
+    top_p: null,
+    reasoning_effort: "none",
+    prompt: "",
+    output_fields: {},
+    max_output_tokens: 256,
+  };
   const allNodeIds = config.flow.nodes.map((node) => node.id);
 
   // New question draft state
@@ -105,10 +116,11 @@ export function ClassifierPanel({
   }
 
   // Jev Questions helpers
-  const currentJev = classifier.jev ?? {
+  const currentJev: NonNullable<typeof classifier.jev> = classifier.jev ?? {
     model: "jev-latest",
     api_url: "https://api.typesafe.ai/v1/systemone",
     questions: DEFAULT_JEV_QUESTIONS,
+    output_fields: [],
   };
   const questionsMap = currentJev.questions || DEFAULT_JEV_QUESTIONS;
 
@@ -238,7 +250,7 @@ export function ClassifierPanel({
       (p) => p.slots.includes("llm") || (p.models_by_slot?.llm?.length ?? 0) > 0,
     ) ?? [];
 
-  const currentProvider = classifier.model?.provider || "groq";
+  const currentProvider = classifier.llm?.provider || "groq";
   const selectedProviderEntry = llmProviders.find(
     (p) => p.provider === currentProvider,
   );
@@ -289,7 +301,7 @@ export function ClassifierPanel({
               </Badge>
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
-              Standard LLM prompt-driven classification returning compact key-value JSON state. Uses tool <code className="font-mono text-foreground font-semibold">classify_llm</code>.
+              Standard LLM prompt-driven classification returning compact key-value JSON state through <code className="font-mono text-foreground font-semibold">classify_lead</code>.
             </p>
           </div>
 
@@ -323,7 +335,7 @@ export function ClassifierPanel({
               </Badge>
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
-              Dedicated multi-choice classification engine with calibrated choice probability distributions. Uses tool <code className="font-mono text-foreground font-semibold">classify_jev</code>.
+              Dedicated multi-choice classification engine with normalized results through <code className="font-mono text-foreground font-semibold">classify_lead</code>.
             </p>
           </div>
         </div>
@@ -469,7 +481,7 @@ export function ClassifierPanel({
               <div>
                 <h2 className="text-base font-semibold">LLM Classifier Settings</h2>
                 <p className="text-xs text-muted-foreground">
-                  Custom instructions and LLM model powering the <code className="font-mono">classify_llm</code> tool.
+                  Custom instructions and LLM model powering the <code className="font-mono">classify_lead</code> tool.
                 </p>
               </div>
 
@@ -479,9 +491,9 @@ export function ClassifierPanel({
                   <Textarea
                     id="classifier-prompt"
                     rows={5}
-                    value={classifier.prompt ?? ""}
+                    value={currentLlm.prompt}
                     disabled={disabled}
-                    onChange={(e) => update({ prompt: e.target.value })}
+                    onChange={(e) => update({ llm: { ...currentLlm, prompt: e.target.value } })}
                     placeholder="Classify the conversation according to observed caller intent..."
                   />
                   <FieldDescription>
@@ -498,9 +510,9 @@ export function ClassifierPanel({
                       disabled={disabled}
                       onChange={(e) =>
                         update({
-                          model: {
-                            ...classifier.model,
-                            provider: e.target.value,
+                          llm: {
+                            ...currentLlm,
+                            provider: e.target.value as typeof currentLlm.provider,
                             model:
                               providers?.providers.find((p) => p.provider === e.target.value)
                                 ?.models_by_slot?.llm?.[0] || "",
@@ -520,12 +532,12 @@ export function ClassifierPanel({
                     <FieldLabel htmlFor="classifier-model">Model</FieldLabel>
                     <NativeSelect
                       id="classifier-model"
-                      value={classifier.model?.model || availableModels[0] || ""}
+                      value={currentLlm.model || availableModels[0] || ""}
                       disabled={disabled}
                       onChange={(e) =>
                         update({
-                          model: {
-                            ...classifier.model,
+                          llm: {
+                            ...currentLlm,
                             model: e.target.value,
                           },
                         })
@@ -572,7 +584,7 @@ export function ClassifierPanel({
                 <div>
                   <h2 className="text-base font-semibold">TypeSafe AI Jev Settings</h2>
                   <p className="text-xs text-muted-foreground">
-                    Multi-choice questions and criteria evaluated by the <code className="font-mono">classify_jev</code> tool.
+                    Multi-choice questions and criteria evaluated by the <code className="font-mono">classify_lead</code> tool.
                   </p>
                 </div>
                 <Button
@@ -750,7 +762,7 @@ export function ClassifierPanel({
           <div className="rounded-md border p-3 text-xs text-muted-foreground">
             <p className="font-medium text-foreground">Compact Runtime Output</p>
             <p className="mt-1">
-              Both <code className="font-mono text-foreground font-semibold">classify_jev</code> and <code className="font-mono text-foreground font-semibold">classify_llm</code> extract the live transcript automatically and return clean, compact key-value findings.
+              <code className="font-mono text-foreground font-semibold">classify_lead</code> and automatic node classifiers use the selected backend, extract the live transcript automatically, and return clean, compact key-value findings.
             </p>
           </div>
         </div>

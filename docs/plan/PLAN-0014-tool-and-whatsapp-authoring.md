@@ -88,3 +88,15 @@ Status: completed
 
 Plan 0014 is complete. Plan 0015 (provider model configuration) is the next
 implementation boundary and has not been started.
+
+## Follow-up: edit WhatsApp template drafts from Tools
+
+- Extended the existing version-aware draft editor with a WhatsApp section.
+- Drafts can change the selected account-scoped catalog media and edit template
+  placeholder-to-tool-argument mappings without returning to Integrations.
+- Existing tool description and parameter descriptions remain the authoring
+  fields for model-facing tool guidance; no additional prompt/config field is
+  introduced. The editor explains where each kind of instruction belongs.
+- Template identity remains fixed in this editor because changing an approved
+  template can change its placeholder schema; generate a tool from Integrations
+  for a different template.

@@ -139,7 +139,7 @@ export function KnowledgePanel({
                 updateRetrieval({
                   wait: {
                     ...config.retrieval.wait,
-                    mode: event.target.value,
+                    mode: event.target.value as AgentConfig["retrieval"]["wait"]["mode"],
                     acknowledgement:
                       event.target.value === "acknowledge_then_wait"
                         ? config.retrieval.wait.acknowledgement ||

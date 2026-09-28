@@ -1,7 +1,11 @@
 from datetime import UTC, datetime
 
 from voice_runtime.contracts.evidence import EvidenceBatch
-from voice_runtime.diagnostics import provider_error_diagnostic, text_error_diagnostic
+from voice_runtime.diagnostics import (
+    provider_error_diagnostic,
+    provider_exception_diagnostic,
+    text_error_diagnostic,
+)
 from voice_runtime.execution.exchange import ExchangeTracker
 
 
@@ -53,6 +57,39 @@ def test_pipeline_provider_text_is_not_collapsed_to_generic_pipeline_error():
     assert diagnostic["source"] == "provider"
     assert diagnostic["metadata"]["provider"] == "groq"
     assert diagnostic["retryable"] is True
+
+
+def test_groq_failed_generation_is_preserved_as_provider_diagnostic_metadata():
+    class Response:
+        status_code = 400
+
+        @property
+        def headers(self):
+            return {"x-request-id": "groq-req-1", "retry-after": "2"}
+
+        @staticmethod
+        def json():
+            return {
+                "error": {
+                    "code": "tool_use_failed",
+                    "message": "Failed to call a function",
+                    "failed_generation": '{"name":"change_node","arguments":',
+                }
+            }
+
+    class ProviderError(Exception):
+        response = Response()
+
+    diagnostic = provider_exception_diagnostic(
+        ProviderError("invalid tool call"), provider="groq", operation="llm"
+    )
+
+    assert diagnostic["source"] == "provider"
+    assert diagnostic["category"] == "provider_request_failed"
+    assert diagnostic["provider_request_id"] == "groq-req-1"
+    assert diagnostic["http_status"] == 400
+    assert diagnostic["metadata"]["failed_generation"] == '{"name":"change_node","arguments":'
+    assert diagnostic["metadata"]["operation"] == "llm"
 
 
 def test_runtime_diagnostic_is_valid_evidence_and_keeps_timestamp_contract():

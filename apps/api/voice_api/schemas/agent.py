@@ -1,9 +1,10 @@
 from pydantic import BaseModel, Field
+from voice_runtime.contracts import AgentConfig
 
 
 class RevisionBody(BaseModel):
     revision: int = Field(gt=0)
-    config: dict
+    config: AgentConfig
     note: str | None = None
 
 
@@ -13,7 +14,26 @@ class ExpectedRevision(BaseModel):
 
 class CreateBody(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    config: dict
+    config: AgentConfig
+
+
+class AgentVersionResponse(BaseModel):
+    id: str
+    version: int
+    revision: int
+    status: str
+    config: AgentConfig
+    note: str | None
+
+
+class AgentVersionsResponse(BaseModel):
+    versions: list[AgentVersionResponse]
+
+
+class UpdatedAgentVersionResponse(BaseModel):
+    id: str
+    revision: int
+    config: AgentConfig
 
 
 class BindToolBody(BaseModel):

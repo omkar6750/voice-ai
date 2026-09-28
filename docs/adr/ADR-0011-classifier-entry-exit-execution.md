@@ -21,6 +21,10 @@ deterministic node lifecycle hook instead.
 
 ## Decision
 
+The classifier contract and delivery details are extended by ADR-0019: the
+active runtime exposes only `classify_lead`, and automatic/dynamic execution
+shares the agent-selected JEV or Pipecat LLM backend.
+
 Use the installed Pipecat 1.11.0 `FlowManager._set_node` lifecycle as the single
 runtime hook:
 

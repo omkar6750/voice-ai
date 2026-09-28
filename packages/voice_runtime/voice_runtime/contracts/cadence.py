@@ -68,19 +68,67 @@ class JevClassifierConfig(ConfigModel):
     api_url: str = "https://api.typesafe.ai/v1/systemone"
     questions: dict[str, JevQuestion] = Field(default_factory=default_jev_questions)
 
+    output_fields: list[str] = Field(
+        default_factory=lambda: ["lead_temperature", "service_fit", "tone"]
+    )
+
+
+class ClassifierLLMConfig(LLMConfig):
+    prompt: str = "Classify the supplied conversation using only observed evidence."
+    output_fields: dict[str, list[str]] = Field(
+        default_factory=lambda: {
+            "lead_temperature": ["hot", "warm", "cold"],
+            "service_fit": ["strong_fit", "possible_fit", "poor_fit"],
+            "tone": ["receptive", "hesitant", "resistant"],
+        }
+    )
+    max_output_tokens: int = Field(default=96, gt=0, le=512)
+
 
 class ClassifierConfig(CadenceConfig):
     classifier_type: Literal["llm", "jev"] = "llm"
-    node_entries: list[Identifier] = Field(default_factory=list)
     node_exits: list[Identifier] = Field(default_factory=lambda: ["discovery", "qualification"])
-    model: LLMConfig = Field(default_factory=LLMConfig)
-    prompt: str = "Classify the supplied conversation using only observed evidence."
-    jev: JevClassifierConfig = Field(default_factory=JevClassifierConfig)
+    llm: ClassifierLLMConfig | None = Field(default_factory=ClassifierLLMConfig)
+    jev: JevClassifierConfig | None = None
+    max_result_chars: int = Field(default=512, gt=0, le=4096)
+    include_confidence: bool = False
+    include_probabilities: bool = False
     answer_signals: list[str] = Field(default_factory=list)
     topic_signals: list[str] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)
     confidence_threshold: float = Field(default=0.8, ge=0, le=1)
     consecutive_verdicts: int = Field(default=1, gt=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_classifier_shape(cls, value):
+        if not isinstance(value, dict):
+            return value
+        value = dict(value)
+        classifier_type = value.get("classifier_type", "llm")
+        if "llm" not in value and ("model" in value or "prompt" in value):
+            legacy_model = dict(value.pop("model", {}) or {})
+            if "prompt" in value:
+                legacy_model["prompt"] = value.pop("prompt")
+            value["llm"] = legacy_model
+        if classifier_type == "jev":
+            value["llm"] = None
+            value.setdefault("jev", {"questions": default_jev_questions()})
+        else:
+            value["jev"] = None
+        return value
+
+    @model_validator(mode="after")
+    def selected_branch_only(self):
+        if self.classifier_type == "llm":
+            if self.llm is None:
+                object.__setattr__(self, "llm", ClassifierLLMConfig())
+            object.__setattr__(self, "jev", None)
+        else:
+            if self.jev is None:
+                object.__setattr__(self, "jev", JevClassifierConfig())
+            object.__setattr__(self, "llm", None)
+        return self
 
 
 class SummarizerConfig(CadenceConfig):

@@ -162,3 +162,23 @@ template-tool form whose media selector stores the local catalog ID.
   WhatsApp connection; no external message was sent by automated tests.
 - Meta template creation remains out of scope; this only configures existing
   approved templates.
+
+## Follow-up decision: edit WhatsApp bindings on tool drafts
+
+The integration Templates workflow remains the place to discover approved Meta
+templates and create the first tool definition. After cloning that definition,
+the Tools draft editor also permits changing its account-scoped catalog media and
+template-placeholder-to-tool-argument mappings. Template name/language remain
+pinned there: changing template identity can change the provider-defined
+placeholder schema and must go through template generation.
+
+No extra free-form prompt field is added to `ToolConfig`. The existing tool
+`description` and each parameter's schema `description` are the model-facing
+instructions: the runtime passes them as the function description and parameter
+descriptions in `FlowsFunctionSchema`. Agent-wide behavior belongs in the agent
+system/role prompt. For approved WhatsApp templates, Meta owns the literal body;
+the model supplies mapped placeholder values and cannot rewrite the template.
+The acknowledgement is a spoken wait message, not a tool-use prompt.
+
+The editor clarifies these boundaries and preserves local media IDs in the draft;
+runtime media resolution remains connection-scoped as described above.

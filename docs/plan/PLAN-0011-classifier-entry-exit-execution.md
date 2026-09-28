@@ -2,6 +2,8 @@
 
 Status: completed
 
+The provider, tool-collapse, and context-budget work is tracked in PLAN-0019.
+
 ## Existing facts
 
 - `classifier.node_entries` and `classifier.node_exits` exist in the contract but are not consumed by runtime code.

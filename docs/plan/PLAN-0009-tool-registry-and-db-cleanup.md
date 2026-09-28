@@ -81,3 +81,19 @@ Status: completed
 ## Boundary
 
 Plan 0009 is complete. Plan 0010 (tool-result delivery evidence) has not been started.
+
+## Follow-up: deleting a tool with saved agent references
+
+- Tool deletion now removes the deleted tool's binding and explicit prompt
+  directives from every agent version, including published versions in this
+  development workspace; affected revisions are incremented.
+- Cleaned references include global/node/role prompts, node tool bindings,
+  entry/exit actions, and background hooks, including alias binding keys pinned
+  by the deleted tool ID/version ID.
+- Historical tool invocation rows are retained; their nullable
+  `tool_version_id` is cleared before deleting the tool definition so evidence
+  is not orphaned from the database's referential model.
+- A recreated tool is a new identity and is not silently rebound. Agent authors
+  must explicitly bind the new version and add its prompt directive.
+- The development agent versions in the reported 500 response were repaired;
+  all five now validate with no reference to the deleted WhatsApp tool.

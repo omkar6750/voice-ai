@@ -96,6 +96,61 @@ function AudioTrack({ artifact }: { artifact: Artifact }) {
   );
 }
 
+function PipelineDebugLog({ artifact }: { artifact: Artifact }) {
+  const token = useOperatorToken();
+  const [content, setContent] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function load() {
+    setBusy(true);
+    try {
+      const response = await fetch(
+        "/api/v1/artifacts/" + artifact.id + "/file",
+        {
+          headers: { Authorization: "Bearer " + token },
+        },
+      );
+      if (!response.ok)
+        throw new Error("Pipeline log unavailable (" + response.status + ")");
+      setContent(await response.text());
+    } catch (cause) {
+      toast.error(
+        cause instanceof Error ? cause.message : "Could not load pipeline log",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card className="mt-4">
+      <CardHeader>
+        <CardTitle>Pipeline debug log</CardTitle>
+        <CardDescription>
+          Timestamped provider, VAD, turn, interruption, and playback events.
+          Open only when the structured diagnosis needs more detail.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {artifact.deleted_at ? (
+          <p className="text-sm text-muted-foreground">Debug log expired.</p>
+        ) : content === null ? (
+          <Button variant="outline" size="sm" disabled={busy} onClick={load}>
+            {busy ? (
+              <Spinner data-icon="inline-start" />
+            ) : (
+              <Activity data-icon="inline-start" />
+            )}
+            {busy ? "Loading…" : "Load pipeline log"}
+          </Button>
+        ) : (
+          <pre className="max-h-96 overflow-auto rounded-md bg-muted p-3 font-mono text-xs whitespace-pre-wrap break-all">
+            {content || "The pipeline log is empty."}
+          </pre>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function RunDetailPage() {
   const { runId } = useParams();
   const api = useApi();
@@ -162,6 +217,7 @@ export function RunDetailPage() {
     return () => window.clearInterval(timer);
   }, [run?.status, load]);
   const recorded = artifacts.filter((item) => item.kind !== "pipeline_log");
+  const pipelineLog = artifacts.find((item) => item.kind === "pipeline_log");
   const durationMs =
     run?.started_at && run.ended_at
       ? Date.parse(run.ended_at) - Date.parse(run.started_at)
@@ -374,6 +430,7 @@ export function RunDetailPage() {
                     )}
                   </CardContent>
                 </Card>
+                {pipelineLog && <PipelineDebugLog artifact={pipelineLog} />}
               </div>
               <Inspector
                 selection={selection}

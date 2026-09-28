@@ -38,7 +38,13 @@ export function ModelsPanel({
         ...config.tts,
         cartesia: {
           ...config.tts.cartesia,
-          generation_config: { ...cartesiaGeneration, [field]: value },
+          pronunciation_dict_id: config.tts.cartesia?.pronunciation_dict_id ?? null,
+          generation_config: {
+            volume: cartesiaGeneration?.volume ?? null,
+            speed: cartesiaGeneration?.speed ?? null,
+            emotion: cartesiaGeneration?.emotion ?? null,
+            [field]: value,
+          },
         },
       },
     });
@@ -279,7 +285,10 @@ export function ModelsPanel({
                     placeholder="Optional dictionary ID" disabled={disabled}
                     onChange={(event) => change({ ...config, tts: {
                       ...config.tts,
-                      cartesia: { ...config.tts.cartesia, pronunciation_dict_id: event.target.value || null },
+                      cartesia: {
+                        generation_config: config.tts.cartesia?.generation_config ?? null,
+                        pronunciation_dict_id: event.target.value || null,
+                      },
                     } })} />
                 </Field>
               </>

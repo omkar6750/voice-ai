@@ -17,7 +17,11 @@ def _safe_text(value: Any, limit: int = 2000) -> str | None:
     text = str(value)
     text = re.sub(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", text)
     text = re.sub(r"\b(?:sk|gsk|key|token)[-_][A-Za-z0-9._-]+\b", "[REDACTED]", text)
-    text = re.sub(r"(?i)(api[_ -]?key|access[_ -]?token|password|secret)\s*[:=]\s*[^,;\s]+", r"\1=[REDACTED]", text)
+    text = re.sub(
+        r"(?i)(api[_ -]?key|access[_ -]?token|password|secret)\s*[:=]\s*[^,;\s]+",
+        r"\1=[REDACTED]",
+        text,
+    )
     return text[:limit]
 
 
@@ -40,6 +44,7 @@ def provider_error_diagnostic(
         or body_map.get("error_description")
         or (body if isinstance(body, str) else None)
     )
+    failed_generation = error_map.get("failed_generation") or body_map.get("failed_generation")
     lower = str(provider_message or "").lower()
     if status_code in {401, 403} or (
         status_code is None
@@ -51,7 +56,9 @@ def provider_error_diagnostic(
             f"{provider} rejected the configured credentials",
             False,
         )
-    elif status_code == 429 and any(term in lower for term in ("quota", "credit", "usage limit", "billing")):
+    elif status_code == 429 and any(
+        term in lower for term in ("quota", "credit", "usage limit", "billing")
+    ):
         category, code, message, retryable = (
             "provider_quota_exhausted",
             "provider_quota_exhausted",
@@ -90,7 +97,10 @@ def provider_error_diagnostic(
         provider_request_id=_safe_text(request_id, 255),
         http_status=status_code,
         retry_after_seconds=retry_after_seconds,
-        metadata={"provider": provider},
+        metadata={
+            "provider": provider,
+            **({"failed_generation": _safe_text(failed_generation)} if failed_generation else {}),
+        },
     )
 
 
@@ -130,6 +140,49 @@ def exception_diagnostic(
     )
 
 
+def provider_exception_diagnostic(exc: BaseException, *, provider: str, operation: str) -> dict:
+    """Extract safe provider response metadata from SDK exceptions across providers."""
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    body = None
+    if response is not None:
+        try:
+            body = response.json()
+        except Exception:
+            body = None
+    headers = getattr(response, "headers", {}) or {}
+    request_id = next(
+        (
+            headers[key]
+            for key in ("x-request-id", "request-id", "x-goog-request-id")
+            if headers.get(key)
+        ),
+        None,
+    )
+    diagnostic = provider_error_diagnostic(
+        provider=provider,
+        status_code=status_code,
+        body=body if isinstance(body, (Mapping, str)) else str(exc),
+        request_id=request_id,
+        retry_after_seconds=_retry_after(headers.get("retry-after")),
+    )
+    diagnostic["metadata"]["operation"] = operation
+    # Some SDK exceptions stringify structured response details (notably Groq's
+    # invalid tool-call error) while hiding the response object.
+    if not diagnostic.get("metadata", {}).get("failed_generation"):
+        match = re.search(r"failed_generation['\"]?\s*[:=]\s*['\"]([^'\"]+)", str(exc), re.I)
+        if match:
+            diagnostic["metadata"]["failed_generation"] = _safe_text(match.group(1))
+    return diagnostic
+
+
+def _retry_after(value: Any) -> float | None:
+    try:
+        return max(0.0, min(float(value), 86400.0))
+    except (TypeError, ValueError):
+        return None
+
+
 def text_error_diagnostic(error: str, *, fallback_source: str = "runtime") -> dict:
     """Classify provider-shaped pipeline text when an SDK hides HTTP fields."""
     text = _safe_text(error) or "Runtime execution failed"
@@ -149,7 +202,9 @@ def text_error_diagnostic(error: str, *, fallback_source: str = "runtime") -> di
             retryable=True,
             metadata={"provider": provider} if provider else {},
         )
-    if any(term in lower for term in ("quota", "credits", "credit exhausted", "usage limit", "billing")):
+    if any(
+        term in lower for term in ("quota", "credits", "credit exhausted", "usage limit", "billing")
+    ):
         return diagnostic_dict(
             severity="error",
             category="provider_quota_exhausted",

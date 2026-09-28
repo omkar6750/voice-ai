@@ -2,7 +2,7 @@
 
 from .agent import AgentConfig, ContextConfig, FlowConfig, FlowNodeConfig, LanguageConfig
 from .base import ConfigModel
-from .cadence import CadenceConfig, ClassifierConfig, SummarizerConfig
+from .cadence import CadenceConfig, ClassifierConfig, ClassifierLLMConfig, SummarizerConfig
 from .diagnostics import DiagnosticInput, DiagnosticPayload
 from .knowledge import KnowledgeConfig, RetrievalConfig
 from .providers import (
@@ -38,6 +38,7 @@ __all__ = [
     "CadenceConfig",
     "CallLimits",
     "ClassifierConfig",
+    "ClassifierLLMConfig",
     "ConfigModel",
     "ContextConfig",
     "DiagnosticInput",

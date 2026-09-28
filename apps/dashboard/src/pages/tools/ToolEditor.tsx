@@ -10,13 +10,19 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
+import { useResource } from "@/lib/resources";
 
 type ToolVersion = components["schemas"]["ToolVersionResponse"];
 type ToolConfig = components["schemas"]["ToolConfig"];
 type HandlerCatalog = components["schemas"]["ToolHandlerCatalog"];
 type ValidationResponse = components["schemas"]["ToolValidationResponse"];
+type WhatsAppConfig = NonNullable<ToolConfig["whatsapp"]>;
+type MediaListResponse = components["schemas"]["MediaListResponse"];
 type EditableToolConfig = Omit<ToolConfig, "parameters" | "wait"> & {
   parameters: Record<string, unknown>;
   wait: NonNullable<ToolConfig["wait"]>;
@@ -99,14 +105,23 @@ export function ToolEditor({
   onSaved: () => Promise<void>;
 }) {
   const api = useApi();
-  const [config, setConfig] = useState<EditableToolConfig>(() => editableConfig(version.config));
-  const [rows, setRows] = useState<ParameterRow[]>(() => parameterRows(version.config));
-  const [busy, setBusy] = useState<"save" | "validate" | "publish" | null>(null);
+  const [config, setConfig] = useState<EditableToolConfig>(() =>
+    editableConfig(version.config),
+  );
+  const [rows, setRows] = useState<ParameterRow[]>(() =>
+    parameterRows(version.config),
+  );
+  const [busy, setBusy] = useState<"save" | "validate" | "publish" | null>(
+    null,
+  );
   const [mapping, setMapping] = useState(() =>
     mappingText(version.config.http?.argument_mapping),
   );
   const [extraction, setExtraction] = useState(() =>
     mappingText(version.config.http?.output_extraction),
+  );
+  const [whatsappMapping, setWhatsappMapping] = useState(() =>
+    mappingText(version.config.whatsapp?.parameter_mappings),
   );
 
   const selectedHandler = useMemo(
@@ -118,10 +133,7 @@ export function ToolEditor({
     setConfig((current) => ({ ...current, [key]: value }));
   }
 
-  function setWaitField(
-    key: "mode" | "acknowledgement",
-    value: string | null,
-  ) {
+  function setWaitField(key: "mode" | "acknowledgement", value: string | null) {
     setConfig((current) => ({
       ...current,
       wait: { ...current.wait, [key]: value },
@@ -146,6 +158,14 @@ export function ToolEditor({
           config: {
             ...config,
             parameters: parametersSchema(rows),
+            ...(config.whatsapp
+              ? {
+                  whatsapp: {
+                    ...config.whatsapp,
+                    parameter_mappings: parseMappingText(whatsappMapping),
+                  },
+                }
+              : {}),
             ...(config.http
               ? {
                   http: {
@@ -161,7 +181,9 @@ export function ToolEditor({
       toast.success("Draft saved");
       await onSaved();
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "Could not save draft");
+      toast.error(
+        cause instanceof Error ? cause.message : "Could not save draft",
+      );
     } finally {
       setBusy(null);
     }
@@ -175,9 +197,14 @@ export function ToolEditor({
         { method: "POST" },
       );
       if (result.valid) toast.success("Tool configuration is valid");
-      else toast.error((result.issues ?? []).map((issue) => issue.message).join("; "));
+      else
+        toast.error(
+          (result.issues ?? []).map((issue) => issue.message).join("; "),
+        );
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "Could not validate tool");
+      toast.error(
+        cause instanceof Error ? cause.message : "Could not validate tool",
+      );
     } finally {
       setBusy(null);
     }
@@ -193,7 +220,9 @@ export function ToolEditor({
       toast.success("Tool published");
       await onSaved();
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "Could not publish tool");
+      toast.error(
+        cause instanceof Error ? cause.message : "Could not publish tool",
+      );
     } finally {
       setBusy(null);
     }
@@ -206,72 +235,107 @@ export function ToolEditor({
           <FieldLabel>Tool name</FieldLabel>
           <Input value={config.name} disabled className="font-mono" />
           <FieldDescription>
-            The logical tool name is immutable; clone the logical tool to create a different tool.
+            The logical tool name is immutable; clone the logical tool to create
+            a different tool.
           </FieldDescription>
         </Field>
         <Field>
-          <FieldLabel htmlFor={`tool-description-${version.id}`}>Description</FieldLabel>
+          <FieldLabel htmlFor={`tool-description-${version.id}`}>
+            Description
+          </FieldLabel>
           <Textarea
             id={`tool-description-${version.id}`}
             value={config.description}
             onChange={(event) => setField("description", event.target.value)}
             rows={3}
           />
+          <FieldDescription>
+            The model receives this as the function description. Explain when to
+            use the tool; put overall conversation behavior in the agent prompt
+            and argument-specific guidance in the parameter descriptions below.
+          </FieldDescription>
         </Field>
         <Field>
           <FieldLabel>Execution</FieldLabel>
-          <Input value={config.kind === "registered" ? "Registered backend handler" : "HTTP request"} disabled />
+          <Input
+            value={
+              config.kind === "registered"
+                ? "Registered backend handler"
+                : "HTTP request"
+            }
+            disabled
+          />
         </Field>
 
         {config.kind === "registered" && (
           <>
             <Field>
-              <FieldLabel htmlFor={`tool-handler-${version.id}`}>Handler</FieldLabel>
+              <FieldLabel htmlFor={`tool-handler-${version.id}`}>
+                Handler
+              </FieldLabel>
               <NativeSelect
                 id={`tool-handler-${version.id}`}
                 value={config.handler ?? ""}
                 onChange={(event) => {
                   const handler = event.target.value || null;
                   setField("handler", handler);
-                  if (handler !== "send_whatsapp_template") setField("whatsapp", null);
+                  if (handler !== "send_whatsapp_template")
+                    setField("whatsapp", null);
                 }}
               >
-                <NativeSelectOption value="">Select reviewed handler</NativeSelectOption>
+                <NativeSelectOption value="">
+                  Select reviewed handler
+                </NativeSelectOption>
                 {handlers.map((handler) => (
                   <NativeSelectOption key={handler.name} value={handler.name}>
                     {handler.name}
                   </NativeSelectOption>
                 ))}
               </NativeSelect>
-              <FieldDescription>{selectedHandler?.description}</FieldDescription>
+              <FieldDescription>
+                {selectedHandler?.description}
+              </FieldDescription>
             </Field>
             {config.handler === "send_whatsapp_template" && config.whatsapp && (
-              <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-                WhatsApp template settings are account-scoped and edited from the integration
-                template workflow. This draft is linked to template{" "}
-                <span className="font-mono text-foreground">{config.whatsapp.template_name}</span>
-                {config.whatsapp.header_media_id ? " with a catalog media header." : "."}
-              </div>
+              <WhatsAppDraftFields
+                versionId={version.id}
+                config={config.whatsapp}
+                mapping={whatsappMapping}
+                onMappingChange={setWhatsappMapping}
+                onChange={(whatsapp) => setField("whatsapp", whatsapp)}
+              />
             )}
             <Field>
-              <FieldLabel htmlFor={`tool-wait-${version.id}`}>Wait mode</FieldLabel>
+              <FieldLabel htmlFor={`tool-wait-${version.id}`}>
+                Wait mode
+              </FieldLabel>
               <NativeSelect
                 id={`tool-wait-${version.id}`}
                 value={config.wait.mode}
                 onChange={(event) => setWaitField("mode", event.target.value)}
               >
-                <NativeSelectOption value="silent_wait">Silent wait</NativeSelectOption>
-                <NativeSelectOption value="acknowledge_then_wait">Acknowledge, then wait</NativeSelectOption>
-                <NativeSelectOption value="continue_conversation">Continue conversation</NativeSelectOption>
+                <NativeSelectOption value="silent_wait">
+                  Silent wait
+                </NativeSelectOption>
+                <NativeSelectOption value="acknowledge_then_wait">
+                  Acknowledge, then wait
+                </NativeSelectOption>
+                <NativeSelectOption value="continue_conversation">
+                  Continue conversation
+                </NativeSelectOption>
               </NativeSelect>
             </Field>
             {config.wait.mode === "acknowledge_then_wait" && (
               <Field>
-                <FieldLabel htmlFor={`tool-ack-${version.id}`}>Acknowledgement</FieldLabel>
+                <FieldLabel htmlFor={`tool-ack-${version.id}`}>
+                  Acknowledgement
+                </FieldLabel>
                 <Input
                   id={`tool-ack-${version.id}`}
                   value={config.wait.acknowledgement ?? ""}
-                  onChange={(event) => setWaitField("acknowledgement", event.target.value)}
+                  onChange={(event) =>
+                    setWaitField("acknowledgement", event.target.value)
+                  }
                 />
               </Field>
             )}
@@ -281,7 +345,9 @@ export function ToolEditor({
         {config.kind === "http" && config.http && (
           <>
             <Field>
-              <FieldLabel htmlFor={`tool-url-${version.id}`}>Endpoint</FieldLabel>
+              <FieldLabel htmlFor={`tool-url-${version.id}`}>
+                Endpoint
+              </FieldLabel>
               <Input
                 id={`tool-url-${version.id}`}
                 value={config.http.url}
@@ -290,41 +356,59 @@ export function ToolEditor({
             </Field>
             <div className="grid gap-4 md:grid-cols-2">
               <Field>
-                <FieldLabel htmlFor={`tool-method-${version.id}`}>Method</FieldLabel>
+                <FieldLabel htmlFor={`tool-method-${version.id}`}>
+                  Method
+                </FieldLabel>
                 <NativeSelect
                   id={`tool-method-${version.id}`}
                   value={config.http.method}
-                  onChange={(event) => setHttpField("method", event.target.value)}
+                  onChange={(event) =>
+                    setHttpField("method", event.target.value)
+                  }
                 >
-                  {(["GET", "POST", "PUT", "PATCH", "DELETE"] as const).map((method) => (
-                    <NativeSelectOption key={method} value={method}>{method}</NativeSelectOption>
-                  ))}
+                  {(["GET", "POST", "PUT", "PATCH", "DELETE"] as const).map(
+                    (method) => (
+                      <NativeSelectOption key={method} value={method}>
+                        {method}
+                      </NativeSelectOption>
+                    ),
+                  )}
                 </NativeSelect>
               </Field>
               <Field>
-                <FieldLabel htmlFor={`tool-timeout-${version.id}`}>Timeout (seconds)</FieldLabel>
+                <FieldLabel htmlFor={`tool-timeout-${version.id}`}>
+                  Timeout (seconds)
+                </FieldLabel>
                 <Input
                   id={`tool-timeout-${version.id}`}
                   type="number"
                   min={1}
                   max={120}
                   value={config.http.timeout_secs}
-                  onChange={(event) => setHttpField("timeout_secs", Number(event.target.value))}
+                  onChange={(event) =>
+                    setHttpField("timeout_secs", Number(event.target.value))
+                  }
                 />
               </Field>
             </div>
             <Field>
-              <FieldLabel htmlFor={`tool-secret-${version.id}`}>Secret reference</FieldLabel>
+              <FieldLabel htmlFor={`tool-secret-${version.id}`}>
+                Secret reference
+              </FieldLabel>
               <Input
                 id={`tool-secret-${version.id}`}
                 value={config.http.secret_reference ?? ""}
-                onChange={(event) => setHttpField("secret_reference", event.target.value || null)}
+                onChange={(event) =>
+                  setHttpField("secret_reference", event.target.value || null)
+                }
                 placeholder="integration-secret-id"
               />
             </Field>
             <div className="grid gap-4 md:grid-cols-2">
               <Field>
-                <FieldLabel htmlFor={`tool-mapping-${version.id}`}>Argument mapping</FieldLabel>
+                <FieldLabel htmlFor={`tool-mapping-${version.id}`}>
+                  Argument mapping
+                </FieldLabel>
                 <Textarea
                   id={`tool-mapping-${version.id}`}
                   value={mapping}
@@ -332,10 +416,14 @@ export function ToolEditor({
                   placeholder="caller_name -> customer_name"
                   rows={4}
                 />
-                <FieldDescription>One mapping per line: tool argument -&gt; request field.</FieldDescription>
+                <FieldDescription>
+                  One mapping per line: tool argument -&gt; request field.
+                </FieldDescription>
               </Field>
               <Field>
-                <FieldLabel htmlFor={`tool-extraction-${version.id}`}>Output extraction</FieldLabel>
+                <FieldLabel htmlFor={`tool-extraction-${version.id}`}>
+                  Output extraction
+                </FieldLabel>
                 <Textarea
                   id={`tool-extraction-${version.id}`}
                   value={extraction}
@@ -343,7 +431,9 @@ export function ToolEditor({
                   placeholder="status -> data.status"
                   rows={4}
                 />
-                <FieldDescription>One mapping per line: result field -&gt; response path.</FieldDescription>
+                <FieldDescription>
+                  One mapping per line: result field -&gt; response path.
+                </FieldDescription>
               </Field>
             </div>
           </>
@@ -353,46 +443,112 @@ export function ToolEditor({
           <div className="mb-2 flex items-center justify-between">
             <div>
               <h3 className="text-sm font-medium">Input parameters</h3>
-              <p className="text-xs text-muted-foreground">These fields become the function-calling schema.</p>
+              <p className="text-xs text-muted-foreground">
+                Names, descriptions, and required status become the
+                function-calling schema. For WhatsApp templates, describe what
+                each placeholder should contain.
+              </p>
             </div>
             <Button
               type="button"
               size="sm"
               variant="outline"
-              onClick={() => setRows((current) => [...current, { name: "", type: "string", description: "", required: false }])}
+              onClick={() =>
+                setRows((current) => [
+                  ...current,
+                  {
+                    name: "",
+                    type: "string",
+                    description: "",
+                    required: false,
+                  },
+                ])
+              }
             >
               Add parameter
             </Button>
           </div>
           <div className="flex flex-col gap-3">
             {rows.map((row, index) => (
-              <div key={`${version.id}-${index}`} className="grid gap-2 rounded-md border p-3 md:grid-cols-[1fr_120px_1.5fr_auto]">
+              <div
+                key={`${version.id}-${index}`}
+                className="grid gap-2 rounded-md border p-3 md:grid-cols-[1fr_120px_1.5fr_auto]"
+              >
                 <Input
                   value={row.name}
                   placeholder="parameter_name"
-                  onChange={(event) => setRows((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item))}
+                  onChange={(event) =>
+                    setRows((current) =>
+                      current.map((item, itemIndex) =>
+                        itemIndex === index
+                          ? { ...item, name: event.target.value }
+                          : item,
+                      ),
+                    )
+                  }
                 />
                 <NativeSelect
                   value={row.type}
-                  onChange={(event) => setRows((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, type: event.target.value } : item))}
+                  onChange={(event) =>
+                    setRows((current) =>
+                      current.map((item, itemIndex) =>
+                        itemIndex === index
+                          ? { ...item, type: event.target.value }
+                          : item,
+                      ),
+                    )
+                  }
                 >
-                  {(["string", "number", "integer", "boolean"] as const).map((type) => <NativeSelectOption key={type} value={type}>{type}</NativeSelectOption>)}
+                  {(["string", "number", "integer", "boolean"] as const).map(
+                    (type) => (
+                      <NativeSelectOption key={type} value={type}>
+                        {type}
+                      </NativeSelectOption>
+                    ),
+                  )}
                 </NativeSelect>
                 <Input
                   value={row.description}
                   placeholder="Description"
-                  onChange={(event) => setRows((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, description: event.target.value } : item))}
+                  onChange={(event) =>
+                    setRows((current) =>
+                      current.map((item, itemIndex) =>
+                        itemIndex === index
+                          ? { ...item, description: event.target.value }
+                          : item,
+                      ),
+                    )
+                  }
                 />
                 <div className="flex items-center gap-2 text-xs">
                   <label className="flex items-center gap-1">
                     <input
                       type="checkbox"
                       checked={row.required}
-                      onChange={(event) => setRows((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, required: event.target.checked } : item))}
+                      onChange={(event) =>
+                        setRows((current) =>
+                          current.map((item, itemIndex) =>
+                            itemIndex === index
+                              ? { ...item, required: event.target.checked }
+                              : item,
+                          ),
+                        )
+                      }
                     />
                     Required
                   </label>
-                  <Button type="button" size="sm" variant="ghost" onClick={() => setRows((current) => current.filter((_, itemIndex) => itemIndex !== index))}>Remove</Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() =>
+                      setRows((current) =>
+                        current.filter((_, itemIndex) => itemIndex !== index),
+                      )
+                    }
+                  >
+                    Remove
+                  </Button>
                 </div>
               </div>
             ))}
@@ -401,16 +557,116 @@ export function ToolEditor({
       </FieldGroup>
 
       <div className="mt-4 flex flex-wrap gap-2">
-        <Button type="button" disabled={busy !== null} onClick={() => void save()}>
+        <Button
+          type="button"
+          disabled={busy !== null}
+          onClick={() => void save()}
+        >
           {busy === "save" ? "Saving…" : "Save draft"}
         </Button>
-        <Button type="button" variant="outline" disabled={busy !== null} onClick={() => void validate()}>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={busy !== null}
+          onClick={() => void validate()}
+        >
           {busy === "validate" ? "Validating…" : "Validate"}
         </Button>
-        <Button type="button" variant="secondary" disabled={busy !== null} onClick={() => void publish()}>
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={busy !== null}
+          onClick={() => void publish()}
+        >
           {busy === "publish" ? "Publishing…" : "Publish"}
         </Button>
       </div>
+    </div>
+  );
+}
+
+function WhatsAppDraftFields({
+  versionId,
+  config,
+  mapping,
+  onMappingChange,
+  onChange,
+}: {
+  versionId: string;
+  config: WhatsAppConfig;
+  mapping: string;
+  onMappingChange: (value: string) => void;
+  onChange: (value: WhatsAppConfig) => void;
+}) {
+  const { data, loading } = useResource<MediaListResponse>(
+    `/integrations/${config.connection_id}/media`,
+  );
+  const media = data?.media ?? [];
+  const selectedMediaExists = media.some(
+    (item) => item.id === config.header_media_id,
+  );
+
+  return (
+    <div className="flex flex-col gap-4 rounded-md border p-3">
+      <div>
+        <h3 className="text-sm font-medium">WhatsApp template</h3>
+        <p className="text-xs text-muted-foreground">
+          {config.template_name} · {config.language}. Template copy is approved
+          and owned by Meta; this tool supplies its variable values and optional
+          header media.
+        </p>
+      </div>
+      <Field>
+        <FieldLabel htmlFor={`whatsapp-media-${versionId}`}>
+          Header media
+        </FieldLabel>
+        <NativeSelect
+          id={`whatsapp-media-${versionId}`}
+          value={config.header_media_id ?? ""}
+          onChange={(event) =>
+            onChange({ ...config, header_media_id: event.target.value || null })
+          }
+          disabled={loading}
+        >
+          <NativeSelectOption value="">No header media</NativeSelectOption>
+          {config.header_media_id && !selectedMediaExists && (
+            <NativeSelectOption value={config.header_media_id}>
+              Currently selected media (not in catalog)
+            </NativeSelectOption>
+          )}
+          {media.map((item) => (
+            <NativeSelectOption
+              key={item.id}
+              value={item.id}
+              disabled={item.status !== "available"}
+            >
+              {item.display_name} · {item.media_type} · {item.status}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        <FieldDescription>
+          Select an available media record from this WhatsApp connection. The
+          draft stores its local catalog ID; the runtime resolves Meta’s media
+          ID when sending.
+        </FieldDescription>
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`whatsapp-mappings-${versionId}`}>
+          Template placeholder mapping
+        </FieldLabel>
+        <Textarea
+          id={`whatsapp-mappings-${versionId}`}
+          value={mapping}
+          onChange={(event) => onMappingChange(event.target.value)}
+          placeholder={"1 -> caller_name\n2 -> param_2"}
+          rows={3}
+        />
+        <FieldDescription>
+          One mapping per line: template placeholder number -&gt; tool argument.
+          These arguments and their descriptions are passed to the model as the
+          callable tool schema.
+        </FieldDescription>
+      </Field>
     </div>
   );
 }

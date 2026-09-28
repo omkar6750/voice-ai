@@ -73,8 +73,9 @@ async def test_providers_and_config_schema_routes(monkeypatch) -> None:
         assert "send_whatsapp_template" in handler_names
         assert "send_whatsapp_message" in handler_names
         assert "check_whatsapp_window" in handler_names
-        assert "classify_jev" in handler_names
-        assert "classify_llm" in handler_names
+        assert "classify_lead" in handler_names
+        assert "classify_jev" not in handler_names
+        assert "classify_llm" not in handler_names
         assert handlers_data["http_policy"]["follow_redirects"] is False
 
 
@@ -137,10 +138,12 @@ def test_classifier_contracts_and_trimmer():
     from voice_runtime.execution.native import trim_classifier_result
 
     # Test default LLM classifier
-    cfg_llm = ClassifierConfig(classifier_type="llm", prompt="Test prompt")
+    cfg_llm = ClassifierConfig(
+        classifier_type="llm", llm={"prompt": "Test prompt", "provider": "groq"}
+    )
     assert cfg_llm.classifier_type == "llm"
-    assert cfg_llm.prompt == "Test prompt"
-    assert "lead_temperature" in cfg_llm.jev.questions
+    assert cfg_llm.llm.prompt == "Test prompt"
+    assert cfg_llm.jev is None
 
     # Test Jev classifier
     cfg_jev = ClassifierConfig(
@@ -156,6 +159,7 @@ def test_classifier_contracts_and_trimmer():
         ),
     )
     assert cfg_jev.classifier_type == "jev"
+    assert cfg_jev.llm is None
     assert cfg_jev.jev.model == "jev-v2"
     assert "custom_q" in cfg_jev.jev.questions
     assert cfg_jev.jev.questions["custom_q"].criteria["yes"] == "Customer said yes"
@@ -172,12 +176,9 @@ def test_classifier_contracts_and_trimmer():
     }
     trimmed = trim_classifier_result(raw_res)
     assert trimmed["lead_temperature"] == "hot"
-    assert trimmed["lead_temperature_hot"] == 0.85
-    assert trimmed["lead_temperature_warm"] == 0.12
-    # Cold is 0.03 (< 0.1), so excluded from compact output
-    assert "lead_temperature_cold" not in trimmed
+    assert "lead_temperature_hot" not in trimmed
     assert trimmed["service_fit"] == "strong_fit"
-    assert trimmed["notes"] == "Fast caller"
+    assert "notes" not in trimmed
 
 
 @pytest.mark.asyncio

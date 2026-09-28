@@ -14,8 +14,7 @@ def test_runtime_handler_registry_is_canonical_and_detached() -> None:
         "change_node",
         "end_call",
         "send_whatsapp_template",
-        "classify_jev",
-        "classify_llm",
+        "classify_lead",
         "query_knowledge_base",
     } <= names
     assert is_registered_handler("send_whatsapp_template")

@@ -17,7 +17,7 @@ related: [RFC-0001, RFC-0003, RFC-0004, RFC-0005]
 
 ## 1. Context
 
-Tools in the Voice AI platform (`change_node`, `end_call`, `send_whatsapp_template`, `classify_jev`) represent discrete executable capabilities available to the LLM during conversational turns.
+Tools in the Voice AI platform (`change_node`, `end_call`, `send_whatsapp_template`, `classify_lead`) represent discrete executable capabilities available to the LLM during conversational turns.
 
 Like agents, tools use immutable versioning (`ToolVersion`):
 - Draft versions allow updating description, JSON schema parameters, and timeout settings.

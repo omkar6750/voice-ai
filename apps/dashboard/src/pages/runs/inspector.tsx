@@ -57,6 +57,13 @@ function Evidence({
   onSelect: (selection: Selection) => void;
 }) {
   const config = run.resolved_config;
+  const diagnostics = timeline.diagnostics;
+  const issues = diagnostics.filter(
+    (diagnostic) => diagnostic.severity !== "info",
+  );
+  const turnDecisions = diagnostics.filter(
+    (diagnostic) => diagnostic.category === "turn_decision",
+  );
   if (selection.kind === "run")
     return (
       <>
@@ -77,10 +84,10 @@ function Evidence({
             <Value label="Hash">{run.config_hash ?? "Not recorded"}</Value>
           </dl>
           {run.error && <Json label="Run error" value={run.error} />}
-          {timeline.diagnostics.length ? (
+          {issues.length ? (
             <section className="flex flex-col gap-2">
-              <h4 className="text-sm font-medium">Runtime diagnostics</h4>
-              {timeline.diagnostics.map((diagnostic) => (
+              <h4 className="text-sm font-medium">Issues and warnings</h4>
+              {issues.map((diagnostic) => (
                 <div
                   key={diagnostic.diagnostic_id}
                   className="rounded-md border p-3 text-xs"
@@ -107,10 +114,60 @@ function Evidence({
                       {diagnostic.detail}
                     </p>
                   )}
+                  {diagnostic.provider_request_id && (
+                    <p className="mt-2 break-all text-muted-foreground">
+                      Provider request: {diagnostic.provider_request_id}
+                    </p>
+                  )}
+                  {Object.entries(diagnostic.metadata ?? {}).some(([key]) =>
+                    [
+                      "provider",
+                      "operation",
+                      "failed_generation",
+                      "strategy",
+                    ].includes(key),
+                  ) && (
+                    <dl className="mt-2 grid gap-1">
+                      {Object.entries(diagnostic.metadata ?? {})
+                        .filter(([key]) =>
+                          [
+                            "provider",
+                            "operation",
+                            "failed_generation",
+                            "strategy",
+                          ].includes(key),
+                        )
+                        .map(([key, value]) => (
+                          <Value key={key} label={key.replaceAll("_", " ")}>
+                            {String(value)}
+                          </Value>
+                        ))}
+                    </dl>
+                  )}
                 </div>
               ))}
             </section>
           ) : null}
+          {turnDecisions.length > 0 && (
+            <details className="rounded-md border p-3 text-xs">
+              <summary className="cursor-pointer font-medium">
+                Turn decisions · {turnDecisions.length}
+              </summary>
+              <ol className="mt-3 flex flex-col gap-2">
+                {turnDecisions.map((decision) => (
+                  <li key={decision.diagnostic_id} className="border-l-2 pl-2">
+                    <p>{decision.message}</p>
+                    <p className="text-muted-foreground">
+                      {stamp(decision.occurred_at)}
+                      {decision.metadata?.strategy
+                        ? ` · ${String(decision.metadata.strategy)}`
+                        : ""}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+            </details>
+          )}
           <Button
             variant="outline"
             onClick={() => onSelect({ kind: "prompt" })}

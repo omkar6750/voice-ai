@@ -165,13 +165,17 @@ async def test_configured_node_classifier_runs_once_and_returns_context_message(
             "classifier_type": "llm",
             "node_entries": ["greeting"],
             "node_exits": [],
-            "model": {"provider": "groq", "model": "classifier-model"},
-            "prompt": "Classify the call",
+            "llm": {
+                "provider": "groq",
+                "model": "classifier-model",
+                "prompt": "Classify the call",
+                "output_fields": {"lead_temperature": ["warm"]},
+            },
         }
     }
     monkeypatch.setattr(
         native_module,
-        "run_llm_classification",
+        "run_selected_classifier",
         AsyncMock(return_value={"lead_temperature": "warm"}),
     )
 
@@ -179,7 +183,7 @@ async def test_configured_node_classifier_runs_once_and_returns_context_message(
     second = await host._run_node_classifier("entry", "greeting")
 
     assert first is not None and second is not None
-    assert first[1]["role"] == "user"
+    assert first[1]["role"] == "system"
     assert first[0] != second[0]
     assert sum(record["kind"] == "classifier_result" for record in sink.records) == 2
 

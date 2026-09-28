@@ -23,13 +23,16 @@ export function ContextPanel({
   disabled: boolean;
 }) {
   const summarizer = config.context.summarizer ?? {};
-  const summaryModel = summarizer.model ?? {
+  const summaryModel: NonNullable<typeof summarizer.model> = summarizer.model ?? {
     provider: "groq" as const,
     model: "qwen/qwen3.8-27b",
     temperature: 0.4,
     max_tokens: 512,
     top_p: null,
     reasoning_effort: "none" as const,
+    prompt: "Summarize the supplied history faithfully; preserve decisions and facts.",
+    output_fields: {},
+    max_output_tokens: 512,
   };
   const llmProviders = catalog?.providers.filter((provider) => provider.slots.includes("llm")) ?? [];
   const selectedProvider = llmProviders.find((provider) => provider.provider === summaryModel.provider);
@@ -49,7 +52,7 @@ export function ContextPanel({
     });
   }
 
-  function updateSummaryModel(partial: NonNullable<SummarizerConfig["model"]>) {
+  function updateSummaryModel(partial: Partial<NonNullable<SummarizerConfig["model"]>>) {
     updateSummarizer({ model: { ...summaryModel, ...partial } });
   }
 

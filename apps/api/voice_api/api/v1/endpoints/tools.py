@@ -1,10 +1,18 @@
+import re
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_operator
-from voice_api.models import Agent, AgentVersion, AgentVersionTool, Tool, ToolVersion
+from voice_api.models import (
+    Agent,
+    AgentVersion,
+    AgentVersionTool,
+    Tool,
+    ToolInvocation,
+    ToolVersion,
+)
 from voice_api.models.common import new_id
 from voice_api.schemas.agent import ExpectedRevision
 from voice_api.schemas.tools import (
@@ -28,10 +36,81 @@ from voice_api.services.tool_registry_service import (
     validate_tool_registry,
 )
 from voice_runtime.contracts import ToolConfig
+from voice_runtime.contracts.prompt_references import tool_references
 
 router = APIRouter(tags=["tools"])
 Session = Depends(get_session)
 Operator = Depends(require_operator)
+
+
+def _remove_deleted_tool_references(
+    raw_config: dict,
+    *,
+    tool_id: str,
+    tool_version_ids: set[str],
+    tool_name: str,
+) -> tuple[dict, bool]:
+    """Remove deleted tool bindings and prompt directives from an agent config."""
+    config = dict(raw_config)
+    changed = False
+    bindings = dict(config.get("tool_bindings", {}))
+    removed_binding_keys = {tool_name} if tool_name in bindings else set()
+    for key, binding in bindings.items():
+        if isinstance(binding, dict) and (
+            binding.get("tool_id") == tool_id or binding.get("tool_version_id") in tool_version_ids
+        ):
+            removed_binding_keys.add(key)
+    for key in removed_binding_keys:
+        bindings.pop(key, None)
+        changed = True
+
+    reference_names = removed_binding_keys | {tool_name}
+    reference_pattern = re.compile(
+        rf"(?<!\\)#(?:{'|'.join(re.escape(name) for name in sorted(reference_names))})"
+        r"\b(?:\s*\([^)]*\))?"
+    )
+
+    def remove_prompt_sentences(value: object) -> object:
+        nonlocal changed
+        if not isinstance(value, str):
+            return value
+        sentences = re.split(r"(?<=[.!?])(?=\s|$)", value)
+        retained = [
+            sentence for sentence in sentences if not (tool_references(sentence) & reference_names)
+        ]
+        cleaned = "".join(retained)
+        cleaned = reference_pattern.sub("", cleaned)
+        cleaned = re.sub(r"[ \t]+(?=\n)|\n[ \t]+", "\n", cleaned)
+        if cleaned != value:
+            changed = True
+        return cleaned
+
+    config["tool_bindings"] = bindings
+    config["system_prompt"] = remove_prompt_sentences(config.get("system_prompt", ""))
+    flow = dict(config.get("flow", {}))
+    nodes = []
+    for raw_node in flow.get("nodes", []):
+        node = dict(raw_node)
+        for prompt_key in ("prompt", "role_prompt"):
+            if prompt_key in node:
+                node[prompt_key] = remove_prompt_sentences(node[prompt_key])
+        for action_key in ("tool_bindings", "entry_actions", "exit_actions"):
+            values = node.get(action_key, [])
+            filtered = [value for value in values if value not in reference_names]
+            if filtered != values:
+                node[action_key] = filtered
+                changed = True
+        nodes.append(node)
+    if "nodes" in flow:
+        flow["nodes"] = nodes
+    config["flow"] = flow
+
+    background_hooks = config.get("background_hooks", [])
+    filtered_hooks = [hook for hook in background_hooks if hook not in reference_names]
+    if filtered_hooks != background_hooks:
+        config["background_hooks"] = filtered_hooks
+        changed = True
+    return config, changed
 
 
 @router.get("/tools", response_model=ToolListResponse)
@@ -133,28 +212,8 @@ async def tool_handlers(_: None = Operator) -> ToolHandlerCatalog:
                 "category": "messaging",
             },
             {
-                "name": "classify_jev",
-                "description": "Execute TypeSafe AI Jev System One multi-choice classification against configured question criteria on the live call state.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                },
-                "runtime_supported": True,
-                "category": "classification",
-            },
-            {
-                "name": "classify_llm",
-                "description": "Execute fast LLM multi-choice categorization or custom prompt analysis on the live call state.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                },
-                "runtime_supported": True,
-                "category": "classification",
-            },
-            {
                 "name": "classify_lead",
-                "description": "Alias for classify_jev multi-choice lead classification.",
+                "description": "Classify the live lead using the classifier backend configured for this agent.",
                 "parameters": {
                     "type": "object",
                     "properties": {},
@@ -416,23 +475,27 @@ async def tool_deletion_impact(
         else []
     )
 
+    referenced_version_ids = {binding.agent_version_id for binding in bindings}
+    agent_versions = (await session.scalars(select(AgentVersion))).all()
     bound_agents = []
-    seen = set()
-    for b in bindings:
-        ag_v = await session.get(AgentVersion, b.agent_version_id)
-        if ag_v:
-            key = (ag_v.agent_id, ag_v.version)
-            if key not in seen:
-                seen.add(key)
-                ag = await session.get(Agent, ag_v.agent_id)
-                bound_agents.append(
-                    {
-                        "agent_id": ag_v.agent_id,
-                        "agent_name": ag.name if ag else "Unknown Agent",
-                        "version": ag_v.version,
-                        "status": ag_v.status,
-                    }
-                )
+    for agent_version in agent_versions:
+        _, has_config_reference = _remove_deleted_tool_references(
+            agent_version.config or {},
+            tool_id=tool_id,
+            tool_version_ids=set(tv_ids),
+            tool_name=tool.name,
+        )
+        if agent_version.id not in referenced_version_ids and not has_config_reference:
+            continue
+        agent = await session.get(Agent, agent_version.agent_id)
+        bound_agents.append(
+            {
+                "agent_id": agent_version.agent_id,
+                "agent_name": agent.name if agent else "Unknown Agent",
+                "version": agent_version.version,
+                "status": agent_version.status,
+            }
+        )
 
     return ToolImpactResponse(
         tool_id=tool.id,
@@ -463,31 +526,34 @@ async def delete_tool(tool_id: str, session: AsyncSession = Session, _: None = O
         await session.scalars(select(ToolVersion.id).where(ToolVersion.tool_id == tool_id))
     ).all()
 
-    if tv_ids:
+    tool_version_ids = set(tv_ids)
+    if tool_version_ids:
         await session.execute(
-            delete(AgentVersionTool).where(AgentVersionTool.tool_version_id.in_(tv_ids))
+            delete(AgentVersionTool).where(
+                AgentVersionTool.tool_version_id.in_(tool_version_ids)
+            )
         )
 
-        agent_versions = (await session.scalars(select(AgentVersion))).all()
-        for av in agent_versions:
-            cfg = dict(av.config or {})
-            tb = dict(cfg.get("tool_bindings", {}))
-            changed = False
-            if tool.name in tb:
-                del tb[tool.name]
-                changed = True
-            flow = dict(cfg.get("flow", {}))
-            nodes = list(flow.get("nodes", []))
-            for n in nodes:
-                node_tools = n.get("tool_bindings", [])
-                if isinstance(node_tools, list) and tool.name in node_tools:
-                    n["tool_bindings"] = [x for x in node_tools if x != tool.name]
-                    changed = True
-            if changed:
-                cfg["tool_bindings"] = tb
-                flow["nodes"] = nodes
-                cfg["flow"] = flow
-                av.config = cfg
+    agent_versions = (await session.scalars(select(AgentVersion))).all()
+    for av in agent_versions:
+        cfg, changed = _remove_deleted_tool_references(
+            av.config or {},
+            tool_id=tool_id,
+            tool_version_ids=tool_version_ids,
+            tool_name=tool.name,
+        )
+        if changed:
+            av.config = cfg
+            av.revision += 1
+
+    if tool_version_ids:
+        # Keep historical invocation/result rows readable while the definition
+        # is deleted; tool_version_id is nullable specifically for this case.
+        await session.execute(
+            update(ToolInvocation)
+            .where(ToolInvocation.tool_version_id.in_(tool_version_ids))
+            .values(tool_version_id=None)
+        )
 
         await session.execute(delete(ToolVersion).where(ToolVersion.tool_id == tool_id))
 

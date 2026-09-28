@@ -7,7 +7,6 @@ This deliberately does not import the protected standalone demo.
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import re
 from collections.abc import Awaitable, Callable
@@ -47,6 +46,11 @@ from voice_runtime.diagnostics import (
     provider_error_diagnostic,
     text_error_diagnostic,
 )
+from voice_runtime.execution.classifier import (
+    model_visible_result,
+    normalize_classifier_result,
+    run_selected_classifier,
+)
 from voice_runtime.execution.contact_context import sanitize_contact_variables
 from voice_runtime.execution.exchange import ExchangeTracker, bind_transcripts
 from voice_runtime.execution.observer import EvidenceObserver
@@ -83,9 +87,7 @@ def render_opening(text: str, state: dict[str, Any]) -> str:
         value: Any = state
         for part in match.group(1).split("."):
             if not isinstance(value, dict) or part not in value:
-                raise ValueError(
-                    f"Opening references unavailable variable '{match.group(1)}'"
-                )
+                raise ValueError(f"Opening references unavailable variable '{match.group(1)}'")
             value = value[part]
         return "" if value is None else str(value)
 
@@ -93,25 +95,8 @@ def render_opening(text: str, state: dict[str, Any]) -> str:
 
 
 def trim_classifier_result(res: dict) -> dict:
-    """Schema-agnostic trimmer for classification output matching demo_call.py compact format."""
-    if not isinstance(res, dict):
-        return {"result": str(res)}
-    trimmed: dict[str, Any] = {}
-    for k, v in res.items():
-        if isinstance(v, dict):
-            choice = v.get("choice")
-            if choice is not None:
-                trimmed[k] = choice
-            probs = v.get("probabilities")
-            if isinstance(probs, dict):
-                for pk, pv in probs.items():
-                    if isinstance(pv, (int, float)) and pv >= 0.1:
-                        trimmed[f"{k}_{pk}"] = round(float(pv), 2)
-            elif "confidence" in v and v["confidence"] is not None:
-                trimmed[f"{k}_conf"] = round(float(v["confidence"]), 2)
-        else:
-            trimmed[k] = v
-    return trimmed
+    """Backward-compatible name for the context-safe classifier normalizer."""
+    return normalize_classifier_result(res)
 
 
 def _retry_after(value: str | None) -> float | None:
@@ -275,77 +260,6 @@ async def run_jev_classification(
         }
 
 
-async def run_llm_classification(
-    api_key: str,
-    transcript: str,
-    prompt: str = "Classify the supplied conversation using only observed evidence.",
-    model: str = "llama-3.3-70b-versatile",
-) -> dict:
-    """Execute LLM categorization with compact JSON return."""
-    if not api_key:
-        logger.warning("Groq API key not configured for LLM classification")
-        return {
-            "status": "error",
-            "error": "Groq API key is not configured",
-            "_diagnostic": provider_error_diagnostic(
-                provider="groq", status_code=401, body={"message": "API key is not configured"}
-            ),
-        }
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                json={
-                    "model": model,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": (
-                                f"{prompt}\nReturn your evaluation strictly as a valid, compact JSON object."
-                            ),
-                        },
-                        {"role": "user", "content": f"Dialogue Transcript:\n{transcript}"},
-                    ],
-                    "temperature": 0.1,
-                    "response_format": {"type": "json_object"},
-                },
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-            if resp.status_code == 200:
-                raw_data = json.loads(resp.json()["choices"][0]["message"]["content"])
-                return raw_data if isinstance(raw_data, dict) else {"result": raw_data}
-            logger.error("LLM classification HTTP {}", resp.status_code)
-            try:
-                body = resp.json()
-            except Exception:
-                body = resp.text[:500]
-            return {
-                "status": "error",
-                "error": f"LLM provider returned HTTP {resp.status_code}",
-                "_diagnostic": provider_error_diagnostic(
-                    provider="groq",
-                    status_code=resp.status_code,
-                    body=body,
-                    request_id=resp.headers.get("x-request-id") or resp.headers.get("request-id"),
-                    retry_after_seconds=_retry_after(resp.headers.get("retry-after")),
-                ),
-            }
-    except Exception as exc:
-        logger.error("LLM classification error: {}", exc)
-        return {
-            "status": "error",
-            "error": "LLM classifier provider request failed",
-            "_diagnostic": exception_diagnostic(
-                exc,
-                source="provider",
-                category="provider_request_failed",
-                code="groq_request_failed",
-                message="Groq provider request failed",
-                retryable=True,
-            ),
-        }
-
-
 def _parse_spoken_callback_time(phrase: str) -> datetime:
     """Parse common spoken natural language date and time phrases into aware UTC datetime."""
     phrase_lower = phrase.lower()
@@ -484,6 +398,30 @@ class TracedFlowManager(FlowManager):
                             code="tool_error",
                             message=f"Tool {name} failed",
                         )
+                    if name == "classify_lead":
+                        result = model_visible_result(
+                            normalize_classifier_result(
+                                result,
+                                (
+                                    self._snapshot.get("classifier", {}).get(
+                                        "jev"
+                                        if self._snapshot.get("classifier", {}).get(
+                                            "classifier_type"
+                                        )
+                                        == "jev"
+                                        else "llm",
+                                        {},
+                                    )
+                                    or {}
+                                ).get("output_fields"),
+                                max_result_chars=int(
+                                    self._snapshot.get("classifier", {}).get(
+                                        "max_result_chars", 512
+                                    )
+                                ),
+                            ),
+                            int(self._snapshot.get("classifier", {}).get("max_result_chars", 512)),
+                        )
                 if isinstance(diagnostic, dict):
                     self.tracker.diagnostic(**diagnostic)
                 result_id = self.tracker.tool_result(invocation_id, result, is_final=is_final)
@@ -506,9 +444,7 @@ class TracedFlowManager(FlowManager):
                     if previous_context_callback is not None:
                         await previous_context_callback()
 
-                result_properties = replace(
-                    result_properties, on_context_updated=context_updated
-                )
+                result_properties = replace(result_properties, on_context_updated=context_updated)
                 await original_callback(result, properties=result_properties)
                 if is_final:
                     final_result, final_sent = result, True
@@ -551,6 +487,7 @@ class NativePipelineHost:
         self._verbatim_opening: str | None = None
 
     def _node(self, key: str) -> NodeConfig:
+        """Adapt one saved graph node into Pipecat's native NodeConfig shape."""
         node = self._nodes[key]
         flow = self._snapshot["flow"]
         role_message = node.get("role_prompt")
@@ -631,20 +568,22 @@ class NativePipelineHost:
         classifier_cfg = self._snapshot.get("classifier", {})
         if not classifier_cfg.get("enabled", True):
             return None
-        configured_nodes = classifier_cfg.get("node_entries" if phase == "entry" else "node_exits", [])
+        configured_nodes = classifier_cfg.get(
+            "node_entries" if phase == "entry" else "node_exits", []
+        )
         if node_key not in configured_nodes or self.tracker is None:
             return None
 
-        classifier_type = classifier_cfg.get("classifier_type", "llm")
         transcript = _extract_transcript(getattr(self, "context", None), self.tracker)
-        if classifier_type == "jev":
-            jev_cfg = classifier_cfg.get("jev", {})
-            provider, model = "typesafe", jev_cfg.get("model", "jev-latest")
-        else:
-            llm_cfg = classifier_cfg.get("model", {})
-            provider, model = llm_cfg.get("provider", "groq"), llm_cfg.get(
-                "model", "llama-3.3-70b-versatile"
-            )
+        classifier_type = classifier_cfg.get("classifier_type", "llm")
+        selected = (
+            classifier_cfg.get("jev") if classifier_type == "jev" else classifier_cfg.get("llm")
+        )
+        selected = selected or {}
+        provider = "typesafe" if classifier_type == "jev" else selected.get("provider", "groq")
+        model = selected.get(
+            "model", "jev-latest" if classifier_type == "jev" else "qwen/qwen3.8-27b"
+        )
 
         operation = self.tracker.start_classifier(
             phase=phase,
@@ -657,41 +596,38 @@ class NativePipelineHost:
         result: dict[str, Any]
         error: str | None = None
         try:
-            if classifier_type == "jev":
-                jev_cfg = classifier_cfg.get("jev", {})
+
+            async def jev_request(**kwargs):
+                jev_cfg = kwargs["config"]
                 questions = jev_cfg.get("questions") or {}
                 if not questions:
                     from voice_runtime.contracts.cadence import default_jev_questions
 
-                    questions = {key: value.model_dump() for key, value in default_jev_questions().items()}
+                    questions = {
+                        key: value.model_dump() for key, value in default_jev_questions().items()
+                    }
                 jev_key = getattr(self.settings, "jev_api_key", None) or os.getenv(
                     "VOICE_JEV_API_KEY", ""
                 )
-                raw_result = await run_jev_classification(
+                return await run_jev_classification(
                     api_key=jev_key,
-                    transcript=transcript,
+                    transcript=kwargs["transcript"],
                     questions=questions,
-                    model=model,
+                    model=jev_cfg.get("model", "jev-latest"),
                     api_url=jev_cfg.get("api_url", "https://api.typesafe.ai/v1/systemone"),
                 )
-            elif provider == "groq":
-                groq_key = getattr(self.settings, "groq_api_key", None) or os.getenv(
-                    "VOICE_GROQ_API_KEY", ""
-                )
-                raw_result = await run_llm_classification(
-                    api_key=groq_key,
-                    transcript=transcript,
-                    prompt=classifier_cfg.get(
-                        "prompt", "Classify the supplied conversation using only observed evidence."
-                    ),
-                    model=model,
-                )
-            else:
-                raw_result = {
-                    "status": "error",
-                    "error": f"Unsupported classifier LLM provider: {provider}",
-                }
-            result = trim_classifier_result(raw_result)
+
+            raw_result = await run_selected_classifier(
+                settings=self.settings,
+                classifier=classifier_cfg,
+                transcript=transcript,
+                jev_request=jev_request,
+            )
+            result = normalize_classifier_result(
+                raw_result,
+                selected.get("output_fields"),
+                max_result_chars=int(classifier_cfg.get("max_result_chars", 512)),
+            )
             raw_diagnostic = raw_result.get("_diagnostic") if isinstance(raw_result, dict) else None
             if isinstance(raw_diagnostic, dict):
                 self.tracker.diagnostic(**raw_diagnostic)
@@ -703,9 +639,7 @@ class NativePipelineHost:
             error = str(result["error"])
 
         status = "failed" if error else "completed"
-        result_id, message = self.tracker.finish_classifier(
-            operation, status, result, error=error
-        )
+        result_id, message = self.tracker.finish_classifier(operation, status, result, error=error)
         return result_id, message
 
     async def _whatsapp_runtime_config(
@@ -749,7 +683,9 @@ class NativePipelineHost:
                             phone_number_id
                         ):
                             connection_id = str(row.id)
-                            phone_number_id = str(row.config.get("phone_number_id") or phone_number_id)
+                            phone_number_id = str(
+                                row.config.get("phone_number_id") or phone_number_id
+                            )
                             api_version = str(row.config.get("api_version") or api_version)
                             if local_media_id:
                                 media = await session.scalar(
@@ -1117,9 +1053,7 @@ class NativePipelineHost:
                             )
                         for k in sorted(args.keys()):
                             if k.startswith("param_") and k != "param_1":
-                                body_params.append(
-                                    {"type": "text", "text": str(args[k])[:1024]}
-                                )
+                                body_params.append({"type": "text", "text": str(args[k])[:1024]})
                     components.append({"type": "body", "parameters": body_params})
 
                 template_lang = str(whatsapp_config.get("language") or "en")
@@ -1191,56 +1125,41 @@ class NativePipelineHost:
                         ),
                     }
 
-            if name in ("classify_jev", "classify_lead"):
+            if name == "classify_lead":
                 transcript = _extract_transcript(getattr(self, "context", None), self.tracker)
                 classifier_cfg = self._snapshot.get("classifier", {})
-                jev_cfg = classifier_cfg.get("jev", {})
-                questions = jev_cfg.get("questions")
-                if not questions:
-                    from voice_runtime.contracts.cadence import default_jev_questions
 
-                    questions = {k: v.model_dump() for k, v in default_jev_questions().items()}
-                elif isinstance(questions, dict):
-                    questions = {
-                        k: (v.model_dump() if hasattr(v, "model_dump") else v)
-                        for k, v in questions.items()
-                    }
-                jev_key = getattr(self.settings, "jev_api_key", None) or os.getenv(
-                    "VOICE_JEV_API_KEY", ""
-                )
-                res = await run_jev_classification(
-                    api_key=jev_key,
-                    transcript=transcript,
-                    questions=questions,
-                    model=jev_cfg.get("model", "jev-latest"),
-                    api_url=jev_cfg.get("api_url", "https://api.typesafe.ai/v1/systemone"),
-                )
-                logger.info("JEV CLASSIFY RESULT: {}", res)
-                trimmed = trim_classifier_result(res)
-                if isinstance(res.get("_diagnostic"), dict):
-                    trimmed["_diagnostic"] = res["_diagnostic"]
-                return trimmed
+                async def jev_request(**kwargs):
+                    jev_cfg = kwargs["config"]
+                    questions = jev_cfg.get("questions") or {}
+                    if not questions:
+                        from voice_runtime.contracts.cadence import default_jev_questions
 
-            if name == "classify_llm":
-                transcript = _extract_transcript(getattr(self, "context", None), self.tracker)
-                classifier_cfg = self._snapshot.get("classifier", {})
-                llm_cfg = classifier_cfg.get("model", {})
-                groq_key = getattr(self.settings, "groq_api_key", None) or os.getenv(
-                    "VOICE_GROQ_API_KEY", ""
-                )
-                res = await run_llm_classification(
-                    api_key=groq_key,
+                        questions = {k: v.model_dump() for k, v in default_jev_questions().items()}
+                    jev_key = getattr(self.settings, "jev_api_key", None) or os.getenv(
+                        "VOICE_JEV_API_KEY", ""
+                    )
+                    return await run_jev_classification(
+                        api_key=jev_key,
+                        transcript=kwargs["transcript"],
+                        questions=questions,
+                        model=jev_cfg.get("model", "jev-latest"),
+                        api_url=jev_cfg.get("api_url", "https://api.typesafe.ai/v1/systemone"),
+                    )
+
+                result = await run_selected_classifier(
+                    settings=self.settings,
+                    classifier=classifier_cfg,
                     transcript=transcript,
-                    prompt=classifier_cfg.get(
-                        "prompt", "Classify the supplied conversation using only observed evidence."
+                    jev_request=jev_request,
+                )
+                return normalize_classifier_result(
+                    result,
+                    (classifier_cfg.get("jev") or classifier_cfg.get("llm") or {}).get(
+                        "output_fields"
                     ),
-                    model=llm_cfg.get("model", "llama-3.3-70b-versatile"),
+                    max_result_chars=int(classifier_cfg.get("max_result_chars", 512)),
                 )
-                logger.info("LLM CLASSIFY RESULT: {}", res)
-                trimmed = trim_classifier_result(res)
-                if isinstance(res.get("_diagnostic"), dict):
-                    trimmed["_diagnostic"] = res["_diagnostic"]
-                return trimmed
 
             if name in ("check_callback_availability", "book_callback"):
                 endpoint = (
@@ -1343,7 +1262,10 @@ class NativePipelineHost:
                     return {"status": "error", "error": f"Failed to persist callback: {exc}"}
 
             definition = (
-                self._snapshot.get("_resolved", {}).get("tools", {}).get(name, {}).get("definition", {})
+                self._snapshot.get("_resolved", {})
+                .get("tools", {})
+                .get(name, {})
+                .get("definition", {})
             )
             if definition.get("handler") == "query_knowledge_base":
                 query_text = (
@@ -1401,8 +1323,7 @@ class NativePipelineHost:
                     }
 
                 context_excerpts = "\n\n".join(
-                    f"[{h.title}; chunk {h.chunk_id}]\n{h.content[:600]}"
-                    for h in top_hits[:3]
+                    f"[{h.title}; chunk {h.chunk_id}]\n{h.content[:600]}" for h in top_hits[:3]
                 )
                 return {
                     "status": "ok",
@@ -1445,10 +1366,26 @@ class NativePipelineHost:
             for name in self._nodes[key]["tool_bindings"]:
                 if name not in snapshot["_resolved"]["tools"]:
                     raise ValueError("Node references unavailable tool binding")
-        for name, value in (
-            ("sarvam_api_key", self.settings.sarvam_api_key),
-            ("groq_api_key", self.settings.groq_api_key),
-        ):
+        required_credentials = [("sarvam_api_key", self.settings.sarvam_api_key)]
+        llm_provider = snapshot["llm"]["provider"]
+        required_credentials.append(
+            (
+                "gemini_api_key" if llm_provider == "gemini" else "groq_api_key",
+                self.settings.gemini_api_key
+                if llm_provider == "gemini"
+                else self.settings.groq_api_key,
+            )
+        )
+        classifier_cfg = snapshot.get("classifier", {})
+        if classifier_cfg.get("classifier_type") == "jev":
+            required_credentials.append(
+                ("jev_api_key", getattr(self.settings, "jev_api_key", None))
+            )
+        elif (classifier_cfg.get("llm") or {}).get("provider", "groq") == "gemini":
+            required_credentials.append(("gemini_api_key", self.settings.gemini_api_key))
+        else:
+            required_credentials.append(("groq_api_key", self.settings.groq_api_key))
+        for name, value in required_credentials:
             if not value:
                 raise ValueError(f"{name} is not configured")
         if snapshot["tts"]["provider"] == "cartesia" and not self.settings.cartesia_api_key:
@@ -1521,9 +1458,7 @@ class NativePipelineHost:
 
         configured_opening = snapshot.get("greeting") or ""
         self._verbatim_opening = (
-            render_opening(configured_opening, flow_state)
-            if configured_opening.strip()
-            else None
+            render_opening(configured_opening, flow_state) if configured_opening.strip() else None
         )
         initial_messages: list[dict[str, str]] = []
         if not self._verbatim_opening:
@@ -1552,8 +1487,23 @@ class NativePipelineHost:
             await self._handle_user_idle()
 
         @aggregators.user().event_handler("on_user_turn_started")
-        async def on_user_turn_started(_aggregator, _strategy):
+        async def on_user_turn_started(_aggregator, strategy):
             self._idle_reprompts = 0
+            self.observer.record_turn_event("user_turn_started", strategy=type(strategy).__name__)
+
+        @aggregators.user().event_handler("on_user_turn_stopped")
+        async def on_user_turn_stopped(_aggregator, strategy, _message):
+            self.observer.record_turn_event("user_turn_stopped", strategy=type(strategy).__name__)
+
+        @aggregators.user().event_handler("on_user_turn_inference_triggered")
+        async def on_user_turn_inference_triggered(_aggregator, strategy):
+            self.observer.record_turn_event(
+                "user_turn_inference_triggered", strategy=type(strategy).__name__
+            )
+
+        @aggregators.user().event_handler("on_user_turn_stop_timeout")
+        async def on_user_turn_stop_timeout(_aggregator):
+            self.observer.record_turn_event("user_turn_stop_timeout")
 
         bind_transcripts(aggregators, tracker)
         pipeline = Pipeline(
@@ -1573,6 +1523,8 @@ class NativePipelineHost:
             stt=stt,
             tts=tts,
             llm_provider=llm_config["provider"],
+            stt_provider=snapshot["stt"]["provider"],
+            tts_provider=tts_config["provider"],
             llm_model=llm_config["model"],
             stt_model=snapshot["stt"]["model"],
             tts_model=tts_config["model"],

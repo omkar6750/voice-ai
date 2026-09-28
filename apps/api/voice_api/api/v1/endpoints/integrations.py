@@ -445,6 +445,27 @@ async def list_media(
     return MediaListResponse(media=[media_response(row) for row in rows])
 
 
+def _validate_template_parameter_mappings(
+    parameter_mappings: dict[str, str],
+    template_indexes: set[str],
+    tool_argument_names: set[str],
+) -> None:
+    unknown_template_indexes = set(parameter_mappings) - template_indexes
+    if unknown_template_indexes:
+        raise HTTPException(
+            422,
+            "Parameter mappings reference unknown template placeholders: "
+            f"{sorted(unknown_template_indexes)}",
+        )
+
+    unknown_argument_names = set(parameter_mappings.values()) - tool_argument_names
+    if unknown_argument_names:
+        raise HTTPException(
+            422,
+            f"Parameter mappings reference unknown tool arguments: {sorted(unknown_argument_names)}",
+        )
+
+
 @router.post(
     "/integrations/{connection_id}/media/import",
     status_code=201,
@@ -723,18 +744,14 @@ async def generate_template_tool(
                 for index in sorted(set(template_indexes))
             }
 
-    unknown_mapping_keys = set(parameter_mappings) - set(properties)
-    if unknown_mapping_keys:
-        raise HTTPException(
-            422,
-            f"Parameter mappings reference unknown template arguments: {sorted(unknown_mapping_keys)}",
-        )
-    unknown_argument_keys = set(parameter_mappings.values()) - set(properties)
-    if unknown_argument_keys:
-        raise HTTPException(
-            422,
-            f"Parameter mappings reference unknown tool arguments: {sorted(unknown_argument_keys)}",
-        )
+    template_indexes = (
+        set(re.findall(r"\{\{(\d+)\}\}", body_component.get("text", "")))
+        if body_component
+        else set()
+    )
+    _validate_template_parameter_mappings(
+        parameter_mappings, template_indexes, set(properties)
+    )
 
     config = {
         "name": tool_name,

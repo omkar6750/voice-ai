@@ -101,3 +101,19 @@ belong to Plan 0014.
 - The local development database was reset after implementation at the user's explicit
   request. It now has zero runs, three logical agents with one active version each,
   twelve published tool versions, and no cleanup candidates.
+
+## Follow-up decision: safe logical-tool deletion
+
+An operator deleting a logical tool expects all authoring references to stop
+resolving, but historical invocation evidence must not become a dangling foreign
+key. Deletion therefore transactionally removes the tool's relational bindings,
+JSON-config bindings, flow action references, and explicit prompt directives from
+all affected agent versions. This includes published versions in this explicitly
+development-stage workspace, using the existing controlled trigger bypass; each
+changed agent version receives a revision increment. Prompt sentences that invoke
+the deleted tool are removed as a unit so the remaining prompt stays parseable.
+
+Before deleting tool versions, historical `ToolInvocation.tool_version_id`
+references are set to null. The invocation/result evidence remains, while a new
+tool is never automatically substituted for the deleted identity. Recreated tools
+must be explicitly rebound and reintroduced to agent prompts.
