@@ -152,7 +152,6 @@ async def execute_call(
                 await after_close()
             except Exception:
                 incomplete = True
-                outcome, error = "failed", "Call artifacts incomplete; inspect runtime files"
                 diagnostics.append(
                     diagnostic_dict(
                         severity="error",
