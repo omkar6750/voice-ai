@@ -164,8 +164,9 @@ async def test_apply_twilio_call_status():
 
 @pytest.mark.asyncio
 async def test_apply_twilio_stream_status():
-    session = AsyncMock()
+    session = AsyncMock(spec=AsyncSession)
     call = Call(id=new_id(), provider="twilio", provider_metadata={})
+    session.get.return_value = call
 
     await apply_twilio_stream_status(
         session, call, stream_sid="MZ123", event="stream-started", error=None
@@ -177,7 +178,7 @@ async def test_apply_twilio_stream_status():
         session, call, stream_sid="MZ123", event="stream-error", error="WebSocket error 1006"
     )
     assert call.provider_metadata["stream_status"] == "error"
-    assert call.provider_metadata["stream_error"] == "WebSocket error 1006"
+    assert call.provider_metadata["stream_error"] == "Twilio reported a stream error"
 
 
 @pytest.mark.asyncio
