@@ -205,6 +205,14 @@ async def test_call_status_endpoint(monkeypatch):
         yield session_mock
 
     app.dependency_overrides[get_session] = mock_get_session
+    data = {
+        "AccountSid": "AC123",
+        "CallSid": "CA12345",
+        "CallStatus": "in-progress",
+        "SequenceNumber": "2",
+    }
+    url = f"https://voice.example.com/api/v1/telephony/twilio/call-status/{corr_id}"
+    signature = RequestValidator("token").compute_signature(url, data)
 
     try:
         with (
@@ -221,25 +229,27 @@ async def test_call_status_endpoint(monkeypatch):
             ),
             patch(
                 "voice_api.api.v1.endpoints.telephony.get_settings",
-                return_value=SimpleNamespace(public_base_url=None),
+                return_value=SimpleNamespace(public_base_url="https://voice.example.com"),
             ),
         ):
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
                 res = await client.post(
                     f"/api/v1/telephony/twilio/call-status/{corr_id}",
-                    data={"CallSid": "CA12345", "CallStatus": "in-progress"},
+                    data=data,
+                    headers={"X-Twilio-Signature": signature},
                 )
                 assert res.status_code == 204
                 assert call.status == "active"
                 assert call.provider_metadata["twilio_status"] == "in-progress"
+                assert call.provider_metadata["twilio_sequence_number"] == 2
     finally:
         app.dependency_overrides.clear()
 
 
 @pytest.mark.asyncio
 async def test_stream_status_endpoint(monkeypatch):
-    session_mock = AsyncMock()
+    session_mock = AsyncMock(spec=AsyncSession)
     corr_id = new_id()
     call = Call(
         id=new_id(),
@@ -256,6 +266,14 @@ async def test_stream_status_endpoint(monkeypatch):
         yield session_mock
 
     app.dependency_overrides[get_session] = mock_get_session
+    data = {
+        "AccountSid": "AC123",
+        "CallSid": "CA12345",
+        "StreamSid": "MZ999",
+        "StatusCallbackEvent": "stream-started",
+    }
+    url = f"https://voice.example.com/api/v1/telephony/twilio/stream-status/{corr_id}"
+    signature = RequestValidator("token").compute_signature(url, data)
 
     try:
         with (
@@ -272,17 +290,15 @@ async def test_stream_status_endpoint(monkeypatch):
             ),
             patch(
                 "voice_api.api.v1.endpoints.telephony.get_settings",
-                return_value=SimpleNamespace(public_base_url=None),
+                return_value=SimpleNamespace(public_base_url="https://voice.example.com"),
             ),
         ):
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
                 res = await client.post(
                     f"/api/v1/telephony/twilio/stream-status/{corr_id}",
-                    data={
-                        "StreamSid": "MZ999",
-                        "StatusCallbackEvent": "stream-started",
-                    },
+                    data=data,
+                    headers={"X-Twilio-Signature": signature},
                 )
                 assert res.status_code == 204
                 assert call.provider_metadata["stream_sid"] == "MZ999"
@@ -369,7 +385,7 @@ async def test_signature_accepted_when_valid():
     auth_token = "secret_auth_token_999"
     validator = RequestValidator(auth_token)
     url = f"https://voice.example.com/api/v1/telephony/twilio/call-status/{corr_id}"
-    data = {"CallSid": "CA12345", "CallStatus": "in-progress"}
+    data = {"AccountSid": "AC123", "CallSid": "CA12345", "CallStatus": "in-progress"}
     sig = validator.compute_signature(url, data)
 
     try:
