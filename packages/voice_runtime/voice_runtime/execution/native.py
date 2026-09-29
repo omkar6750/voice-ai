@@ -365,6 +365,9 @@ class NativePipelineHost:
         self._verbatim_opening: str | None = None
         self._exchange_count = 0
         self._classifier_cadence_running = False
+        self._close_lock = asyncio.Lock()
+        self._close_attempted = False
+        self._close_error: BaseException | None = None
 
     def _node(self, key: str) -> NodeConfig:
         """Adapt one saved graph node into Pipecat's native NodeConfig shape."""
@@ -1686,32 +1689,56 @@ class NativePipelineHost:
         )
 
     async def close(self) -> None:
-        try:
-            if (
-                not self.termination.closing
-                and self.termination.summary.pipeline_finished_at_ns is None
-            ):
+        async with self._close_lock:
+            if self._close_error is not None:
+                raise self._close_error
+            if self._close_attempted:
+                return
+
+            primary_error: BaseException | None = None
+            cleanup_error: BaseException | None = None
+
+            try:
+                if (
+                    not self.termination.closing
+                    and self.termination.summary.pipeline_finished_at_ns is None
+                ):
+                    self.termination.request("cancelled")
+                elif self.runner_task and not self.runner_task.done():
+                    self.termination.request("cancelled")
+                if self.worker:
+                    await self.worker.cancel()
+                if self.runner_task:
+                    await self.runner_task
+                if self._end_task:
+                    await self._end_task
+            except asyncio.CancelledError as exc:
                 self.termination.request("cancelled")
-            elif self.runner_task and not self.runner_task.done():
-                self.termination.request("cancelled")
-            if self.worker:
-                await self.worker.cancel()
-            if self.runner_task:
-                await self.runner_task
-            if self._end_task:
-                await self._end_task
-        except asyncio.CancelledError:
-            self.termination.request("cancelled")
-            raise
-        except Exception:
-            self.termination.request("pipeline_failure")
-            raise
-        finally:
-            if self.tracker:
-                status = self.termination.summary.evidence_status
-                self.tracker.end_visit(status)
-                self.tracker.end_exchange(status)
-            if self.observer:
-                self.observer.close()
-            if self.capture:
-                self.capture.close()
+                primary_error = exc
+            except Exception as exc:
+                self.termination.request("pipeline_failure")
+                primary_error = exc
+            finally:
+                def attempt_cleanup(action) -> None:
+                    nonlocal cleanup_error
+                    try:
+                        action()
+                    except BaseException as exc:
+                        if cleanup_error is None:
+                            cleanup_error = exc
+
+                if self.tracker:
+                    status = self.termination.summary.evidence_status
+                    attempt_cleanup(lambda: self.tracker.end_visit(status))
+                    attempt_cleanup(lambda: self.tracker.end_exchange(status))
+                if self.observer:
+                    attempt_cleanup(self.observer.close)
+                if self.capture:
+                    attempt_cleanup(self.capture.close)
+
+            if cleanup_error is not None:
+                self.termination.summary.cleanup_status = "uncertain"
+            self._close_attempted = True
+            self._close_error = primary_error or cleanup_error
+            if self._close_error is not None:
+                raise self._close_error
