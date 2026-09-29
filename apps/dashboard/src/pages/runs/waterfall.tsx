@@ -264,6 +264,16 @@ export function Waterfall({
                             )}
                           </div>
                         )}
+                      {op.kind === "tool" && timeline.context_events
+                        .filter((event) => event.tool_invocation_id === op.item.id)
+                        .map((event) => (
+                          <div key={event.id} className="pl-9 pb-2 text-xs text-muted-foreground">
+                            {event.source.replaceAll("_", " ")} · {event.status.replaceAll("_", " ")}
+                            {` · ${new Date(event.occurred_at).toLocaleTimeString()}`}
+                            {event.delivered_at ? " · added to context" : " · not delivered to context"}
+                            {event.consumed_at ? " · consumed by LLM" : " · not consumed by LLM"}
+                          </div>
+                        ))}
                       {op.kind === "span" &&
                         op.item.category === "classifier" &&
                         classifierResultsFor(timeline, op.item).map(

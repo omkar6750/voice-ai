@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from dataclasses import replace
 from typing import Any
 
@@ -40,6 +41,13 @@ class TracedFlowManager(FlowManager):
         self._action_runner = action_runner
         self._end_call_runner = end_call_runner
         self._transition_tool_id: str | None = None
+        self._active_tool_invocation: ContextVar[str | None] = ContextVar(
+            f"active_tool_invocation_{id(self)}", default=None
+        )
+
+    @property
+    def active_tool_invocation_id(self) -> str | None:
+        return self._active_tool_invocation.get()
 
     def _context_message_index(self) -> int | None:
         messages = self._context_for_evidence.get_messages()
@@ -113,6 +121,7 @@ class TracedFlowManager(FlowManager):
             final_result: Any = None
             final_sent = False
             original_callback = params.result_callback
+            active_tool_token = self._active_tool_invocation.set(invocation_id)
 
             async def result_callback(result, *, properties=None):
                 nonlocal final_result, final_sent
@@ -132,7 +141,9 @@ class TracedFlowManager(FlowManager):
                             code="tool_error",
                             message=f"Tool {name} failed",
                         )
-                    if name == "classify_lead":
+                    if name == "classify_lead" and (
+                        not isinstance(result, dict) or result.get("status") != "started"
+                    ):
                         result = model_visible_result(
                             normalize_classifier_result(
                                 result,
@@ -202,6 +213,7 @@ class TracedFlowManager(FlowManager):
             try:
                 await execute(replace(params, result_callback=result_callback))
             finally:
+                self._active_tool_invocation.reset(active_tool_token)
                 if not final_sent and not self.tracker.tool_was_ended(invocation_id):
                     self.tracker.end_tool(
                         invocation_id, "failed", {"error": "No final tool result"}

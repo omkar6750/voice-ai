@@ -43,6 +43,9 @@ function ToolActivity({
   onSelect: (value: Selection) => void;
 }) {
   const results = resultsFor(timeline, tool);
+  const asyncEvents = timeline.context_events.filter(
+    (event) => event.tool_invocation_id === tool.id,
+  );
   return (
     <Message align="end">
       <MessageAvatar>
@@ -62,6 +65,16 @@ function ToolActivity({
             Delivery events: {whatsappReceiptHistory(tool).join(" → ")}
           </p>
         )}
+        {asyncEvents.map((event) => (
+          <p key={event.id} className="text-right text-xs text-muted-foreground">
+            {event.source.replaceAll("_", " ")} · {event.status.replaceAll("_", " ")}
+            {event.delivered_at ? " · added to context" : " · not added to context"}
+            {event.consumed_at ? " · consumed by LLM" : " · not consumed by LLM"}
+            {event.source === "whatsapp_receipt" && event.provider_message_id
+              ? ` · ${event.provider_message_id}`
+              : ""}
+          </p>
+        ))}
         <Bubble align="end" variant="secondary">
           <BubbleContent asChild>
             <button

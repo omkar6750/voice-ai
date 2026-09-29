@@ -76,6 +76,7 @@ class EvidenceObserver(BaseObserver):
         self.last_speech_operation_id: str | None = None
         self.last_tts_operation_id: str | None = None
         self._seen_interruption_frames: set[int] = set()
+        self.context_event_consumer = None
         self._log = log_path.open("a", encoding="utf-8") if log_path else None
 
     def _mark(self, event: str, **details) -> None:
@@ -111,6 +112,10 @@ class EvidenceObserver(BaseObserver):
             self.tracker.consume_classifier_results(
                 context.get_messages(), exchange_id, self.llm_operation["operation_id"]
             )
+            if self.context_event_consumer is not None:
+                await self.context_event_consumer(
+                    context.get_messages(), exchange_id, self.llm_operation["operation_id"]
+                )
             self.llm_text, self.function_calls, self.metrics["llm"] = [], [], {}
             self._mark("llm_started")
         elif data.processor is self.tts and isinstance(data.frame, TextFrame):

@@ -13,6 +13,7 @@ from voice_api.models import (
     TraceSpan,
 )
 from voice_api.models.common import new_id
+from voice_api.services.run_context_service import enqueue_context_event
 
 
 @pytest.fixture
@@ -220,6 +221,41 @@ async def test_context_delivery_links_result_to_consuming_span(client, database,
     ]
 
 
+async def test_run_context_event_is_idempotent_and_projected_to_timeline(
+    client, database, run_id, tool
+):
+    occurred_at = datetime.now(UTC)
+    event = await enqueue_context_event(
+        database,
+        run_id=run_id,
+        tool_invocation_id=tool.id,
+        dedupe_key="tool-result:operation-1",
+        source="tool_result",
+        source_reference="operation-1",
+        payload={"tool": "classify_lead", "result": {"status": "completed"}},
+        occurred_at=occurred_at,
+    )
+    duplicate = await enqueue_context_event(
+        database,
+        run_id=run_id,
+        tool_invocation_id=tool.id,
+        dedupe_key="tool-result:operation-1",
+        source="tool_result",
+        source_reference="operation-1",
+        payload={"tool": "classify_lead", "result": {"status": "different"}},
+        occurred_at=occurred_at,
+    )
+    assert duplicate.id == event.id
+    assert duplicate.payload["result"]["status"] == "completed"
+
+    timeline = await client.get(f"/api/runs/{run_id}/timeline")
+    assert timeline.status_code == 200
+    context_events = timeline.json()["context_events"]
+    assert len(context_events) == 1
+    assert context_events[0]["id"] == event.id
+    assert context_events[0]["status"] == "pending"
+
+
 async def test_classifier_entry_result_reaches_following_llm(client, database, run_id):
     at = datetime.now(UTC)
     exchange = Exchange(id=new_id(), run_id=run_id, sequence=1, origin="greeting")
@@ -229,8 +265,10 @@ async def test_classifier_entry_result_reaches_following_llm(client, database, r
     classifier_result_id = new_id()
     delivery_id = new_id()
     consuming_operation_id = new_id()
+
     def ns(value):
         return int(value.timestamp() * 1_000_000_000)
+
     classifier_start = {
         "id": new_id(),
         "run_id": run_id,
@@ -311,13 +349,26 @@ async def test_classifier_entry_result_reaches_following_llm(client, database, r
     }
     response = await client.post(
         f"/api/runs/{run_id}/evidence",
-        json={"records": [classifier_start, classifier_end, classifier_result, delivery, llm_start, llm_end, consumed]},
+        json={
+            "records": [
+                classifier_start,
+                classifier_end,
+                classifier_result,
+                delivery,
+                llm_start,
+                llm_end,
+                consumed,
+            ]
+        },
     )
     assert response.status_code == 200, response.text
     timeline = (await client.get(f"/api/runs/{run_id}/timeline")).json()
     assert timeline["classifier_results"][0]["status"] == "completed"
     assert timeline["classifier_context_deliveries"][0]["status"] == "consumed"
-    assert timeline["classifier_context_deliveries"][0]["consuming_operation_id"] == consuming_operation_id
+    assert (
+        timeline["classifier_context_deliveries"][0]["consuming_operation_id"]
+        == consuming_operation_id
+    )
 
 
 async def test_revisited_node_and_interrupted_span(client, database, run_id):
@@ -442,9 +493,7 @@ async def test_interruption_evidence_links_cancelled_spans_and_appears_in_timeli
     assert span["interruption_id"] == interruption_id
 
 
-async def test_diagnostic_evidence_preserves_provider_details_and_redacts_metadata(
-    client, run_id
-):
+async def test_diagnostic_evidence_preserves_provider_details_and_redacts_metadata(client, run_id):
     at = datetime.now(UTC)
     diagnostic_id = new_id()
     record = {
@@ -466,9 +515,7 @@ async def test_diagnostic_evidence_preserves_provider_details_and_redacts_metada
         "retry_after_seconds": 12,
         "metadata": {"provider": "groq", "secret": "should-not-survive"},
     }
-    response = await client.post(
-        f"/api/runs/{run_id}/evidence", json={"records": [record]}
-    )
+    response = await client.post(f"/api/runs/{run_id}/evidence", json={"records": [record]})
     assert response.status_code == 200, response.text
     timeline = (await client.get(f"/api/runs/{run_id}/timeline")).json()
     diagnostic = timeline["diagnostics"][0]

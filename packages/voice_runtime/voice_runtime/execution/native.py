@@ -7,6 +7,7 @@ This deliberately does not import the protected standalone demo.
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import os
 import re
@@ -22,7 +23,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.flows import ContextStrategy, ContextStrategyConfig, FlowManager, NodeConfig
 from pipecat.flows.types import FlowsFunctionSchema
-from pipecat.frames.frames import EndFrame, TTSSpeakFrame
+from pipecat.frames.frames import EndFrame, LLMContextFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -31,6 +32,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.groq.llm import GroqLLMService
 from pipecat.turns.user_start import TranscriptionUserTurnStartStrategy, VADUserTurnStartStrategy
@@ -84,6 +86,30 @@ def _extract_transcript(
 
 
 _OPENING_PLACEHOLDER = re.compile(r"{{\s*([A-Za-z0-9_.:-]+)\s*}}")
+
+
+class _CallerTurnContextEventProcessor(FrameProcessor):
+    """Inject durable outcomes only on a new caller turn, before LLM inference."""
+
+    def __init__(self, deliver, context: LLMContext) -> None:
+        super().__init__()
+        self._deliver = deliver
+        self._last_user_message_count = sum(
+            1 for message in context.get_messages() if message.get("role") == "user"
+        )
+
+    async def process_frame(self, frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if direction == FrameDirection.DOWNSTREAM and isinstance(frame, LLMContextFrame):
+            messages = frame.context.get_messages()
+            user_message_count = sum(1 for message in messages if message.get("role") == "user")
+            if user_message_count < self._last_user_message_count:
+                # Flow context strategies may intentionally replace/prune history.
+                self._last_user_message_count = user_message_count
+            elif user_message_count > self._last_user_message_count:
+                self._last_user_message_count = user_message_count
+                await self._deliver(frame.context)
+        await self.push_frame(frame, direction)
 
 
 def render_opening(text: str, state: dict[str, Any]) -> str:
@@ -339,6 +365,8 @@ class NativePipelineHost:
         self._verbatim_opening: str | None = None
         self._exchange_count = 0
         self._classifier_cadence_running = False
+        self._background_tool_tasks: set[asyncio.Task] = set()
+        self._call_closed = False
         self._close_lock = asyncio.Lock()
         self._close_attempted = False
         self._close_error: BaseException | None = None
@@ -354,8 +382,25 @@ class NativePipelineHost:
             # Compatibility for pre-Pipecat snapshots used by older evidence tests.
             role_message = node.get("prompt", "")
         transitions = node.get("transitions", [])
+        callback_config = self._snapshot.get("callback_scheduling", {})
+        callback_role_keys = {
+            role.get("key")
+            for role in callback_config.get("roles", [])
+            if role.get("enabled", True)
+            and any(
+                person.get("enabled", True) and role.get("key") in person.get("roles", [])
+                for person in callback_config.get("bookable_people", [])
+            )
+        }
+        callback_tools_available = bool(callback_config.get("enabled") and callback_role_keys)
         node_bindings = [
-            name for name in node["tool_bindings"] if name != "change_node" or transitions
+            name
+            for name in node["tool_bindings"]
+            if (name != "change_node" or transitions)
+            and (
+                name not in {"check_callback_availability", "book_callback"}
+                or callback_tools_available
+            )
         ]
         exposed_tools = set(node_bindings)
         role_message = compile_tool_references(role_message or "", exposed_tools)
@@ -387,10 +432,37 @@ class NativePipelineHost:
                 node_property = properties.get("node")
                 if isinstance(node_property, dict):
                     node_property["enum"] = list(transitions)
+            description = tool["description"]
+            if self._is_nonblocking_tool(name):
+                description = (
+                    description.rstrip()
+                    + " This classification operation is nonblocking: the immediate result only confirms it started. "
+                    + "A later evidence-backed update arrives on a subsequent caller turn. Do not claim completion before that update."
+                )
+            if name == "check_callback_availability":
+                enabled_roles = [
+                    role
+                    for role in callback_config.get("roles", [])
+                    if role.get("enabled", True) and role.get("key") in callback_role_keys
+                ]
+                role_property = properties.get("role")
+                if isinstance(role_property, dict):
+                    role_property["enum"] = [role["key"] for role in enabled_roles]
+                    role_property["description"] = (
+                        "Choose one configured callback role by key. "
+                        + "; ".join(
+                            f"{role['key']} ({role['label']}): {role['description']}"
+                            for role in enabled_roles
+                        )
+                    )
+                description = (
+                    description.rstrip()
+                    + " The backend assigns an eligible employee and calendar; do not ask the caller to choose an employee."
+                )
             functions.append(
                 FlowsFunctionSchema(
                     name=name,
-                    description=tool["description"],
+                    description=description,
                     properties=properties,
                     required=parameters.get("required", []),
                     handler=self._handler(name),
@@ -638,7 +710,7 @@ class NativePipelineHost:
         )
 
     def _handler(self, name: str):
-        async def handle(args: dict, _manager: FlowManager):
+        async def execute(args: dict, _manager: FlowManager):
             if name == "change_node":
                 target = args.get("node")
                 source = self.flow.current_node
@@ -1068,10 +1140,7 @@ class NativePipelineHost:
                     return {"status": "error", "error": "Callback scheduling service unavailable"}
             if name == "schedule_callback":
                 raw_time = (
-                    args.get("time")
-                    or args.get("when")
-                    or args.get("due_at")
-                    or args.get("phrase")
+                    args.get("time") or args.get("when") or args.get("due_at") or args.get("phrase")
                 )
                 if not isinstance(raw_time, str) or not raw_time.strip():
                     return {"status": "error", "error": "A callback date and time are required"}
@@ -1224,7 +1293,265 @@ class NativePipelineHost:
 
             return {"status": "error", "error": "Tool adapter is not connected to live runtime"}
 
+        async def handle(args: dict, manager: FlowManager):
+            if not self._is_nonblocking_tool(name):
+                return await execute(args, manager)
+            invocation_id = getattr(manager, "active_tool_invocation_id", None)
+            if not invocation_id or self.tracker is None:
+                return {"status": "error", "error": "Tool operation could not be initialized"}
+            operation = self.tracker.start_operation(
+                name,
+                "tool",
+                input_payload={"arguments": args},
+                parent_operation_id=(
+                    self.observer.llm_operation["operation_id"]
+                    if self.observer and self.observer.llm_operation
+                    else None
+                ),
+                asynchronous=True,
+            )
+            task = asyncio.create_task(
+                self._run_background_tool(name, args, manager, invocation_id, operation, execute),
+                name=f"async-tool-{name}-{invocation_id}",
+            )
+            self._background_tool_tasks.add(task)
+            task.add_done_callback(self._background_tool_tasks.discard)
+            return {
+                "status": "started",
+                "operation_id": operation["operation_id"],
+                "message": "The operation has started. Do not claim its outcome until a later update confirms it.",
+            }
+
         return handle
+
+    @staticmethod
+    def _is_nonblocking_tool(name: str) -> bool:
+        return name == "classify_lead"
+
+    async def _run_background_tool(self, name, args, manager, invocation_id, operation, execute):
+        try:
+            result = await execute(args, manager)
+        except asyncio.CancelledError:
+            self.tracker.finish_operation(
+                operation,
+                "interrupted",
+                output_state="interrupted",
+                failure_reason="host_shutdown_outcome_uncertain",
+            )
+            await self._persist_context_event(
+                invocation_id,
+                f"tool-result:{operation['operation_id']}",
+                "tool_result",
+                operation["operation_id"],
+                {
+                    "tool": name,
+                    "result": {
+                        "status": "uncertain",
+                        "message": "The call ended before this operation's outcome was confirmed. Do not assume it succeeded or retry automatically.",
+                    },
+                },
+            )
+            raise
+        except Exception as exc:
+            logger.exception("Background tool {} failed", name)
+            result = {
+                "status": "error",
+                "error": "The operation failed; details are in run diagnostics.",
+            }
+            self.tracker.finish_operation(
+                operation, "failed", output_payload=result, output_state="failed"
+            )
+            self.tracker.diagnostic(
+                severity="error",
+                category="async_tool_failure",
+                source="runtime",
+                code="async_tool_failed",
+                message=f"Asynchronous tool {name} failed",
+                detail=str(exc)[:500],
+            )
+            connection_id = provider_message_id = None
+        else:
+            connection_id = result.pop("_connection_id", None) if isinstance(result, dict) else None
+            provider_message_id = (
+                result.pop("_provider_message_id", None) if isinstance(result, dict) else None
+            )
+            if name == "classify_lead" and isinstance(result, dict):
+                from voice_runtime.execution.classifier import model_visible_result
+
+                max_chars = int(self._snapshot.get("classifier", {}).get("max_result_chars", 512))
+                result = model_visible_result(result, max_chars)
+            result = self._bounded_context_result(result)
+            failed = isinstance(result, dict) and result.get("status") == "error"
+            self.tracker.finish_operation(
+                operation,
+                "failed" if failed else "completed",
+                output_payload=result,
+                output_state="failed" if failed else "recorded",
+            )
+        try:
+            await self._persist_context_event(
+                invocation_id,
+                f"tool-result:{operation['operation_id']}",
+                "tool_result",
+                operation["operation_id"],
+                {"tool": name, "result": result},
+                connection_id=connection_id,
+                provider_message_id=provider_message_id,
+            )
+        except Exception:
+            logger.exception("Could not persist context outcome for tool {}", name)
+            self.tracker.diagnostic(
+                severity="error",
+                category="context_event_persistence",
+                source="evidence",
+                code="async_result_not_persisted",
+                message=f"Result for asynchronous tool {name} could not be queued for context",
+                uncertain=False,
+            )
+
+    @staticmethod
+    def _bounded_context_result(value: Any) -> Any:
+        import json
+
+        def clean(item):
+            if isinstance(item, dict):
+                private = {
+                    "source_path",
+                    "file_path",
+                    "access_token",
+                    "api_key",
+                    "authorization",
+                    "headers",
+                    "secret",
+                    "secret_reference",
+                }
+                return {
+                    str(k): clean(v)
+                    for k, v in item.items()
+                    if not str(k).startswith("_") and str(k).lower() not in private
+                }
+            if isinstance(item, list):
+                return [clean(v) for v in item[:20]]
+            if isinstance(item, str):
+                return item[:3000]
+            if item is None or isinstance(item, (bool, int, float)):
+                return item
+            return str(item)[:300]
+
+        result = clean(value)
+        if len(json.dumps(result, ensure_ascii=False, separators=(",", ":"))) > 6000:
+            return {"status": "error", "error": "Tool result exceeded the context size limit."}
+        return result
+
+    async def _persist_context_event(
+        self,
+        invocation_id,
+        dedupe_key,
+        source,
+        source_reference,
+        payload,
+        *,
+        connection_id=None,
+        provider_message_id=None,
+    ):
+        from voice_api.db.session import SessionFactory
+        from voice_api.services.run_context_service import enqueue_context_event
+
+        async with SessionFactory() as session:
+            await enqueue_context_event(
+                session,
+                run_id=self.run_id,
+                tool_invocation_id=invocation_id,
+                dedupe_key=dedupe_key,
+                source=source,
+                source_reference=source_reference,
+                connection_id=connection_id,
+                provider_message_id=provider_message_id,
+                status="ended_before_delivery" if self._call_closed else "pending",
+                payload=self._bounded_context_result(payload),
+            )
+            await session.commit()
+
+    async def _deliver_pending_context_events(self, context: LLMContext) -> None:
+        if context is None:
+            return
+        from datetime import UTC, datetime
+
+        from sqlalchemy import select
+        from voice_api.db.session import SessionFactory
+        from voice_api.models import RunContextEvent
+
+        async with SessionFactory() as session:
+            events = (
+                await session.scalars(
+                    select(RunContextEvent)
+                    .where(
+                        RunContextEvent.run_id == self.run_id, RunContextEvent.status == "pending"
+                    )
+                    .order_by(RunContextEvent.occurred_at, RunContextEvent.id)
+                    .limit(50)
+                    .with_for_update(skip_locked=True)
+                )
+            ).all()
+            messages = context.get_messages()
+            for event in events:
+                marker = f"[[voice-ai-context-event:{event.id}]]"
+                message_index = next(
+                    (
+                        index
+                        for index, message in enumerate(messages)
+                        if marker in str(message.get("content", ""))
+                    ),
+                    None,
+                )
+                if message_index is None:
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                marker
+                                + "\nEvidence-backed asynchronous outcome: "
+                                + json.dumps(
+                                    event.payload, ensure_ascii=False, separators=(",", ":")
+                                )
+                                + ". Report only the status shown here. Meta acceptance is not proof of delivery; a delivery claim requires a delivered/read receipt."
+                            ),
+                        }
+                    )
+                    message_index = len(messages) - 1
+                context.set_messages(messages)
+                event.status = "delivered"
+                event.delivered_at = datetime.now(UTC)
+                event.context_message_index = message_index
+            if events:
+                await session.commit()
+
+    async def _mark_context_events_consumed(self, messages, exchange_id, operation_id):
+        from datetime import UTC, datetime
+
+        from sqlalchemy import select
+        from voice_api.db.session import SessionFactory
+        from voice_api.models import RunContextEvent
+
+        serialized = "\n".join(str(message.get("content", "")) for message in messages)
+        async with SessionFactory() as session:
+            events = (
+                await session.scalars(
+                    select(RunContextEvent).where(
+                        RunContextEvent.run_id == self.run_id, RunContextEvent.status == "delivered"
+                    )
+                )
+            ).all()
+            changed = False
+            for event in events:
+                if f"[[voice-ai-context-event:{event.id}]]" in serialized:
+                    event.status = "consumed"
+                    event.consumed_at = datetime.now(UTC)
+                    event.consumed_exchange_id = exchange_id
+                    event.consuming_span_id = operation_id
+                    changed = True
+            if changed:
+                await session.commit()
 
     async def prepare(self, snapshot: dict, tracker: ExchangeTracker, *, transport=None) -> None:
         self.tracker, self._snapshot = tracker, snapshot
@@ -1459,6 +1786,7 @@ class NativePipelineHost:
                 transport.input(),
                 stt,
                 aggregators.user(),
+                _CallerTurnContextEventProcessor(self._deliver_pending_context_events, context),
                 llm,
                 tts,
                 transport.output(),
@@ -1480,6 +1808,7 @@ class NativePipelineHost:
             if snapshot["_resolved"]["pipeline_logs_enabled"]
             else None,
         )
+        self.observer.context_event_consumer = self._mark_context_events_consumed
         self.worker = PipelineWorker(
             pipeline,
             observers=[self.observer, self.capture],
@@ -1743,6 +2072,7 @@ class NativePipelineHost:
 
             primary_error: BaseException | None = None
             cleanup_error: BaseException | None = None
+            self._call_closed = True
 
             try:
                 if (
@@ -1758,6 +2088,48 @@ class NativePipelineHost:
                     await self.runner_task
                 if self._end_task:
                     await self._end_task
+                if self._background_tool_tasks:
+                    pending = set(self._background_tool_tasks)
+                    done, pending = await asyncio.wait(pending, timeout=5)
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        await asyncio.gather(*pending, return_exceptions=True)
+                    if done:
+                        await asyncio.gather(*done, return_exceptions=True)
+                if self.run_id:
+                    from sqlalchemy import update
+                    from voice_api.db.session import SessionFactory
+                    from voice_api.models import RunContextEvent
+
+                    try:
+                        async with SessionFactory() as session:
+                            await session.execute(
+                                update(RunContextEvent)
+                                .where(
+                                    RunContextEvent.run_id == self.run_id,
+                                    RunContextEvent.status == "pending",
+                                )
+                                .values(status="ended_before_delivery")
+                            )
+                            await session.commit()
+                    except Exception:
+                        logger.exception(
+                            "Could not finalize pending context events for run {}", self.run_id
+                        )
+                        if self.tracker:
+                            try:
+                                self.tracker.diagnostic(
+                                    severity="warning",
+                                    category="context_event_persistence",
+                                    source="evidence",
+                                    code="context_event_finalize_failed",
+                                    message="Pending asynchronous outcomes could not be finalized at call end",
+                                )
+                            except Exception:
+                                logger.exception(
+                                    "Could not record context-event finalization diagnostic"
+                                )
             except asyncio.CancelledError as exc:
                 self.termination.request("cancelled")
                 primary_error = exc
@@ -1765,6 +2137,7 @@ class NativePipelineHost:
                 self.termination.request("pipeline_failure")
                 primary_error = exc
             finally:
+
                 def attempt_cleanup(action) -> None:
                     nonlocal cleanup_error
                     try:

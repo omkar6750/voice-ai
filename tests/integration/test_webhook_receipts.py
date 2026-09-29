@@ -121,6 +121,15 @@ async def test_receipts_are_account_scoped_and_deduplicated(client, database, mo
     whatsapp_tool = next(item for item in timeline.json()["tools"] if item["id"] == tools[1].id)
     assert [item["status"] for item in whatsapp_tool["receipts"]] == ["sent", "failed"]
     assert whatsapp_tool["receipts"][1]["errors"][0]["title"] == "Undeliverable"
+    receipt_events = [
+        event
+        for event in timeline.json()["context_events"]
+        if event["tool_invocation_id"] == tools[1].id
+    ]
+    assert [event["payload"]["status"] for event in receipt_events] == ["sent", "failed"]
+    assert all(event["source"] == "whatsapp_receipt" for event in receipt_events)
+    assert all(event["status"] == "pending" for event in receipt_events)
+    assert receipt_events[0]["occurred_at"] < receipt_events[1]["occurred_at"]
 
 
 async def test_invalid_credentials_not_echoed_in_validation(client):

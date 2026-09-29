@@ -5,7 +5,6 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from .base import ConfigModel
-from .tools import WaitConfig
 
 
 class KnowledgeConfig(ConfigModel):
@@ -38,7 +37,6 @@ class RetrievalConfig(ConfigModel):
     result_budget_tokens: int = Field(default=1200, gt=0)
     timeout_secs: float = Field(default=10, gt=0)
     reranking_enabled: Literal[False] = False
-    wait: WaitConfig = Field(default_factory=lambda: WaitConfig(mode="silent_wait"))
 
     @model_validator(mode="after")
     def nonzero_weights(self):

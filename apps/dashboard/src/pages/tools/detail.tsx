@@ -94,16 +94,6 @@ export function ToolDetailPage() {
                 </>
               )}
               <ReadOnlyValue
-                label="Wait mode"
-                value={version.config.wait?.mode || "inline"}
-              />
-              {version.config.wait?.acknowledgement && (
-                <ReadOnlyValue
-                  label="Wait acknowledgement"
-                  value={version.config.wait.acknowledgement}
-                />
-              )}
-              <ReadOnlyValue
                 label="Input schema"
                 value={
                   version.config.parameters ? (
@@ -151,8 +141,10 @@ export function ToolDetailPage() {
         </div>
       </LoadState>
       <p className="text-xs text-muted-foreground">
-        Published versions are immutable. Editing always happens on a draft,
-        with the reviewed handler catalog or validated HTTP controls.
+        Published versions are immutable. Runtime execution timing comes from
+        the registered handler; only lead classification continues in the
+        background. Put caller-facing acknowledgement wording in the agent
+        prompt or tool description.
       </p>
     </PageBody>
   );

@@ -1,5 +1,6 @@
 """Exercise the actual Pipecat Flows wrapper, not just the raw tool handler."""
 
+from contextvars import ContextVar
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -29,6 +30,7 @@ def setup_flow():
     manager.observer = SimpleNamespace(function_operations={}, llm_operation=None)
     manager._snapshot = {}
     manager._context_for_evidence = LLMContext([])
+    manager._active_tool_invocation = ContextVar("active_test_tool", default=None)
     manager._end_call_runner = host._finish_end_call
     return host, manager, events
 
@@ -98,6 +100,30 @@ async def test_unrelated_tool_retains_its_original_followup_behavior():
     assert await execute(params("ordinary", callback)) == {"status": "ok", "data": 17}
     assert callback.await_args.kwargs["properties"].run_llm is True
     host.worker.queue_frame.assert_not_awaited()
+
+
+async def test_classify_started_result_is_not_normalized_as_classifier_output():
+    _host, manager, _events = setup_flow()
+    manager.bindings["classify_lead"] = {"version_id": "v3"}
+    manager._snapshot = {"classifier": {"llm": {"output_fields": {"lead_temperature": ["hot"]}}}}
+    manager.tracker.start_tool.return_value = "invocation-1"
+    manager.tracker.tool_result.return_value = "result-1"
+
+    async def handler(_args, _manager):
+        return {
+            "status": "started",
+            "operation_id": "operation-1",
+            "message": "Classification continues in background.",
+        }
+
+    callback = AsyncMock()
+    execute = await manager._create_transition_func("classify_lead", handler)
+    result = await execute(params("classify_lead", callback))
+
+    assert result["status"] == "started"
+    assert callback.await_args.args[0]["status"] == "started"
+    manager.tracker.tool_result.assert_called_once()
+    assert manager.tracker.tool_result.call_args.args[1]["status"] == "started"
 
 
 async def test_shutdown_queue_failure_is_visible_and_allows_cleanup_retry():

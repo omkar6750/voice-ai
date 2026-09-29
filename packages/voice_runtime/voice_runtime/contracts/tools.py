@@ -12,17 +12,6 @@ class ToolBinding(ConfigModel):
     tool_version_id: Identifier
 
 
-class WaitConfig(ConfigModel):
-    mode: Literal["silent_wait", "acknowledge_then_wait"] = "silent_wait"
-    acknowledgement: str | None = None
-
-    @model_validator(mode="after")
-    def acknowledgement_required(self):
-        if self.mode == "acknowledge_then_wait" and not self.acknowledgement:
-            raise ValueError("acknowledge_then_wait requires acknowledgement")
-        return self
-
-
 class RetryConfig(ConfigModel):
     max_attempts: int = Field(default=1, ge=1, le=5)
     backoff_secs: float = Field(default=1, ge=0)
@@ -75,7 +64,6 @@ class ToolConfig(ConfigModel):
     whatsapp: WhatsAppTemplateConfig | None = None
     knowledge_base_id: Identifier | None = None
     parameters: dict[str, Any] = Field(default_factory=lambda: {"type": "object", "properties": {}})
-    wait: WaitConfig = Field(default_factory=WaitConfig)
 
     @model_validator(mode="after")
     def implementation_required(self):

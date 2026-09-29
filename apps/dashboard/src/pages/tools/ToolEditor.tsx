@@ -51,7 +51,6 @@ function editableConfig(config: ToolConfig): EditableToolConfig {
   return {
     ...config,
     parameters: config.parameters ?? { type: "object", properties: {} },
-    wait: { mode: "silent_wait", acknowledgement: null },
   } as EditableToolConfig;
 }
 

@@ -21,7 +21,7 @@ from voice_api.models import (
     Contact,
 )
 from voice_api.models.common import new_id, now
-from voice_api.schemas.calendar import CallbackAvailabilityResponse, CallbackBookingResponse
+from voice_api.schemas.calendar import CallbackAvailabilityResult, CallbackBookingResponse
 from voice_api.services.calendar_service import (
     SCOPES,
     SchedulingError,
@@ -255,7 +255,7 @@ async def disconnect(
 
 
 @router.post(
-    "/callback-scheduling/availability", response_model=CallbackAvailabilityResponse
+    "/callback-scheduling/availability", response_model=CallbackAvailabilityResult
 )
 async def availability(
     body: AvailabilityRequest, session: AsyncSession = Session, _: None = Operator
@@ -263,23 +263,66 @@ async def availability(
     version = await session.get(AgentVersion, body.agent_version_id)
     if version is None:
         raise HTTPException(404, "Agent version not found")
+    requested_timeframe = body.timeframe
+    if not body.contact_id:
+        return {
+            "status": "timezone_required",
+            "requested_timeframe": requested_timeframe,
+            "message": "The caller's timezone is unknown. Ask for their timezone before checking callback availability.",
+        }
+    contact = await session.get(Contact, body.contact_id)
+    if contact is None:
+        return {
+            "status": "contact_unavailable",
+            "requested_timeframe": requested_timeframe,
+            "message": "The callback contact could not be found.",
+        }
+    if not contact.timezone:
+        return {
+            "status": "timezone_required",
+            "requested_timeframe": requested_timeframe,
+            "message": "The caller's timezone is unknown. Ask for their timezone before checking callback availability.",
+        }
     config = AgentConfig.model_validate(version.config).callback_scheduling
     role = next((r for r in config.roles if r.key == body.role), None)
     if not config.enabled or role is None or not role.enabled:
-        raise HTTPException(422, "Callback role is not configured")
+        return {
+            "status": "configuration_error",
+            "requested_timeframe": requested_timeframe,
+            "message": "That callback role is not enabled for this agent.",
+        }
     candidates = [p for p in config.bookable_people if p.enabled and body.role in p.roles]
     if not candidates:
-        raise HTTPException(422, "No enabled person is configured for this callback role")
-    slots = []
-    for person in candidates:
+        return {
+            "status": "configuration_error",
+            "requested_timeframe": requested_timeframe,
+            "message": "No enabled bookable person is configured for this callback role.",
+        }
+    try:
+        window = resolve_timeframe(body.timeframe, contact.timezone)
+    except SchedulingError as exc:
+        status = (
+            "configuration_error"
+            if str(exc).startswith("Unknown timezone:")
+            else "invalid_timeframe"
+        )
+        message = (
+            "The saved contact timezone is invalid; ask the operator to correct it."
+            if status == "configuration_error"
+            else str(exc)
+        )
+        return {"status": status, "requested_timeframe": requested_timeframe, "message": message}
+
+    candidate_slots = []
+    failures = []
+    checked_calendars = 0
+    connected_calendars = 0
+    for person_order, person in enumerate(candidates):
         integration = await session.get(CalendarIntegration, person.calendar_integration_id)
         if integration is None or integration.status != "connected":
-            raise HTTPException(503, "A configured callback calendar is unavailable")
-        timezone = person.timezone or integration.timezone
-        try:
-            window = resolve_timeframe(body.timeframe, timezone)
-        except SchedulingError as exc:
-            raise _error(exc) from exc
+            failures.append("A configured calendar is disconnected.")
+            continue
+        connected_calendars += 1
         try:
             busy = await calendar_call(
                 session,
@@ -287,10 +330,16 @@ async def availability(
                 "freebusy",
                 start=window.start,
                 end=window.end,
-                timezone=timezone,
+                timezone=contact.timezone,
             )
-        except SchedulingError as exc:
-            raise HTTPException(502, "Google Calendar availability could not be checked") from exc
+        except SchedulingError:
+            failures.append("A configured calendar's availability could not be checked.")
+            continue
+        except Exception:
+            logger.exception("Unexpected callback availability failure for calendar {}", integration.id)
+            failures.append("A configured calendar's availability could not be checked.")
+            continue
+        checked_calendars += 1
         for start, end in generate_slots(
             window,
             busy,
@@ -304,7 +353,7 @@ async def availability(
                 "role": body.role,
                 "start": start.isoformat(),
                 "end": end.isoformat(),
-                "timezone": timezone,
+                "timezone": contact.timezone,
                 "window_start": window.start.isoformat(),
                 "window_end": window.end.isoformat(),
                 "timeframe": body.timeframe,
@@ -312,21 +361,54 @@ async def availability(
                 "agent_version_id": body.agent_version_id,
                 "contact_id": body.contact_id,
             }
-            slots.append(
-                {
-                    "slot_id": sign_slot(payload),
-                    "display": format_local_callback_time(start, timezone),
-                    "_sort": start,
-                }
+            candidate_slots.append(
+                (
+                    start.astimezone(UTC),
+                    person_order,
+                    end.astimezone(UTC),
+                    {
+                        "slot_id": sign_slot(payload),
+                        "display": format_local_callback_time(start, contact.timezone),
+                    },
+                )
             )
-    slots.sort(key=lambda item: item["_sort"])
-    for item in slots:
-        item.pop("_sort", None)
+    if checked_calendars == 0:
+        status = "calendar_unavailable" if connected_calendars == 0 else "availability_check_failed"
+        return {
+            "status": status,
+            "requested_timeframe": requested_timeframe,
+            "message": "No configured callback calendar could be checked. Please try again later or contact support.",
+        }
+
+    candidate_slots.sort(key=lambda item: (item[0], item[1]))
+    slots, seen_intervals = [], set()
+    for start_utc, _person_order, end_utc, slot in candidate_slots:
+        interval = (start_utc, end_utc)
+        if interval in seen_intervals:
+            continue
+        seen_intervals.add(interval)
+        slots.append(slot)
+        if len(slots) == 3:
+            break
+    partial = bool(failures)
     return {
-        "status": "available" if slots else "no_availability",
-        "requested_timeframe": body.timeframe,
-        "slots": slots[:3],
-        "message": None if slots else "No callback slots are available in the requested window.",
+        "status": (
+            "partial_availability"
+            if partial
+            else "available"
+            if slots
+            else "no_availability"
+        ),
+        "requested_timeframe": requested_timeframe,
+        "slots": slots,
+        "message": (
+            "Some calendars could not be checked; results may be incomplete."
+            if partial
+            else None
+            if slots
+            else "No callback slots are available in the requested window."
+        ),
+        "warnings": list(dict.fromkeys(failures)),
     }
 
 
@@ -345,6 +427,8 @@ async def book(body: BookRequest, session: AsyncSession = Session, _: None = Ope
     contact = await session.get(Contact, body.contact_id)
     if integration is None or integration.status != "connected" or contact is None:
         raise HTTPException(409, "Calendar or contact is unavailable")
+    if not contact.timezone or contact.timezone != payload.get("timezone"):
+        raise HTTPException(409, "Contact timezone changed; check callback availability again")
     start, end = datetime.fromisoformat(payload["start"]), datetime.fromisoformat(payload["end"])
     try:
         busy = await calendar_call(

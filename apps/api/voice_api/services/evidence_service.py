@@ -8,6 +8,7 @@ from voice_api.models import (
     ClassifierResult,
     FlowNodeVisit,
     InterruptionEvent,
+    RunContextEvent,
     RunDiagnostic,
     ToolContextDelivery,
     ToolInvocationResult,
@@ -64,6 +65,13 @@ async def related_evidence(session: AsyncSession, run_id: str) -> dict:
             select(RunDiagnostic)
             .where(RunDiagnostic.run_id == run_id)
             .order_by(RunDiagnostic.occurred_at)
+        )
+    ).all()
+    context_events = (
+        await session.scalars(
+            select(RunContextEvent)
+            .where(RunContextEvent.run_id == run_id)
+            .order_by(RunContextEvent.occurred_at, RunContextEvent.id)
         )
     ).all()
     return {
@@ -176,5 +184,25 @@ async def related_evidence(session: AsyncSession, run_id: str) -> dict:
                 "created_at": diagnostic.created_at,
             }
             for diagnostic in diagnostics
+        ],
+        "context_events": [
+            {
+                "id": event.id,
+                "run_id": event.run_id,
+                "tool_invocation_id": event.tool_invocation_id,
+                "source": event.source,
+                "source_reference": event.source_reference,
+                "connection_id": event.connection_id,
+                "provider_message_id": event.provider_message_id,
+                "payload": event.payload,
+                "status": event.status,
+                "occurred_at": event.occurred_at,
+                "delivered_at": event.delivered_at,
+                "context_message_index": event.context_message_index,
+                "consumed_at": event.consumed_at,
+                "consumed_exchange_id": event.consumed_exchange_id,
+                "consuming_span_id": event.consuming_span_id,
+            }
+            for event in context_events
         ],
     }

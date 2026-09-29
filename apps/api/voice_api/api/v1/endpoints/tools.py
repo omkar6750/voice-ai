@@ -392,16 +392,13 @@ async def tool_versions(
     ).all()
     versions: list[ToolVersionResponse] = []
     for row in rows:
-        cfg = dict(row.config or {})
-        if "wait" not in cfg or not cfg["wait"]:
-            cfg["wait"] = {"mode": "silent_wait"}
         versions.append(
             ToolVersionResponse(
                 id=row.id,
                 version=row.version,
                 revision=row.revision,
                 status=row.status,
-                config=ToolConfig.model_validate(cfg),
+                config=ToolConfig.model_validate(row.config or {}),
             )
         )
     return ToolVersionsResponse(versions=versions)

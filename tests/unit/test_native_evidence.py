@@ -1,17 +1,21 @@
 """New live-call evidence must be accepted by the versioned ingestion contract."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 import voice_runtime.execution.native as native_module
+from pipecat.frames.frames import LLMContextFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.frame_processor import FrameDirection
 from voice_api.api.v1.endpoints import calls
 from voice_api.schemas.call import StartCallBody
 from voice_runtime.contracts.evidence import EvidenceBatch
 from voice_runtime.execution.exchange import ExchangeTracker
 from voice_runtime.execution.native import (
     NativePipelineHost,
+    _CallerTurnContextEventProcessor,
     build_whatsapp_template_payload,
     render_opening,
     whatsapp_template_header_component,
@@ -291,6 +295,107 @@ def test_node_configuration_is_scoped_to_published_bindings(tmp_path):
     assert overridden["context_strategy"].strategy.value == "reset"
 
 
+def test_callback_role_schema_uses_enabled_agent_roles_without_mutating_registry(tmp_path):
+    host = NativePipelineHost("run-1", tmp_path, object())
+    definition = {
+        "description": "Find callback times.",
+        "parameters": {
+            "type": "object",
+            "properties": {"role": {"type": "string"}},
+            "required": ["role"],
+        },
+    }
+    host._snapshot = {
+        "flow": {},
+        "callback_scheduling": {
+            "enabled": True,
+            "roles": [
+                {
+                    "key": "sales",
+                    "label": "Sales",
+                    "description": "Product questions",
+                    "enabled": True,
+                },
+                {
+                    "key": "support",
+                    "label": "Support",
+                    "description": "Existing orders",
+                    "enabled": True,
+                },
+                {
+                    "key": "disabled",
+                    "label": "Disabled",
+                    "description": "Not selectable",
+                    "enabled": False,
+                },
+            ],
+            "bookable_people": [
+                {"key": "sales-person", "roles": ["sales"], "enabled": True},
+                {"key": "disabled-person", "roles": ["disabled"], "enabled": True},
+            ],
+        },
+        "_resolved": {
+            "tools": {
+                "check_callback_availability": {
+                    "definition": definition,
+                }
+            }
+        },
+    }
+    host._nodes = {
+        "callback": {
+            "tool_bindings": ["check_callback_availability"],
+            "transitions": [],
+            "respond_immediately": False,
+        }
+    }
+
+    function = host._node("callback")["functions"][0]
+
+    assert function.properties["role"]["enum"] == ["sales"]
+    assert "sales (Sales): Product questions" in function.properties["role"]["description"]
+    assert "sales-person" not in function.description
+    assert "calendar" in function.description
+    assert "enum" not in definition["parameters"]["properties"]["role"]
+
+
+def test_callback_tools_are_hidden_when_no_enabled_role_has_a_bookable_person(tmp_path):
+    host = NativePipelineHost("run-1", tmp_path, object())
+    host._snapshot = {
+        "flow": {},
+        "callback_scheduling": {
+            "enabled": True,
+            "roles": [{"key": "sales", "label": "Sales", "description": "Product questions"}],
+            "bookable_people": [],
+        },
+        "_resolved": {
+            "tools": {
+                "check_callback_availability": {
+                    "definition": {
+                        "description": "Find callback times.",
+                        "parameters": {"type": "object", "properties": {}},
+                    }
+                },
+                "book_callback": {
+                    "definition": {
+                        "description": "Book callback.",
+                        "parameters": {"type": "object", "properties": {}},
+                    }
+                },
+            }
+        },
+    }
+    host._nodes = {
+        "callback": {
+            "tool_bindings": ["check_callback_availability", "book_callback"],
+            "transitions": [],
+            "respond_immediately": False,
+        }
+    }
+
+    assert host._node("callback")["functions"] == []
+
+
 async def test_call_dispatch_leaves_claim_to_executor(monkeypatch):
     spawned = []
 
@@ -320,3 +425,85 @@ async def test_call_dispatch_leaves_claim_to_executor(monkeypatch):
     )
     assert result["status"] == "dispatching"
     assert spawned == [("run-1", "endpoint-1")]
+
+
+async def test_classify_lead_returns_started_without_awaiting_work(tmp_path):
+    host = NativePipelineHost("run-1", tmp_path, object())
+    host.tracker = SimpleNamespace(
+        start_operation=lambda *args, **kwargs: {"operation_id": "operation-1"}
+    )
+    host.observer = None
+    host._run_background_tool = AsyncMock()
+    manager = SimpleNamespace(active_tool_invocation_id="invocation-1")
+
+    result = await host._handler("classify_lead")({}, manager)
+    await asyncio.gather(*host._background_tool_tasks)
+
+    assert result["status"] == "started"
+    assert result["operation_id"] == "operation-1"
+    host._run_background_tool.assert_awaited_once()
+
+
+def test_async_tool_policy_keeps_control_and_callback_tools_awaited():
+    assert NativePipelineHost._is_nonblocking_tool("classify_lead")
+    assert not NativePipelineHost._is_nonblocking_tool("whatsapp_template_followup")
+    assert not NativePipelineHost._is_nonblocking_tool("send_whatsapp_message")
+    assert not NativePipelineHost._is_nonblocking_tool("query_knowledge_base")
+    assert not NativePipelineHost._is_nonblocking_tool("classify_entry")
+    assert not NativePipelineHost._is_nonblocking_tool("check_callback_availability")
+    assert not NativePipelineHost._is_nonblocking_tool("book_callback")
+    assert not NativePipelineHost._is_nonblocking_tool("change_node")
+    assert not NativePipelineHost._is_nonblocking_tool("end_call")
+
+
+def test_model_visible_async_result_is_bounded_and_excludes_internal_fields():
+    result = NativePipelineHost._bounded_context_result(
+        {
+            "status": "accepted",
+            "_provider_message_id": "private-internal",
+            "source_path": "C:/private/file",
+            "message": "x" * 3500,
+        }
+    )
+    assert result["status"] == "accepted"
+    assert "_provider_message_id" not in result
+    assert "source_path" not in result
+    assert len(result["message"]) == 3000
+
+
+async def test_async_outcome_is_injected_before_only_a_caller_turn_inference():
+    context = LLMContext(messages=[{"role": "system", "content": "instructions"}])
+    delivered = []
+
+    async def deliver(target_context):
+        delivered.append(target_context)
+        messages = target_context.get_messages()
+        messages.append({"role": "system", "content": "queued outcome"})
+        target_context.set_messages(messages)
+
+    processor = _CallerTurnContextEventProcessor(deliver, context)
+    pushed = []
+
+    async def push_frame(frame, direction):
+        pushed.append((frame, direction))
+
+    processor.push_frame = push_frame
+    context.add_message({"role": "user", "content": "What happened?"})
+    caller_frame = LLMContextFrame(context=context)
+    await processor.process_frame(caller_frame, FrameDirection.DOWNSTREAM)
+
+    assert delivered == [context]
+    assert context.get_messages()[-1]["content"] == "queued outcome"
+    assert pushed == [(caller_frame, FrameDirection.DOWNSTREAM)]
+
+    tool_followup_frame = LLMContextFrame(context=context)
+    await processor.process_frame(tool_followup_frame, FrameDirection.DOWNSTREAM)
+    assert delivered == [context]
+
+    context.set_messages([{"role": "system", "content": "new node context"}])
+    reset_frame = LLMContextFrame(context=context)
+    await processor.process_frame(reset_frame, FrameDirection.DOWNSTREAM)
+    context.add_message({"role": "user", "content": "Same question again"})
+    next_caller_frame = LLMContextFrame(context=context)
+    await processor.process_frame(next_caller_frame, FrameDirection.DOWNSTREAM)
+    assert delivered == [context, context]

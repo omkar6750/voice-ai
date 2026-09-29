@@ -15,10 +15,32 @@ class CallbackSlotResponse(BaseModel):
 class CallbackAvailabilityResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    status: Literal["available", "no_availability"]
+    status: Literal["available", "no_availability", "partial_availability"]
     requested_timeframe: str
     slots: list[CallbackSlotResponse]
     message: str | None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class CallbackAvailabilityErrorResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal[
+        "timezone_required",
+        "contact_unavailable",
+        "invalid_timeframe",
+        "configuration_error",
+        "calendar_unavailable",
+        "availability_check_failed",
+    ]
+    requested_timeframe: str
+    message: str
+
+
+CallbackAvailabilityResult = Annotated[
+    CallbackAvailabilityResponse | CallbackAvailabilityErrorResponse,
+    Field(discriminator="status"),
+]
 
 
 class CallbackBookingConfirmedResponse(BaseModel):

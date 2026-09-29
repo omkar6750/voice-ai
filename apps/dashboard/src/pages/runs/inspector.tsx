@@ -169,6 +169,25 @@ function Evidence({
               </ol>
             </details>
           )}
+          {timeline.context_events.length > 0 && (
+            <section className="flex flex-col gap-2">
+              <h4 className="text-sm font-medium">Asynchronous outcomes</h4>
+              {timeline.context_events.map((event) => (
+                <div key={event.id} className="rounded-md border p-3 text-xs">
+                  <div className="flex justify-between gap-2">
+                    <span className="font-medium">{event.source.replaceAll("_", " ")}</span>
+                    <span className="capitalize text-muted-foreground">{event.status.replaceAll("_", " ")}</span>
+                  </div>
+                  <p className="mt-1 text-muted-foreground">{stamp(event.occurred_at)}</p>
+                  <Json label="Outcome" value={event.payload} />
+                  <dl className="mt-2">
+                    <Value label="Added to context">{stamp(event.delivered_at)}</Value>
+                    <Value label="Consumed by LLM">{stamp(event.consumed_at)}</Value>
+                  </dl>
+                </div>
+              ))}
+            </section>
+          )}
           <Button
             variant="outline"
             onClick={() => onSelect({ kind: "prompt" })}
@@ -467,6 +486,21 @@ function Evidence({
           {tool.receipts.length > 0 && (
             <Json label="WhatsApp delivery receipts" value={tool.receipts} />
           )}
+          {timeline.context_events
+            .filter((event) => event.tool_invocation_id === tool.id)
+            .map((event) => (
+              <div key={event.id} className="rounded-md border p-3 text-xs">
+                <div className="flex justify-between gap-2">
+                  <span className="font-medium">{event.source.replaceAll("_", " ")}</span>
+                  <span className="capitalize text-muted-foreground">{event.status.replaceAll("_", " ")}</span>
+                </div>
+                <Json label="Outcome" value={event.payload} />
+                <dl>
+                  <Value label="Added to context">{stamp(event.delivered_at)}</Value>
+                  <Value label="Consumed by LLM">{stamp(event.consumed_at)}</Value>
+                </dl>
+              </div>
+            ))}
           {tool.llm_operation_id && (
             <Button
               variant="outline"

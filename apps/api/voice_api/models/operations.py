@@ -138,9 +138,7 @@ class ClassifierContextDelivery(Identity, Created, Base):
     __tablename__ = "classifier_context_deliveries"
     __table_args__ = (
         UniqueConstraint("classifier_result_id"),
-        CheckConstraint(
-            "status IN ('delivered','consumed','interrupted_before_consumption')"
-        ),
+        CheckConstraint("status IN ('delivered','consumed','interrupted_before_consumption')"),
         CheckConstraint("context_message_index >= 0"),
     )
     run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
@@ -160,13 +158,51 @@ class ClassifierContextDelivery(Identity, Created, Base):
     consuming_operation_id: Mapped[str | None] = mapped_column(String(36), index=True)
 
 
+class RunContextEvent(Identity, Created, Base):
+    """Durable asynchronous outcome queued for the next caller-driven inference."""
+
+    __tablename__ = "run_context_events"
+    __table_args__ = (
+        UniqueConstraint("run_id", "dedupe_key", name="uq_run_context_event_dedupe"),
+        CheckConstraint(
+            "status IN ('pending','delivered','consumed','ended_before_delivery')",
+            name="ck_run_context_event_status",
+        ),
+        CheckConstraint(
+            "source IN ('tool_result','whatsapp_receipt')",
+            name="ck_run_context_event_source",
+        ),
+        CheckConstraint(
+            "context_message_index IS NULL OR context_message_index >= 0",
+            name="ck_run_context_event_index",
+        ),
+        Index("ix_run_context_event_pending", "run_id", "status", "occurred_at"),
+        Index("ix_run_context_event_provider_message", "connection_id", "provider_message_id"),
+    )
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    # A tool invocation's finalized evidence may still be in the local spool
+    # when an outcome is produced, so this is a soft run-scoped source reference.
+    tool_invocation_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    dedupe_key: Mapped[str] = mapped_column(String(255))
+    source: Mapped[str] = mapped_column(String(40))
+    source_reference: Mapped[str | None] = mapped_column(String(255))
+    connection_id: Mapped[str | None] = mapped_column(String(36))
+    provider_message_id: Mapped[str | None] = mapped_column(String(255))
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="pending")
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    context_message_index: Mapped[int | None]
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consumed_exchange_id: Mapped[str | None] = mapped_column(String(36))
+    consuming_span_id: Mapped[str | None] = mapped_column(String(36))
+
+
 class InterruptionEvent(Identity, Created, Base):
     """Causal interruption marker linking a frame to cancelled work."""
 
     __tablename__ = "interruption_events"
-    __table_args__ = (
-        CheckConstraint("source IN ('caller','system','transport')"),
-    )
+    __table_args__ = (CheckConstraint("source IN ('caller','system','transport')"),)
     run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
     exchange_id: Mapped[str | None] = mapped_column(String(36), index=True)
     source: Mapped[str] = mapped_column(String(20))
@@ -182,9 +218,7 @@ class RunDiagnostic(Identity, Created, Base):
     __table_args__ = (
         Index("ix_run_diagnostics_occurred_at", "occurred_at"),
         CheckConstraint("severity IN ('info','warning','error')"),
-        CheckConstraint(
-            "source IN ('provider','modem','transport','call','evidence','runtime')"
-        ),
+        CheckConstraint("source IN ('provider','modem','transport','call','evidence','runtime')"),
         CheckConstraint("http_status IS NULL OR http_status BETWEEN 100 AND 599"),
         CheckConstraint("retry_after_seconds IS NULL OR retry_after_seconds >= 0"),
     )

@@ -20,6 +20,7 @@ from voice_api.models import (
     IntegrationMedia,
     IntegrationSecret,
     Run,
+    RunContextEvent,
     Tool,
     ToolInvocation,
     ToolVersion,
@@ -910,7 +911,6 @@ async def generate_template_tool(
             "type": "object",
             "properties": properties,
         },
-        "wait": {"mode": "silent_wait"},
     }
 
     existing_tool = await session.scalar(select(Tool).where(Tool.name == tool_name))
@@ -1016,12 +1016,71 @@ async def receive_webhook(
                     .with_for_update()
                     .execution_options(populate_existing=True)
                 )
-                if invocation is not None:
+                outbound_event = await session.scalar(
+                    select(RunContextEvent)
+                    .where(
+                        RunContextEvent.connection_id == connection_id,
+                        RunContextEvent.provider_message_id == message_id,
+                        RunContextEvent.source == "tool_result",
+                    )
+                    .order_by(RunContextEvent.occurred_at.desc())
+                )
+                if invocation is not None or outbound_event is not None:
                     receipt = {key: value for key, value in status.items() if key != "conversation"}
                     identity = (receipt.get("id"), receipt.get("status"), receipt.get("timestamp"))
-                    if not any(
+                    if invocation is not None and not any(
                         (r.get("id"), r.get("status"), r.get("timestamp")) == identity
                         for r in invocation.receipts
                     ):
                         invocation.receipts = [*invocation.receipts, receipt]
+                    receipt_status = str(receipt.get("status") or "unknown")[:40]
+                    event_timestamp = str(receipt.get("timestamp") or "unknown")[:40]
+                    try:
+                        occurred_at = datetime.fromtimestamp(int(event_timestamp), UTC)
+                    except (OverflowError, TypeError, ValueError):
+                        occurred_at = now()
+                    event_run_id = (
+                        invocation.run_id if invocation is not None else outbound_event.run_id
+                    )
+                    event_invocation_id = (
+                        invocation.id
+                        if invocation is not None
+                        else outbound_event.tool_invocation_id
+                    )
+                    from voice_api.services.run_context_service import enqueue_context_event
+
+                    event_run = await session.get(Run, event_run_id)
+                    errors = receipt.get("errors") or []
+                    safe_errors = [
+                        {
+                            "title": str(error.get("title") or "")[:160],
+                            "message": str(error.get("message") or "")[:400],
+                        }
+                        for error in errors[:5]
+                        if isinstance(error, dict)
+                    ]
+                    await enqueue_context_event(
+                        session,
+                        run_id=event_run_id,
+                        tool_invocation_id=event_invocation_id,
+                        dedupe_key=f"whatsapp-receipt:{message_id}:{receipt_status}:{event_timestamp}",
+                        source="whatsapp_receipt",
+                        source_reference=message_id,
+                        connection_id=connection_id,
+                        provider_message_id=message_id,
+                        status=(
+                            "ended_before_delivery" if event_run.ended_at is not None else "pending"
+                        ),
+                        occurred_at=occurred_at,
+                        payload={
+                            "provider": "whatsapp",
+                            "status": receipt_status,
+                            "message": (
+                                "WhatsApp delivery failed"
+                                if receipt_status == "failed"
+                                else f"WhatsApp receipt status: {receipt_status}"
+                            ),
+                            "errors": safe_errors,
+                        },
+                    )
     await session.commit()

@@ -1,7 +1,7 @@
 """Typed run timeline response contracts."""
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, JsonValue
 
@@ -158,6 +158,24 @@ class ClassifierContextDeliveryResponse(BaseModel):
     consuming_operation_id: str | None
 
 
+class RunContextEventResponse(BaseModel):
+    id: str
+    run_id: str
+    tool_invocation_id: str | None
+    source: Literal["tool_result", "whatsapp_receipt"]
+    source_reference: str | None
+    connection_id: str | None
+    provider_message_id: str | None
+    payload: JsonValue
+    status: Literal["pending", "delivered", "consumed", "ended_before_delivery"]
+    occurred_at: datetime
+    delivered_at: datetime | None
+    context_message_index: int | None
+    consumed_at: datetime | None
+    consumed_exchange_id: str | None
+    consuming_span_id: str | None
+
+
 class InterruptionResponse(BaseModel):
     id: str
     run_id: str
@@ -191,6 +209,7 @@ class TimelineResponse(BaseModel):
     tool_context_deliveries: list[ToolContextDeliveryResponse]
     classifier_results: list[ClassifierResultResponse]
     classifier_context_deliveries: list[ClassifierContextDeliveryResponse]
+    context_events: list[RunContextEventResponse]
     interruptions: list[InterruptionResponse]
     diagnostics: list[DiagnosticResponse]
     flow_visits: list[TimelineFlowVisit]

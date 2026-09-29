@@ -89,9 +89,6 @@ async def create_base(
                 },
                 "required": ["query"],
             },
-            "wait": {
-                "mode": "silent_wait",
-            },
         }
         version = ToolVersion(
             id=new_id(),

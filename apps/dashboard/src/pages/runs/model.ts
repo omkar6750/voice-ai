@@ -51,7 +51,21 @@ export function whatsappDeliveryStatus(
     (left, right) => Number(right.timestamp ?? 0) - Number(left.timestamp ?? 0),
   );
   const latest = receipts[0];
+  const asyncSend = timeline.context_events.find((event) => {
+    if (event.tool_invocation_id !== tool.id || event.source !== "tool_result")
+      return false;
+    const payload = event.payload;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload))
+      return false;
+    const result = (payload as Record<string, unknown>).result;
+    return !!result && typeof result === "object" && !Array.isArray(result)
+      && (result as Record<string, unknown>).status === "accepted";
+  });
   if (!latest) {
+    if (asyncSend)
+      return isActive(timeline.run.status)
+        ? "Meta accepted the message · waiting for delivery webhook"
+        : "Meta accepted the message · delivery status unconfirmed (no webhook receipt)";
     if (!tool.provider_message_id || tool.provider_message_id === "unknown") {
       const result =
         tool.result &&

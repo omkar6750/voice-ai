@@ -28,7 +28,6 @@ from .tools import (
     RetryConfig,
     ToolBinding,
     ToolConfig,
-    WaitConfig,
     WhatsAppTemplateConfig,
 )
 from .workspace import WorkspaceConfig
@@ -60,7 +59,6 @@ __all__ = [
     "ToolBinding",
     "ToolConfig",
     "VADConfig",
-    "WaitConfig",
     "WhatsAppTemplateConfig",
     "WorkspaceConfig",
     "is_registered_handler",

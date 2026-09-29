@@ -95,10 +95,14 @@ def resolve_timeframe(
         r"(?:(?:at|after)\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", remainder
     ):
         hour, minute, meridiem = int(match.group(1)), int(match.group(2) or 0), match.group(3)
+        if minute > 59 or (meridiem and not 1 <= hour <= 12):
+            raise SchedulingError("The requested callback time is invalid")
         if meridiem == "pm" and hour < 12:
             hour += 12
         if meridiem == "am" and hour == 12:
             hour = 0
+        if hour > 23:
+            raise SchedulingError("The requested callback time is invalid")
         start = datetime(date.year, date.month, date.day, hour, minute, tzinfo=zone)
         end = start + timedelta(minutes=15)
     else:
