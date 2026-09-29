@@ -7,6 +7,7 @@ This deliberately does not import the protected standalone demo.
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import re
 from copy import deepcopy
@@ -335,7 +336,12 @@ def _parse_spoken_callback_time(phrase: str) -> datetime:
 
 
 class NativePipelineHost:
-    def __init__(self, run_id: str, recordings_dir: Path, settings) -> None:
+    def __init__(
+        self, run_id: str, recordings_dir: Path, settings, *, graceful_close_timeout_secs: float = 15
+    ) -> None:
+        if not math.isfinite(graceful_close_timeout_secs) or graceful_close_timeout_secs <= 0:
+            raise ValueError("Graceful close timeout must be finite and positive")
+        self._graceful_close_timeout_secs = graceful_close_timeout_secs
         self.run_id, self.directory, self.settings = run_id, recordings_dir / run_id, settings
         self.worker = self.flow = self.capture = self.observer = None
         self.runner_task: asyncio.Task | None = None
@@ -1559,6 +1565,19 @@ class NativePipelineHost:
         while self.runner_task and not self.runner_task.done():
             if self.errors:
                 raise RuntimeError(self.errors[-1])
+            if self.termination.graceful_deadline_expired(self._graceful_close_timeout_secs):
+                self.termination.request("drain_timeout")
+                self.tracker.diagnostic(
+                    severity="error",
+                    category="call_termination",
+                    source="runtime",
+                    code="graceful_close_timeout",
+                    message="Graceful pipeline shutdown exceeded its deadline",
+                    uncertain=True,
+                    metadata={"timeout_seconds": self._graceful_close_timeout_secs},
+                )
+                await self.worker.cancel()
+                raise TimeoutError("Graceful pipeline shutdown exceeded its deadline")
             await asyncio.sleep(1)
             if not await _check_active():
                 await self._record_call_termination(modem_or_check)

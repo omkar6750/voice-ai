@@ -24,6 +24,7 @@ TerminationCause = Literal[
     "cancelled",
     "caller_idle_timeout",
     "duration_limit",
+    "drain_timeout",
     "unknown",
 ]
 
@@ -63,6 +64,7 @@ class CallTermination:
     def __init__(self) -> None:
         self.summary = TerminationSummary()
         self.end_queued = False
+        self._requested_clock: float | None = None
 
     @property
     def closing(self) -> bool:
@@ -74,8 +76,9 @@ class CallTermination:
             self.summary.requested_cause = cause
             self.summary.mode = "graceful" if graceful else "immediate"
             self.summary.requested_at_ns = time.time_ns()
+            self._requested_clock = time.monotonic()
             return True
-        failures = {"provider_failure", "pipeline_failure", "network_failure"}
+        failures = {"provider_failure", "pipeline_failure", "network_failure", "drain_timeout"}
         if cause in failures or (not graceful and self.summary.pipeline_finished_at_ns is None):
             # Preserve the first failure, but do not mistake an interrupted goodbye
             # for success merely because the agent requested it first.
@@ -87,6 +90,15 @@ class CallTermination:
             if self.summary.playback_status == "speaking":
                 self.summary.playback_status = "interrupted"
         return False
+
+    def graceful_deadline_expired(self, timeout_seconds: float) -> bool:
+        """Use monotonic elapsed time; wall-clock changes cannot extend draining."""
+        return (
+            self._requested_clock is not None
+            and self.summary.mode == "graceful"
+            and self.summary.pipeline_finished_at_ns is None
+            and time.monotonic() - self._requested_clock >= timeout_seconds
+        )
 
     def claim_end_frame(self) -> bool:
         if self.end_queued:
