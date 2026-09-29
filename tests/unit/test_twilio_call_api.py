@@ -93,7 +93,7 @@ async def test_queue_call_twilio():
 
 @pytest.mark.asyncio
 async def test_queue_call_twilio_trial_rejected():
-    session = AsyncMock()
+    session = AsyncMock(spec=AsyncSession)
     contact_id = new_id()
     version_id = new_id()
     conn_id = new_id()
@@ -137,11 +137,13 @@ async def test_queue_call_twilio_trial_rejected():
 
 @pytest.mark.asyncio
 async def test_apply_twilio_call_status():
-    session = AsyncMock()
+    session = AsyncMock(spec=AsyncSession)
     run = Run(id=new_id(), status="running")
     call = Call(id=new_id(), run_id=run.id, provider="twilio", status="dialing")
 
-    async def mock_get(model, pk):
+    async def mock_get(model, pk, **kwargs):
+        if model is Call and pk == call.id:
+            return call
         if model is Run and pk == run.id:
             return run
         return None
@@ -153,12 +155,11 @@ async def test_apply_twilio_call_status():
     assert call.status == "active"
     assert call.answered_at is not None
 
-    # completed -> completed on both call and run
+    # Provider call completion is not proof of successful business execution.
     await apply_twilio_call_status(session, call, "completed")
     assert call.status == "completed"
     assert call.ended_at is not None
-    assert run.status == "completed"
-    assert run.ended_at is not None
+    assert run.status == "running"
 
 
 @pytest.mark.asyncio
@@ -186,7 +187,7 @@ async def test_call_status_endpoint(monkeypatch):
     from voice_api.main import app
     from voice_runtime.telephony.twilio import TwilioCredentials
 
-    session_mock = AsyncMock()
+    session_mock = AsyncMock(spec=AsyncSession)
     corr_id = new_id()
     call = Call(
         id=new_id(),
@@ -197,6 +198,7 @@ async def test_call_status_endpoint(monkeypatch):
         status="dialing",
         provider_metadata={},
     )
+    session_mock.get.return_value = call
 
     async def mock_get_session():
         yield session_mock
@@ -247,6 +249,7 @@ async def test_stream_status_endpoint(monkeypatch):
         status="active",
         provider_metadata={},
     )
+    session_mock.get.return_value = call
 
     async def mock_get_session():
         yield session_mock
@@ -302,6 +305,7 @@ async def test_signature_required_when_public_base_url_set():
         status="active",
         provider_metadata={},
     )
+    session_mock.get.return_value = call
 
     async def mock_get_session():
         yield session_mock
@@ -354,6 +358,7 @@ async def test_signature_accepted_when_valid():
         status="active",
         provider_metadata={},
     )
+    session_mock.get.return_value = call
 
     async def mock_get_session():
         yield session_mock
