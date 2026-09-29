@@ -44,7 +44,7 @@ async def test_live_models_cached_and_filtered(monkeypatch):
         lambda **kwargs: real_client(transport=httpx.MockTransport(respond)),
     )
     settings = Settings(
-        _env_file=None, groq_api_key="fake", gemini_api_key="fake", operator_token="test"
+        _env_file=None, groq_api_key="fake", gemini_api_key="fake"
     )
     first = await provider_registry.get_provider_registry(settings)
     second = await provider_registry.get_provider_registry(settings)
@@ -60,7 +60,7 @@ async def test_live_models_cached_and_filtered(monkeypatch):
 @pytest.mark.asyncio
 async def test_unconfigured_models_are_not_invented():
     registry = await provider_registry.get_provider_registry(
-        Settings(_env_file=None, groq_api_key=None, gemini_api_key=None, operator_token="test")
+        Settings(_env_file=None, groq_api_key=None, gemini_api_key=None)
     )
     providers = {item.provider: item for item in registry.providers}
     assert providers["groq"].models == []

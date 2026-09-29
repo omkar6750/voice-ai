@@ -2,10 +2,17 @@ import { createContext, useContext } from "react";
 
 export type Api = <T>(path: string, init?: RequestInit) => Promise<T>;
 export const ApiContext = createContext<Api | null>(null);
-export const OperatorTokenContext = createContext("");
+export const SupportSessionContext = createContext<string | null>(null);
+const apiOrigin = (import.meta.env.VITE_API_ORIGIN ?? "").replace(/\/$/, "");
 
-export function useOperatorToken() {
-  return useContext(OperatorTokenContext);
+export function apiUrl(path: string): string {
+  return `${apiOrigin}/api/v1${path}`;
+}
+
+export function websocketUrl(path: string): string {
+  const url = new URL(apiUrl(path), window.location.href);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
 }
 
 export function useApi(): Api {
@@ -14,16 +21,22 @@ export function useApi(): Api {
   return api;
 }
 
+export function useSupportSession(): string | null {
+  return useContext(SupportSessionContext);
+}
+
 export async function request<T>(
-  token: string,
+  sessionToken: string,
   path: string,
   init: RequestInit = {},
+  supportSession?: string | null,
 ): Promise<T> {
   const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${token}`);
+  headers.set("Authorization", `Bearer ${sessionToken}`);
+  if (supportSession) headers.set("X-Platform-Support-Session", supportSession);
   if (init.body && !(init.body instanceof FormData))
     headers.set("Content-Type", "application/json");
-  const response = await fetch(`/api/v1${path}`, { ...init, headers });
+  const response = await fetch(apiUrl(path), { ...init, headers });
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
     const detail = payload?.detail;
@@ -42,9 +55,11 @@ export async function request<T>(
     : (response.json() as Promise<T>);
 }
 
-export async function requestBlob(token: string, path: string): Promise<Blob> {
-  const response = await fetch(`/api/v1${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
+export async function requestBlob(token: string, path: string, supportSession?: string | null): Promise<Blob> {
+  const headers = new Headers({ Authorization: `Bearer ${token}` });
+  if (supportSession) headers.set("X-Platform-Support-Session", supportSession);
+  const response = await fetch(apiUrl(path), {
+    headers,
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => null);

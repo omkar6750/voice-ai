@@ -5,10 +5,10 @@ from datetime import datetime
 from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .common import Base, Created, Identity
+from .common import Base, Created, Identity, OrganizationOwned
 
 
-class RunArtifact(Identity, Created, Base):
+class RunArtifact(Identity, Created, OrganizationOwned, Base):
     __tablename__ = "run_artifacts"
     run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
     kind: Mapped[str] = mapped_column(String(30))

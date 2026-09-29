@@ -15,6 +15,7 @@ def upgrade() -> None:
         "classifier_results",
         "result",
         type_=postgresql.JSONB(none_as_null=True),
+        postgresql_using="result::jsonb",
         existing_nullable=True,
     )
     for column in ("interrupted_operation_ids", "interrupted_tool_invocation_ids"):
@@ -22,13 +23,13 @@ def upgrade() -> None:
             "interruption_events",
             column,
             type_=postgresql.JSONB(),
+            postgresql_using=f"{column}::jsonb",
             existing_nullable=False,
         )
-    op.drop_index("ix_inbound_webhook_messages_sender_created", table_name="inbound_webhook_messages")
-    op.create_index(
-        "ix_inbound_webhook_messages_connection_id",
-        "inbound_webhook_messages",
-        ["connection_id"],
+    op.drop_index("ix_inbound_webhook_messages_sender_created", if_exists=True)
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_inbound_webhook_messages_connection_id "
+        "ON inbound_webhook_messages (connection_id)"
     )
 
 

@@ -8,8 +8,6 @@ from voice_api.schemas.agent import (
 from voice_api.schemas.browser_session import (
     BrowserSessionResponse,
     CreateBrowserSessionRequest,
-    WebRTCOfferRequest,
-    WebRTCPatchRequest,
 )
 from voice_api.schemas.call import StartCallBody
 from voice_api.schemas.contact import ContactBody
@@ -100,7 +98,5 @@ __all__ = [
     "ToolVersionMutationResponse",
     "ToolVersionResponse",
     "ToolVersionsResponse",
-    "WebRTCOfferRequest",
-    "WebRTCPatchRequest",
     "WhatsAppConfig",
 ]

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { requestBlob, useOperatorToken } from "@/app/api";
+import { useAuth } from "@clerk/react";
+import { requestBlob, useSupportSession } from "@/app/api";
 
 export function MediaPreviewImage({
   connectionId,
@@ -10,7 +11,8 @@ export function MediaPreviewImage({
   mediaId: string;
   alt: string;
 }) {
-  const token = useOperatorToken();
+  const { getToken } = useAuth();
+  const supportSession = useSupportSession();
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -19,10 +21,10 @@ export function MediaPreviewImage({
     let objectUrl: string | null = null;
     setUrl(null);
     setFailed(false);
-    void requestBlob(
-      token,
-      `/integrations/${connectionId}/media/${mediaId}/preview`,
-    )
+    void getToken().then((token) => {
+      if (!token) throw new Error("Sign in required");
+      return requestBlob(token, `/integrations/${connectionId}/media/${mediaId}/preview`, supportSession);
+    })
       .then((blob) => {
         if (!blob.type.startsWith("image/"))
           throw new Error("Invalid image preview type");
@@ -38,7 +40,7 @@ export function MediaPreviewImage({
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [connectionId, mediaId, token]);
+  }, [connectionId, mediaId, getToken, supportSession]);
 
   if (failed)
     return (

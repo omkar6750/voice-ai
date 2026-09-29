@@ -1,9 +1,12 @@
 """End-to-end finalized transcript capture through spool, HTTP, PostgreSQL and timeline."""
 
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from time import time_ns
+from types import SimpleNamespace
 
 import pytest
+from pipecat.processors.aggregators.llm_context import LLMContext
 from sqlalchemy import func, select
 from voice_api.models import (
     ClassifierContextDelivery,
@@ -13,6 +16,7 @@ from voice_api.models import (
     FlowNodeVisit,
     InterruptionEvent,
     Run,
+    RunContextEvent,
     RunDiagnostic,
     ToolContextDelivery,
     ToolInvocation,
@@ -22,6 +26,7 @@ from voice_api.models import (
 from voice_api.models.common import new_id
 from voice_runtime.execution.evidence_client import ApiEvidenceIngestor
 from voice_runtime.execution.exchange import ExchangeTracker
+from voice_runtime.execution.native import NativePipelineHost
 from voice_runtime.execution.spool import DurableSpool
 
 
@@ -37,6 +42,45 @@ async def browser_run(client):
         await client.post(f"/api/agent-versions/{version}/publish", json={"revision": 1})
     ).status_code == 200
     return (await client.post("/api/runs", json={"agent_version_id": version})).json()["run_id"]
+
+
+async def test_native_async_context_lifecycle_is_tenant_scoped(client, database, monkeypatch):
+    from voice_api.db import session as session_module
+    from voice_api.db import tenant_scope
+
+    run_id = await browser_run(client)
+
+    @asynccontextmanager
+    async def factory():
+        yield database
+
+    bind = tenant_scope.bind_run_organization
+    bound_runs = []
+
+    async def tracked_bind(session, run_id):
+        bound_runs.append(run_id)
+        return await bind(session, run_id)
+
+    monkeypatch.setattr(session_module, "SessionFactory", factory)
+    monkeypatch.setattr(tenant_scope, "bind_run_organization", tracked_bind)
+    host = NativePipelineHost.__new__(NativePipelineHost)
+    host.run_id = run_id
+    host._call_closed = False
+    host.settings = SimpleNamespace(whatsapp_access_token=None, whatsapp_phone_number_id=None)
+    monkeypatch.setenv("VOICE_WHATSAPP_ACCESS_TOKEN", "must-not-use-global-token")
+    monkeypatch.setenv("VOICE_WHATSAPP_PHONE_NUMBER_ID", "must-not-use-global-account")
+    token, phone, _, _ = await host._whatsapp_runtime_config(connection_id="missing")
+    assert token == phone == ""
+    await host._persist_context_event(
+        None, "native-result", "tool_result", "native", {"status": "completed"}
+    )
+    context = LLMContext(messages=[{"role": "user", "content": "What happened?"}])
+    await host._deliver_pending_context_events(context)
+    await host._mark_context_events_consumed(context.get_messages(), None, None)
+    event = await database.scalar(select(RunContextEvent).where(RunContextEvent.run_id == run_id))
+    assert event.status == "consumed"
+    assert event.org_id == (await database.get(Run, run_id)).org_id
+    assert bound_runs == [run_id] * 4
 
 
 async def test_typed_operation_metrics_and_replay(client, database):
@@ -140,9 +184,7 @@ async def test_every_evidence_variant_maps_to_its_database_row(client, database)
     run_id = await browser_run(client)
     run = await database.get(Run, run_id)
     config = dict(run.resolved_config)
-    config["_resolved"] = {
-        "tools": {"send_message": {"version_id": "tool-v1", "definition": {}}}
-    }
+    config["_resolved"] = {"tools": {"send_message": {"version_id": None, "definition": {}}}}
     run.resolved_config = config
     await database.commit()
 
@@ -182,9 +224,7 @@ async def test_every_evidence_variant_maps_to_its_database_row(client, database)
         return start_record, ended_record
 
     llm_start, llm_end = operation(llm_id, "agent inference", "llm", "completed", 1)
-    consume_start, consume_end = operation(
-        consume_id, "tool follow-up", "llm", "completed", 2
-    )
+    consume_start, consume_end = operation(consume_id, "tool follow-up", "llm", "completed", 2)
     classifier_start, classifier_end = operation(
         classifier_id, "entry classifier", "classifier", "completed", 3
     )
@@ -205,7 +245,7 @@ async def test_every_evidence_variant_maps_to_its_database_row(client, database)
             invocation_id=invocation_id,
             exchange_id=exchange_id,
             binding_key="send_message",
-            tool_version_id="tool-v1",
+            tool_version_id=None,
             function_call_id="function-1",
             llm_operation_id=llm_id,
             arguments={},
@@ -327,9 +367,12 @@ async def test_every_evidence_variant_maps_to_its_database_row(client, database)
         RunDiagnostic: 1,
     }
     for model, count in expected.items():
-        assert await database.scalar(
-            select(func.count()).select_from(model).where(model.run_id == run_id)
-        ) == count
+        assert (
+            await database.scalar(
+                select(func.count()).select_from(model).where(model.run_id == run_id)
+            )
+            == count
+        )
 
 
 async def test_invalid_record_is_rejected_before_spool_append(client, database, tmp_path):
@@ -346,9 +389,9 @@ async def test_invalid_record_is_rejected_before_spool_append(client, database, 
             "run_id": run_id,
             "timestamp_ns": records[0]["timestamp_ns"],
             "exchange_id": new_id(),
-            "sequence": 1,
+            "sequence": 0,
             "role": "user",
-            "content": "Missing exchange",
+            "content": "Invalid sequence",
             "source_timestamp": datetime.now(UTC).isoformat(),
         }
         size_before = spool.path.stat().st_size

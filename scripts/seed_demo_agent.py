@@ -3,7 +3,6 @@ import os
 from datetime import UTC, datetime
 
 from sqlalchemy import select
-from voice_api.core.config import get_settings
 from voice_api.db.session import SessionFactory
 from voice_api.models import (
     Agent,
@@ -94,7 +93,6 @@ Northstar Software Studio is an elite software engineering agency specializing i
 
 async def seed() -> None:
     print("Seeding Northstar SDR Agent, Tools, and Integrations into PostgreSQL...")
-    settings = get_settings()
 
     async with SessionFactory() as session:
         # 1. Initialize WorkspaceSettings
@@ -542,7 +540,6 @@ async def seed() -> None:
         print(f"Agent Version ID:   {agent_ver.id}")
         print(f"Contact ID:         {contact.id}")
         print(f"Endpoint ID:        {endpoint.id}")
-        print(f"Operator Token:     {settings.operator_token}")
         print("=" * 80)
 
 

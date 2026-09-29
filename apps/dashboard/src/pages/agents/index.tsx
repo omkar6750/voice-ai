@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { AlertTriangle, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import { useOrganizationAccess } from "@/app/access";
 import { PageBody, PageHeader, LoadState } from "@/components/record-page";
 import { Button } from "@/components/ui/button";
 import {
@@ -52,6 +53,7 @@ type AgentImpact = {
 
 export function AgentsPage() {
   const api = useApi();
+  const { canManage } = useOrganizationAccess();
   const navigate = useNavigate();
   const { data, loading, error, reload } = useResource<{ agents: Agent[] }>(
     "/agents",
@@ -212,7 +214,7 @@ export function AgentsPage() {
                     <Button variant="link" asChild>
                       <Link to={`/agents/${agent.id}`}>Versions</Link>
                     </Button>
-                    <Button
+                    {canManage && <Button
                       variant="ghost"
                       size="icon-sm"
                       className="text-destructive hover:bg-destructive/10"
@@ -221,7 +223,7 @@ export function AgentsPage() {
                     >
                       <Trash2 className="size-4" />
                       <span className="sr-only">Delete</span>
-                    </Button>
+                    </Button>}
                   </div>
                 </TableCell>
               </TableRow>

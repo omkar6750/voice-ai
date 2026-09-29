@@ -17,8 +17,8 @@ OTHER_SID = "CA" + "b" * 32
 @pytest.mark.parametrize(
     "values",
     [
-        {"public_base_url": None, "operator_token": "token"},
-        {"public_base_url": "https://voice.example.com", "operator_token": None},
+        {"public_base_url": None, "runtime_service_token": "token"},
+        {"public_base_url": "https://voice.example.com", "runtime_service_token": None},
     ],
 )
 async def test_dispatch_configuration_fails_before_persisting_queued_request(monkeypatch, values):
@@ -77,7 +77,7 @@ def make_rows(*, status="queued", run_status="queued", metadata=None, sid=None):
 
 
 def settings(**overrides):
-    values = {"public_base_url": "https://voice.example.test", "operator_token": "operator-token"}
+    values = {"public_base_url": "https://voice.example.test", "runtime_service_token": "runtime-token"}
     values.update(overrides)
     return SimpleNamespace(**values)
 
@@ -245,7 +245,7 @@ async def test_cancelled_create_is_recorded_uncertain_and_propagates(monkeypatch
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "configuration",
-    [settings(operator_token=None), settings(public_base_url="http://voice.example.test")],
+    [settings(runtime_service_token=None), settings(public_base_url="http://voice.example.test")],
 )
 async def test_invalid_public_url_or_missing_operator_token_prevents_credential_resolution(
     monkeypatch, configuration

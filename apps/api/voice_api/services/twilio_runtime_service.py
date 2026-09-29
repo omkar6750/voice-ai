@@ -20,7 +20,9 @@ from voice_runtime.execution.native import NativePipelineHost
 from voice_runtime.execution.spool import DurableSpool
 from voice_runtime.telephony.twilio_session import TERMINAL_STATUSES, TwilioMediaSession
 
+from voice_api.core.security import runtime_token_for_run
 from voice_api.db.session import SessionFactory
+from voice_api.db.tenant_scope import bind_run_organization
 from voice_api.models import Call, Run
 from voice_api.models.common import now
 from voice_api.schemas.diagnostics import DiagnosticInput
@@ -68,7 +70,8 @@ async def run_twilio_pipeline(
         timeout=20,
         follow_redirects=False,
     ) as client:
-        ingestor = ApiEvidenceIngestor(client, run_id, settings.operator_token or "")
+        runtime_token = runtime_token_for_run(settings.runtime_service_token or "", run_id)
+        ingestor = ApiEvidenceIngestor(client, run_id, runtime_token)
         try:
             host = NativePipelineHost(
                 run_id=run_id,
@@ -88,7 +91,7 @@ async def run_twilio_pipeline(
                     settings.cartesia_api_key,
                     settings.gemini_api_key,
                     auth_token,
-                    settings.operator_token,
+                    settings.runtime_service_token,
                 )
                 if s
             )
@@ -149,7 +152,7 @@ async def run_twilio_pipeline(
                         async with asyncio.timeout(20):
                             response = await client.post(
                                 f"/api/runs/{run_id}/artifacts",
-                                headers={"Authorization": f"Bearer {settings.operator_token}"},
+                                headers={"X-Voice-Runtime-Token": runtime_token},
                                 json={
                                     "id": str(uuid5(NAMESPACE_URL, f"{run_id}/{kind}")),
                                     "kind": kind,
@@ -203,6 +206,7 @@ async def _persist_twilio_outcome(
 ) -> None:
     termination = media.termination
     async with SessionFactory() as db:
+        await bind_run_organization(db, run_id)
         # Match callback lock order so finalization cannot overwrite a
         # concurrent provider-terminal event or deadlock Call/Run locks.
         call = await db.get(Call, call_id, with_for_update=True, populate_existing=True)

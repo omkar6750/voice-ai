@@ -53,4 +53,3 @@ class GeminiEmbedder:
         if not values or len(values) != DIMENSIONS:
             raise ValueError(f"Expected {DIMENSIONS} finite embedding dimensions, received {len(values)}")
         return normalize(values)
-

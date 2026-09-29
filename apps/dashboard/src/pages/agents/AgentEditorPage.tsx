@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import { useOrganizationAccess } from "@/app/access";
 import {
   LoadState,
   PageBody,
@@ -49,6 +50,7 @@ export function AgentEditorPage() {
   const { agentId = "", versionId = "" } = useParams();
   const [params, setParams] = useSearchParams();
   const api = useApi();
+  const { canManage } = useOrganizationAccess();
   const resource = useResource<{ versions: AgentVersion[] }>(
     `/agents/${agentId}/versions`,
   );
@@ -165,7 +167,7 @@ export function AgentEditorPage() {
     }
   }
 
-  const disabled = stored?.status !== "draft";
+  const disabled = stored?.status !== "draft" || !canManage;
   const registeredTools = tools.data?.tools.map((tool) => tool.name) ?? [];
   return (
     <PageBody>
@@ -192,6 +194,14 @@ export function AgentEditorPage() {
                 {busy ? "Saving…" : "Save draft"}
               </Button>
             )}
+            <Button asChild variant="outline">
+              <Link to={`/agents/${agentId}`}>Versions</Link>
+            </Button>
+          </div>
+        }
+        readOnlyAction={
+          <div className="flex items-center gap-2">
+            {stored && <StatusBadge value={stored.status} />}
             <Button asChild variant="outline">
               <Link to={`/agents/${agentId}`}>Versions</Link>
             </Button>

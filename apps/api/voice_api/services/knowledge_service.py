@@ -9,8 +9,13 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_runtime.contracts.knowledge import RetrievalConfig
 
+from voice_api.db.tenant_scope import (
+    bind_knowledge_source_organization,
+    bind_organization,
+    required_organization,
+)
 from voice_api.knowledge.embeddings import MODEL, Embedder, normalize
-from voice_api.knowledge.ingestion import chunk_markdown
+from voice_api.knowledge.ingestion import Chunk, chunk_markdown
 from voice_api.models import KnowledgeBase, KnowledgeChunk, KnowledgeSource
 from voice_api.schemas.knowledge import SearchHit, ingestion_config
 
@@ -29,17 +34,26 @@ async def activate_build(
     session: AsyncSession,
     source_id: str,
     ingestion_token: str,
-    chunks: list,
+    chunks: list[Chunk],
     vectors: list[list[float]],
 ) -> bool:
     """Caller owns transaction; source lock serializes deletion/rebuild/publication."""
     if len(chunks) != len(vectors) or not chunks:
         raise ValueError("Build must contain an embedding for every chunk")
     vectors = [normalize(vector) for vector in vectors]
+    org_id = await bind_knowledge_source_organization(session, source_id, missing_ok=True)
+    if org_id is None:
+        return False
     source = await locked_source(session, source_id)
     if not build_is_current(source, ingestion_token):
         return False
-    await session.execute(delete(KnowledgeChunk).where(KnowledgeChunk.source_id == source_id))
+    if not source.org_id or source.org_id != org_id:
+        return False
+    await session.execute(
+        delete(KnowledgeChunk).where(
+            KnowledgeChunk.source_id == source_id, KnowledgeChunk.org_id == source.org_id
+        )
+    )
     session.add_all(
         [
             KnowledgeChunk(
@@ -72,12 +86,18 @@ async def build_source(
     The persisted ingestion_token acts as a fencing token. A crash leaves a visible building
     source that can be explicitly rebuilt; existing active chunks remain searchable.
     """
+    org_id: str | None = None
     try:
         async with session_factory() as session, session.begin():
+            org_id = await bind_knowledge_source_organization(session, source_id)
             source = await session.get(KnowledgeSource, source_id)
             if not build_is_current(source, ingestion_token):
                 return False
+            if not source.org_id or source.org_id != org_id:
+                return False
             base = await session.get(KnowledgeBase, source.knowledge_base_id)
+            if base is None:
+                return False
             config = ingestion_config(base.config)
             content, title = source.content, source.title
         if len(content) > config.extraction_max_chars:
@@ -87,10 +107,14 @@ async def build_source(
         )
         vectors = [await embedder.embed(chunk.content, title=title) for chunk in chunks]
         async with session_factory() as session, session.begin():
+            bind_organization(session.sync_session, org_id)
             return await activate_build(session, source_id, ingestion_token, chunks, vectors)
     except Exception:
         # Never persist provider response bodies, URLs, credentials, or source content.
         async with session_factory() as session, session.begin():
+            if org_id is None:
+                return False
+            bind_organization(session.sync_session, org_id)
             source = await locked_source(session, source_id)
             if build_is_current(source, ingestion_token):
                 source.status = "failed"
@@ -120,8 +144,11 @@ SEARCH_SQL = text("""
 WITH corpus AS MATERIALIZED (
     SELECT c.id AS chunk_id, c.source_id, c.ordinal, c.content, c.embedding,
            c.metadata_json, s.title, s.source_path
-    FROM knowledge_chunks c JOIN knowledge_sources s ON s.id = c.source_id
+    FROM knowledge_chunks c
+    JOIN knowledge_sources s ON s.id = c.source_id
+    JOIN knowledge_bases b ON b.id = s.knowledge_base_id
     WHERE s.knowledge_base_id = :base_id AND c.embedding_model = :model
+      AND b.org_id = :org_id AND s.org_id = :org_id AND c.org_id = :org_id
 ), vectors AS (
     SELECT chunk_id, row_number() OVER (
         ORDER BY embedding <=> CAST(:embedding AS vector), chunk_id
@@ -154,6 +181,7 @@ ORDER BY scores.score DESC, c.chunk_id LIMIT :top_k
 
 
 def apply_budget(hits: list[SearchHit], budget: int) -> list[SearchHit]:
+    """Bound retrieved content by UTF-8 bytes; provenance needs a separate budget."""
     result = []
     for hit in hits:
         content = hit.content.encode("utf-8")[:budget].decode("utf-8", errors="ignore")
@@ -177,9 +205,10 @@ async def search(
         raise ValueError("Search query must not be blank")
     if config.vector_weight and embedder is None:
         raise ValueError("Vector search requires a configured embedding adapter")
+    org_id = required_organization(session.sync_session)
     async with asyncio.timeout(config.timeout_secs):
         vector = (
-            await embedder.embed(query, query=True)
+            normalize(await embedder.embed(query, query=True))
             if config.vector_weight
             else [1.0] + [0.0] * 767
         )
@@ -191,6 +220,7 @@ async def search(
             SEARCH_SQL,
             {
                 "base_id": base_id,
+                "org_id": org_id,
                 "model": MODEL,
                 "query": query,
                 "embedding": "[" + ",".join(str(value) for value in vector) + "]",

@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import json
 import math
-import os
 import re
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
@@ -51,7 +50,6 @@ from voice_runtime.diagnostics import (
     provider_error_diagnostic,
     text_error_diagnostic,
 )
-from voice_runtime.execution.callback_http import CallbackHTTPError, post_callback_json
 from voice_runtime.execution.classifier import (
     normalize_classifier_result,
     run_selected_classifier,
@@ -584,9 +582,7 @@ class NativePipelineHost:
                     questions = {
                         key: value.model_dump() for key, value in default_jev_questions().items()
                     }
-                jev_key = getattr(self.settings, "jev_api_key", None) or os.getenv(
-                    "VOICE_JEV_API_KEY", ""
-                )
+                jev_key = getattr(self.settings, "jev_api_key", None) or ""
                 return await run_jev_classification(
                     api_key=jev_key,
                     transcript=kwargs["transcript"],
@@ -650,12 +646,8 @@ class NativePipelineHost:
         connection_id: str | None = None,
     ) -> tuple[str, str, str | None, str]:
         """Resolve a pinned integration; template media IDs are already provider IDs."""
-        access_token = getattr(self.settings, "whatsapp_access_token", None) or os.getenv(
-            "VOICE_WHATSAPP_ACCESS_TOKEN", ""
-        )
-        phone_number_id = getattr(self.settings, "whatsapp_phone_number_id", None) or os.getenv(
-            "VOICE_WHATSAPP_PHONE_NUMBER_ID", ""
-        )
+        access_token = getattr(self.settings, "whatsapp_access_token", None) or ""
+        phone_number_id = getattr(self.settings, "whatsapp_phone_number_id", None) or ""
         if connection_id:
             # An explicitly pinned tool must fail closed instead of falling back
             # to unrelated process-wide WhatsApp credentials.
@@ -665,10 +657,12 @@ class NativePipelineHost:
         try:
             from sqlalchemy import select
             from voice_api.db.session import SessionFactory
+            from voice_api.db.tenant_scope import bind_run_organization
             from voice_api.models import IntegrationConnection, IntegrationSecret
             from voice_api.services.vault_service import CredentialVault
 
             async with SessionFactory() as session:
+                await bind_run_organization(session, self.run_id)
                 query = select(IntegrationConnection).where(
                     IntegrationConnection.provider == "whatsapp",
                     IntegrationConnection.enabled.is_(True),
@@ -751,9 +745,11 @@ class NativePipelineHost:
                 try:
                     from sqlalchemy import select
                     from voice_api.db.session import SessionFactory
+                    from voice_api.db.tenant_scope import bind_run_organization
                     from voice_api.models import InboundWebhookMessage
 
                     async with SessionFactory() as db_session:
+                        await bind_run_organization(db_session, self.run_id)
                         inbound_row = await db_session.scalar(
                             select(InboundWebhookMessage)
                             .where(
@@ -797,9 +793,11 @@ class NativePipelineHost:
                 try:
                     from sqlalchemy import select
                     from voice_api.db.session import SessionFactory
+                    from voice_api.db.tenant_scope import bind_run_organization
                     from voice_api.models import InboundWebhookMessage
 
                     async with SessionFactory() as db_session:
+                        await bind_run_organization(db_session, self.run_id)
                         inbound_row = await db_session.scalar(
                             select(InboundWebhookMessage)
                             .where(
@@ -1062,9 +1060,7 @@ class NativePipelineHost:
                         from voice_runtime.contracts.cadence import default_jev_questions
 
                         questions = {k: v.model_dump() for k, v in default_jev_questions().items()}
-                    jev_key = getattr(self.settings, "jev_api_key", None) or os.getenv(
-                        "VOICE_JEV_API_KEY", ""
-                    )
+                    jev_key = getattr(self.settings, "jev_api_key", None) or ""
                     return await run_jev_classification(
                         api_key=jev_key,
                         transcript=kwargs["transcript"],
@@ -1088,22 +1084,13 @@ class NativePipelineHost:
                 )
 
             if name in ("check_callback_availability", "book_callback"):
-                api_base_url = (
-                    getattr(self.settings, "api_base_url", None)
-                    or os.getenv("VOICE_API_BASE_URL")
-                    or "http://localhost:8000"
-                ).rstrip("/")
-                endpoint = (
-                    f"{api_base_url}/api/v1/callback-scheduling/availability"
-                    if name == "check_callback_availability"
-                    else f"{api_base_url}/api/v1/callback-scheduling/book"
-                )
                 contact = (
                     self._snapshot.get("_resolved", {}).get("contact")
                     or self._snapshot.get("contact_snapshot")
                     or {}
                 )
                 payload = {
+                    "run_id": self.run_id,
                     "agent_version_id": self._snapshot.get("agent_version_id"),
                     "contact_id": contact.get("id") or self._snapshot.get("contact_id"),
                 }
@@ -1120,21 +1107,10 @@ class NativePipelineHost:
                             "reason": args.get("reason", "Customer requested callback"),
                         }
                     )
-                token = getattr(self.settings, "operator_token", None) or os.getenv(
-                    "VOICE_OPERATOR_TOKEN", ""
-                )
                 try:
-                    async with httpx.AsyncClient(timeout=20) as client:
-                        return await post_callback_json(client, endpoint, payload, token)
-                except CallbackHTTPError as exc:
-                    logger.warning("human callback tool received HTTP {}", exc.status_code)
-                    return {
-                        "status": "error",
-                        "error": f"Callback scheduling service returned HTTP {exc.status_code}",
-                    }
-                except ValueError as exc:
-                    logger.warning("human callback tool received invalid JSON result: {}", exc)
-                    return {"status": "error", "error": str(exc)}
+                    from voice_api.services.local_runtime_service import local_callback
+
+                    return await local_callback(name, self.run_id, payload)
                 except Exception as exc:
                     logger.error("human callback tool failed ({})", type(exc).__name__)
                     return {"status": "error", "error": "Callback scheduling service unavailable"}
@@ -1172,6 +1148,7 @@ class NativePipelineHost:
                     from uuid import uuid4
 
                     from voice_api.db.session import SessionFactory
+                    from voice_api.db.tenant_scope import bind_run_organization
                     from voice_api.models import Callback
                     from voice_api.services.calendar_service import (
                         SchedulingError,
@@ -1186,6 +1163,7 @@ class NativePipelineHost:
                     formatted_time = format_local_callback_time(due_at, timezone)
                     request_key = f"{self.run_id}_{uuid4().hex[:8]}"
                     async with SessionFactory() as session:
+                        await bind_run_organization(session, self.run_id)
                         cb = Callback(
                             request_key=request_key,
                             contact_id=contact_id,
@@ -1243,19 +1221,19 @@ class NativePipelineHost:
                 all_hits = []
                 try:
                     from voice_api.db.session import SessionFactory
+                    from voice_api.db.tenant_scope import bind_run_organization
                     from voice_api.knowledge.embeddings import GeminiEmbedder
                     from voice_api.services.knowledge_service import search
 
                     from voice_runtime.contracts.knowledge import RetrievalConfig
 
-                    gemini_key = getattr(self.settings, "gemini_api_key", None) or os.getenv(
-                        "GEMINI_API_KEY", ""
-                    )
+                    gemini_key = getattr(self.settings, "gemini_api_key", None) or ""
                     retrieval_cfg = RetrievalConfig.model_validate(
                         self._snapshot.get("retrieval", {})
                     )
 
                     async with SessionFactory() as db_session, httpx.AsyncClient() as http_client:
+                        await bind_run_organization(db_session, self.run_id)
                         embedder = GeminiEmbedder(gemini_key, http_client) if gemini_key else None
                         hits = await search(db_session, kb_id, query_text, retrieval_cfg, embedder)
                         all_hits.extend(hits)
@@ -1455,9 +1433,11 @@ class NativePipelineHost:
         provider_message_id=None,
     ):
         from voice_api.db.session import SessionFactory
+        from voice_api.db.tenant_scope import bind_run_organization
         from voice_api.services.run_context_service import enqueue_context_event
 
         async with SessionFactory() as session:
+            await bind_run_organization(session, self.run_id)
             await enqueue_context_event(
                 session,
                 run_id=self.run_id,
@@ -1479,9 +1459,11 @@ class NativePipelineHost:
 
         from sqlalchemy import select
         from voice_api.db.session import SessionFactory
+        from voice_api.db.tenant_scope import bind_run_organization
         from voice_api.models import RunContextEvent
 
         async with SessionFactory() as session:
+            await bind_run_organization(session, self.run_id)
             events = (
                 await session.scalars(
                     select(RunContextEvent)
@@ -1531,10 +1513,12 @@ class NativePipelineHost:
 
         from sqlalchemy import select
         from voice_api.db.session import SessionFactory
+        from voice_api.db.tenant_scope import bind_run_organization
         from voice_api.models import RunContextEvent
 
         serialized = "\n".join(str(message.get("content", "")) for message in messages)
         async with SessionFactory() as session:
+            await bind_run_organization(session, self.run_id)
             events = (
                 await session.scalars(
                     select(RunContextEvent).where(
@@ -1553,7 +1537,9 @@ class NativePipelineHost:
             if changed:
                 await session.commit()
 
-    async def prepare(self, snapshot: dict, tracker: ExchangeTracker, *, transport=None) -> None:
+    async def prepare(
+        self, snapshot: dict, tracker: ExchangeTracker, *, transport=None, enable_rtvi=False
+    ) -> None:
         self.tracker, self._snapshot = tracker, snapshot
         self._nodes = {node["id"]: node for node in snapshot["flow"]["nodes"]}
         action_errors = validate_node_actions(
@@ -1812,7 +1798,7 @@ class NativePipelineHost:
         self.worker = PipelineWorker(
             pipeline,
             observers=[self.observer, self.capture],
-            enable_rtvi=False,
+            enable_rtvi=enable_rtvi,
             params=PipelineParams(
                 enable_metrics=True,
                 enable_usage_metrics=True,
@@ -2100,10 +2086,12 @@ class NativePipelineHost:
                 if self.run_id:
                     from sqlalchemy import update
                     from voice_api.db.session import SessionFactory
+                    from voice_api.db.tenant_scope import bind_run_organization
                     from voice_api.models import RunContextEvent
 
                     try:
                         async with SessionFactory() as session:
+                            await bind_run_organization(session, self.run_id)
                             await session.execute(
                                 update(RunContextEvent)
                                 .where(

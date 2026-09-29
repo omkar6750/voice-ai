@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class CreateBrowserSessionRequest(BaseModel):
@@ -20,24 +20,4 @@ class BrowserSessionResponse(BaseModel):
     contact_id: str | None = None
     created_at: datetime | None = None
     expires_at: datetime | None = None
-
-
-class WebRTCOfferRequest(BaseModel):
-    sdp: str
-    type: str = "offer"
-    pc_id: str | None = None
-    restart_pc: bool | None = None
-    request_data: Any | None = None
-
-
-class IceCandidatePatch(BaseModel):
-    candidate: str
-    sdp_mid: str = Field(default="0", alias="sdpMid")
-    sdp_mline_index: int = Field(default=0, alias="sdpMLineIndex")
-
-    model_config = {"populate_by_name": True}
-
-
-class WebRTCPatchRequest(BaseModel):
-    pc_id: str
-    candidates: list[IceCandidatePatch]
+    sample_rate: int = 16000

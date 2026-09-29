@@ -4,14 +4,25 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from voice_api.api.v1.api import api_router
+from voice_api.core.config import get_settings
 
 app = FastAPI(title="Voice AI API", version="0.2.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        part.strip() for part in get_settings().clerk_authorized_parties.split(",") if part.strip()
+    ],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Platform-Support-Session"],
+)
 
 
 class DashboardFiles(StaticFiles):

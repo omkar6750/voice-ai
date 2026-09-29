@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import select
 from voice_api.models import Call, Run, WorkspaceSettings
 from voice_api.models.common import new_id
 from voice_api.services.resolution_service import fingerprint
@@ -113,7 +114,7 @@ async def test_callback_defaults_window_and_single_launch(client, database):
     launch = {"endpoint_id": body["endpoint_id"], "mode": "automatic"}
     path = f"/api/callbacks/{callback_id}/launch"
     assert (await client.post(path, json=launch)).status_code == 409
-    settings = await database.get(WorkspaceSettings, 1)
+    settings = await database.scalar(select(WorkspaceSettings).where(WorkspaceSettings.id == 1))
     if settings is None:
         settings = WorkspaceSettings(id=1, config={})
         database.add(settings)
@@ -156,5 +157,5 @@ async def test_snapshot_logging_and_final_outcome(client, database):
         response = await client.post(f"/api/runs/{run_id}/progress", json=outcome)
         assert response.status_code == 200, response.text
     await database.refresh(run)
-    assert run.final_state["api_key"] == "<redacted>"
+    assert run.final_state["api_key"] == "[REDACTED]"
     assert run.status == "completed"

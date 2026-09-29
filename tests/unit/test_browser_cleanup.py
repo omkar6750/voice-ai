@@ -10,9 +10,8 @@ from voice_api.services.browser_session_service import BrowserSessionContext
 
 
 def make_context() -> BrowserSessionContext:
-    context = BrowserSessionContext("session-id", "run-id", {})
+    context = BrowserSessionContext("session-id", "run-id", {}, "org-test")
     context.host = AsyncMock()
-    context.request_handler = AsyncMock()
     return context
 
 
@@ -24,7 +23,6 @@ async def test_repeated_close_runtime_closes_each_resource_once() -> None:
     await context.close_runtime()
 
     context.host.close.assert_awaited_once()
-    context.request_handler.close.assert_awaited_once()
     assert context.cleanup_complete
 
 
@@ -55,12 +53,11 @@ async def test_concurrent_close_runtime_closes_each_resource_once() -> None:
     await asyncio.gather(first, second)
 
     context.host.close.assert_awaited_once()
-    context.request_handler.close.assert_awaited_once()
     assert context.cleanup_complete
 
 
 @pytest.mark.asyncio
-async def test_host_close_failure_still_closes_handler_and_is_not_retried() -> None:
+async def test_host_close_failure_is_not_retried() -> None:
     context = make_context()
     host_error = RuntimeError("host close failed")
     context.host.close.side_effect = host_error
@@ -70,45 +67,12 @@ async def test_host_close_failure_still_closes_handler_and_is_not_retried() -> N
 
     assert exc_info.value is host_error
     context.host.close.assert_awaited_once()
-    context.request_handler.close.assert_awaited_once()
     assert not context.cleanup_complete
 
     with pytest.raises(RuntimeError) as repeated:
         await context.close_runtime()
     assert repeated.value is host_error
     context.host.close.assert_awaited_once()
-    context.request_handler.close.assert_awaited_once()
-    assert not context.cleanup_complete
-
-
-@pytest.mark.asyncio
-async def test_first_close_error_is_propagated_after_both_closes_are_attempted() -> None:
-    context = make_context()
-    host_error = RuntimeError("host close failed")
-    context.host.close.side_effect = host_error
-    context.request_handler.close.side_effect = RuntimeError("handler close failed")
-
-    with pytest.raises(RuntimeError) as exc_info:
-        await context.close_runtime()
-
-    assert exc_info.value is host_error
-    context.host.close.assert_awaited_once()
-    context.request_handler.close.assert_awaited_once()
-    assert not context.cleanup_complete
-
-
-@pytest.mark.asyncio
-async def test_handler_close_failure_leaves_cleanup_incomplete() -> None:
-    context = make_context()
-    handler_error = RuntimeError("handler close failed")
-    context.request_handler.close.side_effect = handler_error
-
-    with pytest.raises(RuntimeError) as exc_info:
-        await context.close_runtime()
-
-    assert exc_info.value is handler_error
-    context.host.close.assert_awaited_once()
-    context.request_handler.close.assert_awaited_once()
     assert not context.cleanup_complete
 
 
@@ -130,5 +94,4 @@ async def test_pipeline_finalizer_cleanup_does_not_deadlock_external_close() -> 
     await asyncio.wait_for(context.close_runtime(), timeout=1)
 
     context.host.close.assert_awaited_once()
-    context.request_handler.close.assert_awaited_once()
     assert context.cleanup_complete

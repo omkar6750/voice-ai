@@ -1,6 +1,7 @@
 """Operator catalog: live chat models, cached in process, and runtime-fixed services."""
 
 import asyncio
+import hashlib
 import time
 
 import httpx
@@ -15,11 +16,12 @@ _lock = asyncio.Lock()
 
 
 async def _models(provider: str, key: str) -> tuple[list[str], str]:
-    cached = _cache.get(provider)
+    cache_key = f"{provider}:{hashlib.sha256(key.encode()).hexdigest()}"
+    cached = _cache.get(cache_key)
     if cached and cached[0] > time.monotonic():
         return cached[1], "configured"
     async with _lock:
-        cached = _cache.get(provider)
+        cached = _cache.get(cache_key)
         if cached and cached[0] > time.monotonic():
             return cached[1], "configured"
         try:
@@ -59,7 +61,7 @@ async def _models(provider: str, key: str) -> tuple[list[str], str]:
                         if not page_token:
                             break
             models = sorted(set(models))
-            _cache[provider] = (time.monotonic() + _TTL_SECONDS, models)
+            _cache[cache_key] = (time.monotonic() + _TTL_SECONDS, models)
             return models, "configured"
         except (httpx.HTTPError, KeyError, ValueError, TypeError):
             # Keep a stale catalog on transient provider failures, never fabricate models.
@@ -92,7 +94,9 @@ async def get_provider_registry(settings: Settings) -> ProviderCatalogResponse:
         providers.append(
             {
                 "provider": name,
-                "models": sorted({model for models in capability["models_by_slot"].values() for model in models}),
+                "models": sorted(
+                    {model for models in capability["models_by_slot"].values() for model in models}
+                ),
                 "status": "configured" if key else "unconfigured",
                 **capability,
             }

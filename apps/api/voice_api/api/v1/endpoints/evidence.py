@@ -8,8 +8,9 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from voice_api.api.deps import get_session, require_operator
+from voice_api.api.deps import get_session, require_runtime_service
 from voice_api.core.security import safe_evidence
+from voice_api.db.tenant_scope import bind_run_organization
 from voice_api.models import (
     ClassifierContextDelivery,
     ClassifierResult,
@@ -47,7 +48,7 @@ from voice_runtime.contracts.evidence import (
 
 router = APIRouter(tags=["evidence"])
 Session = Depends(get_session)
-Operator = Depends(require_operator)
+Operator = Depends(require_runtime_service)
 Id = Annotated[str, Field(min_length=1, max_length=36)]
 
 
@@ -94,6 +95,13 @@ def at_ns(value: int) -> datetime:
 def verify_same(existing, fields: dict) -> None:
     if any(getattr(existing, key) != value for key, value in fields.items()):
         raise HTTPException(409, "Evidence identity conflicts with existing record")
+
+
+def verify_delivery_replay(existing, fields: dict) -> None:
+    # A replayed delivery can arrive after its later consumption was persisted.
+    if existing.status not in {"delivered", "consumed"}:
+        raise HTTPException(409, "Evidence delivery has an incompatible state")
+    verify_same(existing, {key: value for key, value in fields.items() if key != "status"})
 
 
 async def store_record(session: AsyncSession, run_id: str, record) -> None:
@@ -254,7 +262,7 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
         }
         delivery = await session.get(ClassifierContextDelivery, record.delivery_id)
         if delivery:
-            verify_same(delivery, fields)
+            verify_delivery_replay(delivery, fields)
         else:
             existing = await session.scalar(
                 select(ClassifierContextDelivery).where(
@@ -262,7 +270,7 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
                 )
             )
             if existing:
-                verify_same(existing, fields)
+                verify_delivery_replay(existing, fields)
             else:
                 session.add(ClassifierContextDelivery(id=record.delivery_id, **fields))
         await session.flush()
@@ -460,11 +468,11 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
                 select(ToolContextDelivery).where(ToolContextDelivery.result_id == record.result_id)
             )
             if existing is not None:
-                verify_same(existing, fields)
+                verify_delivery_replay(existing, fields)
             else:
                 session.add(ToolContextDelivery(id=record.delivery_id, **fields))
         else:
-            verify_same(delivery, fields)
+            verify_delivery_replay(delivery, fields)
         await session.flush()
         return
     if isinstance(record, ToolResultConsumed):
@@ -590,6 +598,7 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
 async def ingest(
     run_id: str, body: EvidenceBatch, session: AsyncSession = Session, _: None = Operator
 ) -> dict:
+    await bind_run_organization(session, run_id)
     if any(record.run_id != run_id for record in body.records):
         raise HTTPException(422, "Batch contains evidence for another run")
     # Serialize batches per run; retries see committed records before making changes.
@@ -610,6 +619,7 @@ async def ingest(
 
 
 async def locked_run(session: AsyncSession, run_id: str) -> Run:
+    await bind_run_organization(session, run_id)
     run = await session.get(Run, run_id, with_for_update=True)
     if run is None:
         raise HTTPException(404, "Run not found")
@@ -710,6 +720,7 @@ async def record_result(
     session: AsyncSession = Session,
     _: None = Operator,
 ) -> dict:
+    await bind_run_organization(session, run_id)
     body.payload = safe_evidence(body.payload)
     tool = await session.get(ToolInvocation, invocation_id, with_for_update=True)
     if tool is None or tool.run_id != run_id:
@@ -757,6 +768,7 @@ async def consume_result(
     session: AsyncSession = Session,
     _: None = Operator,
 ) -> dict:
+    await bind_run_organization(session, run_id)
     result = await session.get(ToolInvocationResult, result_id, with_for_update=True)
     exchange = await session.get(Exchange, body.exchange_id)
     if result is None or result.run_id != run_id:

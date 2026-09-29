@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from voice_api.api.v1.endpoints import calendar as calendar_endpoint
 from voice_api.models import CalendarIntegration
+from voice_api.services import calendar_service
 from voice_api.services.calendar_service import (
     BusyPeriod,
     SchedulingError,
@@ -167,6 +168,11 @@ async def test_availability_provider_failure_is_not_reported_as_empty_slots(monk
 
 @pytest.mark.asyncio
 async def test_availability_uses_contact_timezone_and_skips_disconnected_person(monkeypatch):
+    monkeypatch.setattr(
+        calendar_service,
+        "get_settings",
+        lambda: SimpleNamespace(callback_slot_signing_key="test-key"),
+    )
     role = SimpleNamespace(key="sales", enabled=True)
     people = [
         SimpleNamespace(

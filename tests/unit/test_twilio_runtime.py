@@ -60,6 +60,7 @@ def runtime(monkeypatch, tmp_path):
         yield db
 
     monkeypatch.setattr(service, "SessionFactory", session_factory)
+    monkeypatch.setattr(service, "bind_run_organization", AsyncMock(return_value="org-test"))
     persist = AsyncMock()
     monkeypatch.setattr(service, "persist_diagnostic", persist)
     spool = MagicMock()
@@ -109,7 +110,7 @@ def runtime(monkeypatch, tmp_path):
     media = TwilioMediaSession("stream-id", termination, AsyncMock(), rest)
     settings = SimpleNamespace(
         recordings_dir=str(tmp_path / "recordings"),
-        operator_token="operator-secret",
+        runtime_service_token="runtime-secret",
         groq_api_key="provider-secret",
         jev_api_key="",
         sarvam_api_key="",

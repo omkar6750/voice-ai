@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { Activity, Edit3, Phone, Plus, ShieldCheck, Trash2, User } from "lucide-react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import { AdminOnly } from "@/app/access";
 import {
   LoadState,
   PageBody,
@@ -191,6 +192,7 @@ export function ContactDetailPage() {
             </Button>
           </div>
         }
+        readOnlyAction={<Button asChild variant="outline"><Link to="/contacts">All contacts</Link></Button>}
       />
 
       <LoadState
@@ -390,7 +392,7 @@ export function ContactDetailPage() {
       </LoadState>
 
       {/* Edit Contact Sheet */}
-      <Sheet open={editOpen} onOpenChange={setEditOpen}>
+      <AdminOnly><Sheet open={editOpen} onOpenChange={setEditOpen}>
         <SheetContent>
           <form onSubmit={updateContact} className="flex min-h-full flex-col justify-between gap-4">
             <SheetHeader className="pb-1">
@@ -548,7 +550,7 @@ export function ContactDetailPage() {
             </SheetFooter>
           </form>
         </SheetContent>
-      </Sheet>
+      </Sheet></AdminOnly>
     </PageBody>
   );
 }

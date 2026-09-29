@@ -292,11 +292,10 @@ def sign_slot(payload: dict) -> str:
         .decode()
         .rstrip("=")
     )
-    key = (
-        get_settings().integration_active_key
-        or get_settings().operator_token
-        or "development-slot-key"
-    ).encode()
+    key_value = get_settings().callback_slot_signing_key
+    if not key_value:
+        raise SchedulingError("Callback slot signing is not configured")
+    key = key_value.encode()
     signature = hmac.new(key, raw.encode(), hashlib.sha256).hexdigest()
     return f"{raw}.{signature}"
 
@@ -306,11 +305,10 @@ def verify_slot(value: str) -> dict:
         raw, signature = value.split(".", 1)
     except ValueError as exc:
         raise SchedulingError("Invalid callback slot") from exc
-    key = (
-        get_settings().integration_active_key
-        or get_settings().operator_token
-        or "development-slot-key"
-    ).encode()
+    key_value = get_settings().callback_slot_signing_key
+    if not key_value:
+        raise SchedulingError("Callback slot signing is not configured")
+    key = key_value.encode()
     if not hmac.compare_digest(signature, hmac.new(key, raw.encode(), hashlib.sha256).hexdigest()):
         raise SchedulingError("Invalid callback slot")
     payload = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))

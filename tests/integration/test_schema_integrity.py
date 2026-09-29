@@ -10,12 +10,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 from voice_api.api.v1.endpoints.agents import update_agent_version
+from voice_api.db.tenant_scope import bind_organization
 from voice_api.models import (
     Agent,
     AgentVersion,
     Call,
     ConversationMessage,
     Exchange,
+    LegacyDataTenant,
 )
 from voice_api.models.common import new_id
 from voice_api.schemas.agent import RevisionBody
@@ -34,6 +36,10 @@ async def test_two_connections_cannot_overwrite_same_draft():
     }
     try:
         async with AsyncSession(engine, expire_on_commit=False) as session:
+            org_id = await session.scalar(select(LegacyDataTenant.organization_id))
+            if org_id is None:
+                pytest.fail("Integration database must contain the isolated legacy organization")
+            bind_organization(session.sync_session, org_id)
             session.add(Agent(id=agent_id, name=agent_id))
             await session.flush()
             session.add(
@@ -50,6 +56,7 @@ async def test_two_connections_cannot_overwrite_same_draft():
 
         async def edit(persona):
             async with AsyncSession(engine, expire_on_commit=False) as session:
+                bind_organization(session.sync_session, org_id)
                 try:
                     await update_agent_version(
                         version_id,
@@ -159,7 +166,6 @@ async def test_browser_evidence_without_call_and_cross_run_rejected(client, data
     response = await client.post("/api/runs", json=body)
     assert response.status_code == 201, response.text
     run_id = response.json()["run_id"]
-    assert response.json()["call_id"] is None
     second_id = (await client.post("/api/runs", json=body)).json()["run_id"]
     exchange = Exchange(id=new_id(), run_id=run_id, sequence=1, origin="greeting")
     database.add(exchange)

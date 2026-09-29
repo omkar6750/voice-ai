@@ -9,7 +9,9 @@ from pydantic import AwareDatetime, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from voice_api.api.deps import get_session, require_operator
+from voice_api.api.deps import get_session, require_legacy_owner, require_runtime_service
+from voice_api.core.security import allow_organization_member
+from voice_api.db.tenant_scope import bind_contact_organization
 from voice_api.models import AgentVersion, Call, Callback, Contact, Run, WorkspaceSettings
 from voice_api.services.call_service import queue_call
 from voice_runtime.contracts import WorkspaceConfig
@@ -17,10 +19,11 @@ from voice_runtime.contracts.base import ConfigModel
 
 Session = Depends(get_session)
 
-router = APIRouter(tags=["callbacks"], dependencies=[Depends(require_operator)])
+router = APIRouter(tags=["callbacks"])
 
 
-@router.get("/callbacks")
+@router.get("/callbacks", dependencies=[Depends(require_legacy_owner)])
+@allow_organization_member
 async def list_callbacks(
     status: str | None = None,
     due_before: datetime | None = None,
@@ -66,7 +69,7 @@ async def list_callbacks(
         count_stmt = count_stmt.where(Callback.due_at >= due_after)
     total = await session.scalar(count_stmt) or 0
 
-    row = await session.get(WorkspaceSettings, 1)
+    row = await session.scalar(select(WorkspaceSettings).where(WorkspaceSettings.id == 1))
     workspace_config = WorkspaceConfig.model_validate(row.config if row else {})
 
     callbacks = [
@@ -124,9 +127,10 @@ class LaunchCallback(ConfigModel):
     mode: Literal["manual", "automatic"] = "manual"
 
 
-@router.post("/callbacks", status_code=201)
+@router.post("/callbacks", status_code=201, dependencies=[Depends(require_runtime_service)])
 async def schedule(body: ScheduleCallback, session: AsyncSession = Session) -> dict:
     # Serialize creation per contact, including retries with the same request key.
+    await bind_contact_organization(session, body.contact_id)
     contact = await session.get(Contact, body.contact_id, with_for_update=True)
     version = await session.get(AgentVersion, body.agent_version_id)
     if contact is None or version is None or version.status != "published":
@@ -148,7 +152,7 @@ async def schedule(body: ScheduleCallback, session: AsyncSession = Session) -> d
     return {"id": callback.id, "status": callback.status}
 
 
-@router.post("/callbacks/{callback_id}/launch")
+@router.post("/callbacks/{callback_id}/launch", dependencies=[Depends(require_legacy_owner)])
 async def launch(callback_id: str, body: LaunchCallback, session: AsyncSession = Session) -> dict:
     callback = await session.get(
         Callback, callback_id, with_for_update=True, populate_existing=True
@@ -161,7 +165,9 @@ async def launch(callback_id: str, body: LaunchCallback, session: AsyncSession =
         raise HTTPException(409, "Callback already claimed; uncertain attempts never redial")
     now = datetime.now(UTC)
     if body.mode == "automatic":
-        row = await session.get(WorkspaceSettings, 1, with_for_update=True)
+        row = await session.scalar(
+            select(WorkspaceSettings).where(WorkspaceSettings.id == 1).with_for_update()
+        )
         config = WorkspaceConfig.model_validate(row.config if row else {})
         if not config.automatic_callbacks_enabled:
             raise HTTPException(409, "Automatic callbacks disabled")

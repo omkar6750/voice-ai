@@ -66,7 +66,7 @@ async def resolve(
     session: AsyncSession, version: AgentVersion, logging_override: bool | None = None
 ) -> tuple[dict, str]:
     config = AgentConfig.model_validate(version.config)
-    settings = await session.get(WorkspaceSettings, 1)
+    settings = await session.scalar(select(WorkspaceSettings).where(WorkspaceSettings.id == 1))
     workspace = WorkspaceConfig.model_validate(settings.config if settings else {})
     tools = {}
     bindings = (
