@@ -23,7 +23,7 @@ from voice_runtime.telephony.twilio import TwilioCredentials
 
 @pytest.mark.asyncio
 async def test_queue_call_twilio():
-    session = AsyncMock()
+    session = AsyncMock(spec=AsyncSession)
     contact_id = new_id()
     version_id = new_id()
     conn_id = new_id()
@@ -93,7 +93,7 @@ async def test_queue_call_twilio():
 
 @pytest.mark.asyncio
 async def test_queue_call_twilio_trial_rejected():
-    session = AsyncMock()
+    session = AsyncMock(spec=AsyncSession)
     contact_id = new_id()
     version_id = new_id()
     conn_id = new_id()
@@ -137,11 +137,13 @@ async def test_queue_call_twilio_trial_rejected():
 
 @pytest.mark.asyncio
 async def test_apply_twilio_call_status():
-    session = AsyncMock()
+    session = AsyncMock(spec=AsyncSession)
     run = Run(id=new_id(), status="running")
     call = Call(id=new_id(), run_id=run.id, provider="twilio", status="dialing")
 
-    async def mock_get(model, pk):
+    async def mock_get(model, pk, **kwargs):
+        if model is Call and pk == call.id:
+            return call
         if model is Run and pk == run.id:
             return run
         return None
@@ -153,18 +155,18 @@ async def test_apply_twilio_call_status():
     assert call.status == "active"
     assert call.answered_at is not None
 
-    # completed -> completed on both call and run
+    # Provider call completion is not proof of successful business execution.
     await apply_twilio_call_status(session, call, "completed")
     assert call.status == "completed"
     assert call.ended_at is not None
-    assert run.status == "completed"
-    assert run.ended_at is not None
+    assert run.status == "running"
 
 
 @pytest.mark.asyncio
 async def test_apply_twilio_stream_status():
-    session = AsyncMock()
+    session = AsyncMock(spec=AsyncSession)
     call = Call(id=new_id(), provider="twilio", provider_metadata={})
+    session.get.return_value = call
 
     await apply_twilio_stream_status(
         session, call, stream_sid="MZ123", event="stream-started", error=None
@@ -176,7 +178,7 @@ async def test_apply_twilio_stream_status():
         session, call, stream_sid="MZ123", event="stream-error", error="WebSocket error 1006"
     )
     assert call.provider_metadata["stream_status"] == "error"
-    assert call.provider_metadata["stream_error"] == "WebSocket error 1006"
+    assert call.provider_metadata["stream_error"] == "Twilio reported a stream error"
 
 
 @pytest.mark.asyncio
@@ -186,7 +188,7 @@ async def test_call_status_endpoint(monkeypatch):
     from voice_api.main import app
     from voice_runtime.telephony.twilio import TwilioCredentials
 
-    session_mock = AsyncMock()
+    session_mock = AsyncMock(spec=AsyncSession)
     corr_id = new_id()
     call = Call(
         id=new_id(),
@@ -197,11 +199,20 @@ async def test_call_status_endpoint(monkeypatch):
         status="dialing",
         provider_metadata={},
     )
+    session_mock.get.return_value = call
 
     async def mock_get_session():
         yield session_mock
 
     app.dependency_overrides[get_session] = mock_get_session
+    data = {
+        "AccountSid": "AC123",
+        "CallSid": "CA12345",
+        "CallStatus": "in-progress",
+        "SequenceNumber": "2",
+    }
+    url = f"https://voice.example.com/api/v1/telephony/twilio/call-status/{corr_id}"
+    signature = RequestValidator("token").compute_signature(url, data)
 
     try:
         with (
@@ -218,25 +229,27 @@ async def test_call_status_endpoint(monkeypatch):
             ),
             patch(
                 "voice_api.api.v1.endpoints.telephony.get_settings",
-                return_value=SimpleNamespace(public_base_url=None),
+                return_value=SimpleNamespace(public_base_url="https://voice.example.com"),
             ),
         ):
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
                 res = await client.post(
                     f"/api/v1/telephony/twilio/call-status/{corr_id}",
-                    data={"CallSid": "CA12345", "CallStatus": "in-progress"},
+                    data=data,
+                    headers={"X-Twilio-Signature": signature},
                 )
                 assert res.status_code == 204
                 assert call.status == "active"
                 assert call.provider_metadata["twilio_status"] == "in-progress"
+                assert call.provider_metadata["twilio_sequence_number"] == 2
     finally:
         app.dependency_overrides.clear()
 
 
 @pytest.mark.asyncio
 async def test_stream_status_endpoint(monkeypatch):
-    session_mock = AsyncMock()
+    session_mock = AsyncMock(spec=AsyncSession)
     corr_id = new_id()
     call = Call(
         id=new_id(),
@@ -247,11 +260,20 @@ async def test_stream_status_endpoint(monkeypatch):
         status="active",
         provider_metadata={},
     )
+    session_mock.get.return_value = call
 
     async def mock_get_session():
         yield session_mock
 
     app.dependency_overrides[get_session] = mock_get_session
+    data = {
+        "AccountSid": "AC123",
+        "CallSid": "CA12345",
+        "StreamSid": "MZ999",
+        "StatusCallbackEvent": "stream-started",
+    }
+    url = f"https://voice.example.com/api/v1/telephony/twilio/stream-status/{corr_id}"
+    signature = RequestValidator("token").compute_signature(url, data)
 
     try:
         with (
@@ -268,17 +290,15 @@ async def test_stream_status_endpoint(monkeypatch):
             ),
             patch(
                 "voice_api.api.v1.endpoints.telephony.get_settings",
-                return_value=SimpleNamespace(public_base_url=None),
+                return_value=SimpleNamespace(public_base_url="https://voice.example.com"),
             ),
         ):
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
                 res = await client.post(
                     f"/api/v1/telephony/twilio/stream-status/{corr_id}",
-                    data={
-                        "StreamSid": "MZ999",
-                        "StatusCallbackEvent": "stream-started",
-                    },
+                    data=data,
+                    headers={"X-Twilio-Signature": signature},
                 )
                 assert res.status_code == 204
                 assert call.provider_metadata["stream_sid"] == "MZ999"
@@ -302,6 +322,7 @@ async def test_signature_required_when_public_base_url_set():
         status="active",
         provider_metadata={},
     )
+    session_mock.get.return_value = call
 
     async def mock_get_session():
         yield session_mock
@@ -354,6 +375,7 @@ async def test_signature_accepted_when_valid():
         status="active",
         provider_metadata={},
     )
+    session_mock.get.return_value = call
 
     async def mock_get_session():
         yield session_mock
@@ -363,7 +385,7 @@ async def test_signature_accepted_when_valid():
     auth_token = "secret_auth_token_999"
     validator = RequestValidator(auth_token)
     url = f"https://voice.example.com/api/v1/telephony/twilio/call-status/{corr_id}"
-    data = {"CallSid": "CA12345", "CallStatus": "in-progress"}
+    data = {"AccountSid": "AC123", "CallSid": "CA12345", "CallStatus": "in-progress"}
     sig = validator.compute_signature(url, data)
 
     try:
@@ -446,6 +468,11 @@ async def test_exception_sanitization_on_dial_failure():
         provider_metadata={},
     )
 
+    async def locked_get(model, _identity, **_kwargs):
+        return {Call: call_mock, Run: run_mock}.get(model)
+
+    session_mock.get.side_effect = locked_get
+
     with (
         patch("voice_api.api.v1.endpoints.calls.queue_call", return_value=(run_mock, call_mock)),
         patch(
@@ -453,7 +480,7 @@ async def test_exception_sanitization_on_dial_failure():
             return_value=SimpleNamespace(public_base_url="https://test.com", operator_token="tok"),
         ),
         patch(
-            "voice_api.services.twilio_service.resolve_twilio_credentials",
+            "voice_api.services.twilio_dispatch_service.resolve_twilio_credentials",
             return_value=(
                 conn,
                 TwilioCredentials(account_sid="AC123", auth_token="auth_token_secret_12345"),
@@ -474,9 +501,9 @@ async def test_exception_sanitization_on_dial_failure():
 
         assert exc_info.value.status_code == 502
         assert "auth_token_secret_12345" not in exc_info.value.detail
-        assert "[REDACTED]" in exc_info.value.detail
-        assert "auth_token_secret_12345" not in call_mock.provider_metadata["error"]
-        assert "[REDACTED]" in call_mock.provider_metadata["error"]
+        assert exc_info.value.detail == "Twilio call dispatch outcome is uncertain"
+        assert "auth_token_secret_12345" not in str(call_mock.provider_metadata)
+        assert call_mock.provider_metadata["twilio_dispatch_error"] == "create_failed_uncertain"
 
 
 def test_call_capture_creates_wav_files_on_close(tmp_path):

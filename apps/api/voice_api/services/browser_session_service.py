@@ -22,12 +22,13 @@ from pipecat.transports.smallwebrtc.request_handler import (
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from voice_runtime.diagnostics import text_error_diagnostic
+from voice_runtime.diagnostics import diagnostic_dict, text_error_diagnostic
 from voice_runtime.execution.delivery import finalize_evidence, stream_evidence, supervise_execution
 from voice_runtime.execution.evidence_client import ApiEvidenceIngestor, EvidenceDeliveryError
 from voice_runtime.execution.exchange import ExchangeTracker
 from voice_runtime.execution.native import NativePipelineHost
 from voice_runtime.execution.spool import DurableSpool
+from voice_runtime.execution.termination import CallTermination, TerminationCause
 
 from voice_api.core.config import Settings
 from voice_api.db.session import SessionFactory
@@ -54,9 +55,17 @@ class BrowserSessionContext:
         self.cleanup_lock = asyncio.Lock()
         self.cleanup_complete = False
         self.disconnect_task: asyncio.Task | None = None
+        self.termination = CallTermination()
+        self._resources_lock = asyncio.Lock()
+        self._resources_closed = False
+        self._cleanup_error: BaseException | None = None
 
     def mark_ended(self) -> None:
         self.is_active = False
+
+    def request_end(self, cause: TerminationCause) -> None:
+        self.termination.request(cause)
+        self.mark_ended()
 
     async def is_still_active(self) -> bool:
         return self.is_active
@@ -83,10 +92,26 @@ class BrowserSessionContext:
             self.cleanup_complete = True
 
     async def _close_resources(self) -> None:
-        if self.host:
-            await self.host.close()
-        if self.request_handler:
-            await self.request_handler.close()
+        # Separate from cleanup_lock: an external closer may hold that lock
+        # while waiting for the pipeline's own finally block to finish.
+        async with self._resources_lock:
+            if not self._resources_closed:
+                try:
+                    if self.host:
+                        await self.host.close()
+                except BaseException as exc:
+                    self._cleanup_error = exc
+                try:
+                    if self.request_handler:
+                        await self.request_handler.close()
+                except BaseException as exc:
+                    if self._cleanup_error is None:
+                        self._cleanup_error = exc
+                self._resources_closed = True
+            if self._cleanup_error is not None:
+                self.termination.summary.cleanup_status = "uncertain"
+                raise self._cleanup_error
+            self.termination.summary.cleanup_status = "confirmed"
 
 
 class BrowserSessionManager:
@@ -242,9 +267,42 @@ async def handle_browser_offer(
     session: AsyncSession,
 ) -> dict[str, Any]:
     """Handle WebRTC offer from browser, setting up SmallWebRTC and NativePipelineHost."""
-    browser_session = await session.get(BrowserSession, session_id)
+    browser_session = await session.get(
+        BrowserSession, session_id, with_for_update=True
+    )
     if not browser_session:
         raise HTTPException(404, "Browser session not found")
+
+    if (
+        browser_session.status in ("created", "connecting")
+        and browser_session.expires_at is not None
+        and browser_session.expires_at <= now()
+    ):
+        browser_session.status = "expired"
+        browser_session.disconnected_at = now()
+        context = browser_session_manager.get_context(session_id)
+        run = await session.get(Run, browser_session.run_id)
+        if run is not None and run.status in ("claimed", "running"):
+            run.status = "failed"
+            run.ended_at = now()
+            run.error = "Browser session expired before connection"
+            termination = CallTermination()
+            termination.request("cancelled")
+            run.final_state = {
+                **(run.final_state or {}),
+                "termination": termination.snapshot(),
+                "evidence_incomplete": True,
+            }
+        await session.commit()
+        if context is not None:
+            context.request_end("cancelled")
+            try:
+                await context.close_runtime()
+            except BaseException:
+                logger.exception("Failed to clean up expired browser session {}", session_id)
+            finally:
+                await browser_session_manager.remove_context(session_id)
+        raise HTTPException(410, "Browser session has expired")
 
     if browser_session.status in ("disconnected", "expired", "failed"):
         raise HTTPException(410, "Browser session is no longer active")
@@ -272,11 +330,31 @@ async def handle_browser_offer(
         ctx.connected_event.set()
 
         async with SessionFactory() as db_session:
-            bs = await db_session.get(BrowserSession, session_id)
-            if bs:
-                bs.status = "connected"
-                bs.connected_at = now()
-                bs.connection_id = pipecat_connection.pc_id
+            bs = await db_session.get(
+                BrowserSession, session_id, with_for_update=True
+            )
+            if (
+                bs is None
+                or bs.status not in ("created", "connecting")
+                or (bs.expires_at is not None and bs.expires_at <= now())
+            ):
+                await db_session.rollback()
+                try:
+                    await pipecat_connection.disconnect()
+                except BaseException:
+                    logger.exception("Failed to disconnect expired browser peer {}", session_id)
+                finally:
+                    ctx.request_end("cancelled")
+                    try:
+                        await ctx.close_runtime()
+                    except BaseException:
+                        logger.exception("Failed to clean up expired browser session {}", session_id)
+                    finally:
+                        await browser_session_manager.remove_context(session_id)
+                raise HTTPException(410, "Browser session expired before connection")
+            bs.status = "connected"
+            bs.connected_at = now()
+            bs.connection_id = pipecat_connection.pc_id
             r = await db_session.get(Run, run.id)
             if r:
                 r.status = "running"
@@ -294,7 +372,9 @@ async def handle_browser_offer(
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(_transport, _client):
             logger.info("Browser WebRTC client disconnected for session {}", session_id)
-            ctx.mark_ended()
+            ctx.request_end("disconnect_unknown")
+            if ctx.disconnect_task is not None:
+                return
             ctx.disconnect_task = asyncio.create_task(
                 _finalize_browser_disconnect(session_id),
                 name=f"browser-disconnect-{session_id}",
@@ -349,6 +429,7 @@ async def end_browser_session(
 
     ctx = browser_session_manager.get_context(session_id)
     if ctx:
+        ctx.request_end("caller_hangup" if reason == "operator_stop" else "disconnect_unknown")
         await ctx.close_runtime()
         await browser_session_manager.remove_context(session_id)
 
@@ -378,7 +459,20 @@ async def end_browser_session(
                 uncertain=reason != "operator_stop",
             ),
         )
-        run.status = "completed"
+        termination = ctx.termination if ctx else CallTermination()
+        if ctx is None:
+            termination.request(
+                "caller_hangup" if reason == "operator_stop" else "disconnect_unknown"
+            )
+        run.status = termination.summary.execution_status
+        run.final_state = {
+            **(run.final_state or {}),
+            "termination": termination.snapshot(),
+            "evidence_incomplete": bool((run.final_state or {}).get("evidence_incomplete"))
+            or ctx is None,
+        }
+        if run.status == "failed" and not run.error:
+            run.error = f"Browser call ended before normal completion: {termination.summary.cause}"
         if not run.ended_at:
             run.ended_at = now()
 
@@ -416,6 +510,7 @@ async def _run_browser_pipeline(
         run_id=run_id,
         recordings_dir=recordings_dir,
         settings=settings,
+        termination=ctx.termination,
     )
     ctx.host = host
 
@@ -443,17 +538,22 @@ async def _run_browser_pipeline(
     ) as client:
         ingestor = ApiEvidenceIngestor(client, run_id, settings.operator_token or "")
         delivery_task = asyncio.create_task(stream_evidence(spool, ingestor))
-        execution_failed = False
+        final_state: dict[str, Any] = {}
 
         try:
 
-            async def execute_pipeline() -> None:
+            async def execute_pipeline() -> dict:
+                if not ctx.is_active:
+                    return {"termination": ctx.termination.snapshot()}
                 await host.prepare(snapshot, tracker, transport=transport)
-                await host.converse(ctx.is_still_active)
+                return await host.converse(ctx.is_still_active)
 
-            await supervise_execution(execute_pipeline(), delivery_task)
+            final_state = await supervise_execution(execute_pipeline(), delivery_task)
+        except asyncio.CancelledError:
+            ctx.termination.request("cancelled")
+            raise
         except Exception as exc:
-            execution_failed = True
+            ctx.termination.request("pipeline_failure")
             logger.exception("Browser pipeline failed during run {}: {}", run_id, exc)
             async with SessionFactory() as db_session:
                 r = await db_session.get(Run, run_id)
@@ -477,44 +577,15 @@ async def _run_browser_pipeline(
             try:
                 await ctx.close_runtime()
             except Exception:
-                execution_failed = True
                 logger.exception("Browser runtime cleanup failed for run {}", run_id)
-            finalization = await finalize_evidence(spool, ingestor, delivery_task)
-
-            async with SessionFactory() as db_session:
-                r = await db_session.get(Run, run_id)
-                if finalization.diagnostic:
-                    await persist_diagnostic(
-                        db_session,
-                        run_id,
-                        DiagnosticInput.model_validate(finalization.diagnostic),
-                    )
-                if r and r.status in ("claimed", "running"):
-                    r.status = "failed" if execution_failed else "completed"
-                    r.final_state = {"evidence_incomplete": finalization.incomplete}
-                    if execution_failed and not r.error:
-                        r.error = "Browser pipeline stopped before normal completion"
-                    if not r.ended_at:
-                        r.ended_at = now()
-                elif r:
-                    r.final_state = {
-                        **(r.final_state or {}),
-                        "evidence_incomplete": finalization.incomplete,
-                    }
-                bs = await db_session.get(BrowserSession, session_id)
-                if bs and bs.status in ("created", "connecting", "connected"):
-                    bs.status = "disconnected"
-                    if not bs.disconnected_at:
-                        bs.disconnected_at = now()
-                await db_session.commit()
-
+            artifact_diagnostics: list[DiagnosticInput] = []
             if host.directory.exists():
                 for kind in ("input", "output", "mixed", "pipeline_log"):
                     filename = "pipeline.log" if kind == "pipeline_log" else f"{kind}.wav"
                     if not (host.directory / filename).is_file():
                         continue
                     try:
-                        await client.post(
+                        response = await client.post(
                             f"/api/runs/{run_id}/artifacts",
                             headers=headers,
                             json={
@@ -523,5 +594,63 @@ async def _run_browser_pipeline(
                                 "path": f"{run_id}/{filename}",
                             },
                         )
+                        response.raise_for_status()
                     except Exception:
-                        pass
+                        artifact_diagnostics.append(
+                            DiagnosticInput.model_validate(
+                                diagnostic_dict(
+                                    severity="error",
+                                    category="artifact_failure",
+                                    source="runtime",
+                                    code="artifact_registration_failed",
+                                    message="Browser call artifact could not be registered",
+                                    metadata={"kind": kind},
+                                )
+                            )
+                        )
+            finalization = await finalize_evidence(spool, ingestor, delivery_task)
+
+            async with SessionFactory() as db_session:
+                r = await db_session.get(Run, run_id)
+                for diagnostic in artifact_diagnostics:
+                    await persist_diagnostic(db_session, run_id, diagnostic)
+                if finalization.diagnostic:
+                    await persist_diagnostic(
+                        db_session,
+                        run_id,
+                        DiagnosticInput.model_validate(finalization.diagnostic),
+                    )
+                if r and r.status in ("claimed", "running"):
+                    r.status = ctx.termination.summary.execution_status
+                    if r.status == "failed" and not r.error:
+                        r.error = (
+                            "Browser call ended before normal completion: "
+                            f"{ctx.termination.summary.cause}"
+                        )
+                    if not r.ended_at:
+                        r.ended_at = now()
+                if r:
+                    r.final_state = {
+                        **(r.final_state or {}),
+                        **final_state,
+                        "termination": ctx.termination.snapshot(),
+                        "evidence_incomplete": bool(
+                            (r.final_state or {}).get("evidence_incomplete")
+                        )
+                        or finalization.incomplete
+                        or not ctx.cleanup_complete
+                        or bool(artifact_diagnostics),
+                        "artifacts_incomplete": bool(
+                            (r.final_state or {}).get("artifacts_incomplete")
+                        )
+                        or bool(artifact_diagnostics),
+                    }
+                bs = await db_session.get(BrowserSession, session_id)
+                if bs and bs.status in ("created", "connecting", "connected"):
+                    bs.status = "disconnected"
+                    if not bs.disconnected_at:
+                        bs.disconnected_at = now()
+                await db_session.commit()
+
+            if ctx.cleanup_complete:
+                await browser_session_manager.remove_context(session_id)

@@ -7,14 +7,14 @@ This deliberately does not import the protected standalone demo.
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import re
-from collections.abc import Awaitable, Callable
 from copy import deepcopy
-from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import httpx
 from loguru import logger
@@ -22,7 +22,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.flows import ContextStrategy, ContextStrategyConfig, FlowManager, NodeConfig
 from pipecat.flows.types import FlowsFunctionSchema
-from pipecat.frames.frames import EndFrame, FunctionCallResultProperties, TTSSpeakFrame
+from pipecat.frames.frames import EndFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -31,11 +31,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.services.cartesia.tts import CartesiaTTSService, GenerationConfig
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.groq.llm import GroqLLMService
-from pipecat.services.sarvam.stt import SarvamSTTService
-from pipecat.services.sarvam.tts import SarvamTTSService
 from pipecat.turns.user_start import TranscriptionUserTurnStartStrategy, VADUserTurnStartStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.utils.context.llm_context_summarization import (
@@ -45,22 +42,25 @@ from pipecat.utils.context.llm_context_summarization import (
 from pipecat.workers.runner import WorkerRunner
 
 from voice_runtime.call_capture import CallCapture
-from voice_runtime.contracts import is_registered_handler
+from voice_runtime.contracts import is_registered_handler, validate_node_actions
 from voice_runtime.contracts.prompt_references import compile_tool_references
 from voice_runtime.diagnostics import (
     exception_diagnostic,
     provider_error_diagnostic,
     text_error_diagnostic,
 )
+from voice_runtime.execution.callback_http import CallbackHTTPError, post_callback_json
 from voice_runtime.execution.classifier import (
-    model_visible_result,
     normalize_classifier_result,
     run_selected_classifier,
 )
 from voice_runtime.execution.contact_context import sanitize_contact_variables
 from voice_runtime.execution.exchange import ExchangeTracker, bind_transcripts
+from voice_runtime.execution.flow_manager import TracedFlowManager as TracedFlowManager
 from voice_runtime.execution.observer import EvidenceObserver
+from voice_runtime.execution.speech import build_speech_services as build_speech_services
 from voice_runtime.execution.temporal import resolve_local_time_context
+from voice_runtime.execution.termination import CallTermination
 from voice_runtime.telephony.base import CallState
 
 
@@ -215,56 +215,6 @@ def _provider_body(response: httpx.Response) -> dict | str:
     return body if isinstance(body, dict) else str(body)
 
 
-def build_speech_services(settings, snapshot: dict, sample_rate: int):
-    """Build STT/TTS services from the resolved snapshot's exact selections."""
-
-    stt_config = snapshot["stt"]
-    if stt_config["provider"] != "sarvam":
-        raise ValueError(f"Unsupported STT provider: {stt_config['provider']}")
-    stt = SarvamSTTService(
-        api_key=settings.sarvam_api_key,
-        settings=SarvamSTTService.Settings(model=stt_config["model"]),
-        sample_rate=sample_rate,
-    )
-
-    tts_config = snapshot["tts"]
-    if tts_config["provider"] == "sarvam":
-        tts = SarvamTTSService(
-            api_key=settings.sarvam_api_key,
-            settings=SarvamTTSService.Settings(
-                model=tts_config["model"],
-                voice=tts_config["voice"],
-                language=tts_config["language"],
-                pace=tts_config["pace"],
-            ),
-            sample_rate=sample_rate,
-        )
-    elif tts_config["provider"] == "cartesia":
-        cartesia = tts_config.get("cartesia") or {}
-        cartesia_settings = {}
-        if cartesia.get("generation_config"):
-            cartesia_settings["generation_config"] = GenerationConfig(
-                **cartesia["generation_config"]
-            )
-        if cartesia.get("pronunciation_dict_id"):
-            cartesia_settings["pronunciation_dict_id"] = cartesia["pronunciation_dict_id"]
-        tts = CartesiaTTSService(
-            api_key=settings.cartesia_api_key,
-            settings=CartesiaTTSService.Settings(
-                model=tts_config["model"],
-                voice=tts_config["voice"],
-                language=tts_config["language"],
-                **cartesia_settings,
-            ),
-            sample_rate=sample_rate,
-            encoding="pcm_s16le",
-            container="raw",
-        )
-    else:
-        raise ValueError(f"Unsupported TTS provider: {tts_config['provider']}")
-    return stt, tts
-
-
 def build_user_aggregator_params(snapshot: dict, vad) -> LLMUserAggregatorParams:
     """Apply saved call controls to Pipecat's actual user-turn detector."""
     limits = snapshot["call_limits"]
@@ -359,172 +309,27 @@ async def run_jev_classification(
         }
 
 
-class TracedFlowManager(FlowManager):
+class NativePipelineHost:
     def __init__(
         self,
+        run_id: str,
+        recordings_dir: Path,
+        settings,
         *,
-        tracker: ExchangeTracker,
-        bindings: dict,
-        snapshot: dict,
-        observer: EvidenceObserver,
-        context: LLMContext,
-        classifier_runner: Callable[[str, str], Awaitable[tuple[str, dict[str, str]] | None]],
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-        self.tracker = tracker
-        self.bindings = bindings
-        self._snapshot = snapshot
-        self.observer = observer
-        self._context_for_evidence = context
-        self._classifier_runner = classifier_runner
-        self._transition_tool_id: str | None = None
-
-    def _context_message_index(self) -> int | None:
-        messages = self._context_for_evidence.get_messages()
-        return len(messages) - 1 if messages else None
-
-    async def _set_node(self, node_id: str, node_config: NodeConfig) -> None:
-        classifier_messages: list[dict[str, str]] = []
-        current_node = self.current_node
-        if current_node and current_node != node_id:
-            classifier = await self._classifier_runner("exit", current_node)
-            if classifier is not None:
-                _, message = classifier
-                classifier_messages.append(message)
-        classifier = await self._classifier_runner("entry", node_id)
-        if classifier is not None:
-            _, message = classifier
-            classifier_messages.append(message)
-        if classifier_messages:
-            node_config = dict(node_config)
-            node_config["task_messages"] = [
-                *node_config.get("task_messages", []),
-                *classifier_messages,
-            ]
-        await super()._set_node(node_id, node_config)
-        self.tracker.start_visit(node_id, self._transition_tool_id)
-        self._transition_tool_id = None
-
-    async def _create_transition_func(self, name, handler):
-        execute = await super()._create_transition_func(name, handler)
-
-        async def traced(params):
-            binding = self.bindings[name]
-            invocation_id = self.tracker.start_tool(
-                name,
-                binding["version_id"],
-                params.tool_call_id,
-                dict(params.arguments),
-                self.observer.function_operations.get(params.tool_call_id)
-                or (
-                    self.observer.llm_operation["operation_id"]
-                    if self.observer.llm_operation
-                    else None
-                ),
-            )
-            final_result: Any = None
-            final_sent = False
-            original_callback = params.result_callback
-
-            async def result_callback(result, *, properties=None):
-                nonlocal final_result, final_sent
-                is_final = properties is None or properties.is_final
-                connection_id = None
-                provider_message_id = None
-                diagnostic = None
-                if isinstance(result, dict):
-                    result = dict(result)
-                    connection_id = result.pop("_connection_id", None)
-                    provider_message_id = result.pop("_provider_message_id", None)
-                    diagnostic = result.pop("_diagnostic", None)
-                    if diagnostic is None and result.get("status") == "error":
-                        diagnostic = exception_diagnostic(
-                            RuntimeError(str(result.get("error", "Tool execution failed"))),
-                            category="tool_failure",
-                            code="tool_error",
-                            message=f"Tool {name} failed",
-                        )
-                    if name == "classify_lead":
-                        result = model_visible_result(
-                            normalize_classifier_result(
-                                result,
-                                (
-                                    self._snapshot.get("classifier", {}).get(
-                                        "jev"
-                                        if self._snapshot.get("classifier", {}).get(
-                                            "classifier_type"
-                                        )
-                                        == "jev"
-                                        else "llm",
-                                        {},
-                                    )
-                                    or {}
-                                ).get("output_fields"),
-                                max_result_chars=int(
-                                    self._snapshot.get("classifier", {}).get(
-                                        "max_result_chars", 512
-                                    )
-                                ),
-                            ),
-                            int(self._snapshot.get("classifier", {}).get("max_result_chars", 512)),
-                        )
-                if isinstance(diagnostic, dict):
-                    self.tracker.diagnostic(**diagnostic)
-                result_id = self.tracker.tool_result(invocation_id, result, is_final=is_final)
-                if (
-                    name == "change_node"
-                    and is_final
-                    and isinstance(result, dict)
-                    and result.get("status") == "ok"
-                ):
-                    self._transition_tool_id = invocation_id
-                result_properties = properties or FunctionCallResultProperties(is_final=is_final)
-                previous_context_callback = result_properties.on_context_updated
-
-                async def context_updated() -> None:
-                    self.tracker.context_updated(
-                        invocation_id,
-                        result_id,
-                        context_message_index=self._context_message_index(),
-                    )
-                    if previous_context_callback is not None:
-                        await previous_context_callback()
-
-                result_properties = replace(result_properties, on_context_updated=context_updated)
-                await original_callback(result, properties=result_properties)
-                if is_final:
-                    final_result, final_sent = result, True
-                    self.tracker.end_tool(
-                        invocation_id,
-                        "failed"
-                        if isinstance(result, dict) and result.get("status") == "error"
-                        else "completed",
-                        result,
-                        connection_id=connection_id,
-                        provider_message_id=provider_message_id,
-                    )
-
-            try:
-                await execute(replace(params, result_callback=result_callback))
-            finally:
-                if not final_sent and not self.tracker.tool_was_ended(invocation_id):
-                    self.tracker.end_tool(
-                        invocation_id, "failed", {"error": "No final tool result"}
-                    )
-            return final_result
-
-        return traced
-
-
-class NativePipelineHost:
-    def __init__(self, run_id: str, recordings_dir: Path, settings) -> None:
+        graceful_close_timeout_secs: float = 15,
+        termination: CallTermination | None = None,
+    ) -> None:
+        if not math.isfinite(graceful_close_timeout_secs) or graceful_close_timeout_secs <= 0:
+            raise ValueError("Graceful close timeout must be finite and positive")
+        self._graceful_close_timeout_secs = graceful_close_timeout_secs
         self.run_id, self.directory, self.settings = run_id, recordings_dir / run_id, settings
         self.worker = self.flow = self.capture = self.observer = None
         self.runner_task: asyncio.Task | None = None
         self.ready = asyncio.Event()
         self.errors: list[str] = []
         self._call_hung_up: bool = False
+        self._end_frame_queued = False
+        self.termination = termination if termination is not None else CallTermination()
         self._termination_diagnostic_recorded = False
         self._end_task: asyncio.Task | None = None
         self._idle_reprompts = 0
@@ -534,6 +339,9 @@ class NativePipelineHost:
         self._verbatim_opening: str | None = None
         self._exchange_count = 0
         self._classifier_cadence_running = False
+        self._close_lock = asyncio.Lock()
+        self._close_attempted = False
+        self._close_error: BaseException | None = None
 
     def _node(self, key: str) -> NodeConfig:
         """Adapt one saved graph node into Pipecat's native NodeConfig shape."""
@@ -588,7 +396,7 @@ class NativePipelineHost:
                     handler=self._handler(name),
                 )
             )
-        return NodeConfig(
+        config = NodeConfig(
             name=key,
             role_message=role_message or "",
             task_messages=task_messages,
@@ -598,6 +406,43 @@ class NativePipelineHost:
                 strategy=ContextStrategy(node.get("context_strategy", "append"))
             ),
         )
+        if node.get("terminal"):
+            # Pipecat serializes this control frame behind synthesis and local
+            # output audio. It is not a claim of browser/carrier playback.
+            config["post_actions"] = [
+                {"type": "function", "handler": self._terminal_response_finished, "node": key}
+            ]
+        return config
+
+    async def _terminal_response_finished(self, action: dict, manager: FlowManager) -> None:
+        """Complete a terminal visit only when its ordered post-action reaches output."""
+        node = action["node"]
+        if manager.current_node != node or self.termination.closing:
+            return
+        self.termination.summary.terminal_node = node
+        self.termination.request("terminal_completed", graceful=True)
+        self._call_hung_up = True
+        self.tracker.diagnostic(
+            severity="info",
+            category="call_termination",
+            source="call",
+            code="terminal_completed",
+            message="Terminal node response reached local output completion",
+            metadata={"node": node, "playback_scope": "local_output"},
+        )
+        try:
+            await self._finish_end_call()
+        except Exception:
+            self.termination.request("pipeline_failure")
+            self.errors.append("Terminal shutdown could not be queued")
+            self.tracker.diagnostic(
+                severity="error",
+                category="call_termination",
+                source="runtime",
+                code="terminal_shutdown_failed",
+                message="Terminal shutdown could not be queued",
+            )
+            raise
 
     async def _handle_user_idle(self) -> None:
         if self._call_hung_up or self.worker is None:
@@ -609,6 +454,7 @@ class NativePipelineHost:
             )
             return
         self._call_hung_up = True
+        self.termination.request("caller_idle_timeout")
         if self.tracker is not None:
             self.tracker.diagnostic(
                 severity="info",
@@ -803,6 +649,7 @@ class NativePipelineHost:
                 if self._call_hung_up:
                     return {"status": "ok"}
                 self._call_hung_up = True
+                self.termination.request("agent_hangup", graceful=True)
                 self.tracker.diagnostic(
                     severity="info",
                     category="call_termination",
@@ -810,7 +657,6 @@ class NativePipelineHost:
                     code="agent_hangup",
                     message="Agent requested call termination",
                 )
-                await self.worker.queue_frame(EndFrame())
                 return {"status": "ok"}
             if name == "check_whatsapp_window":
                 contact = (
@@ -1207,12 +1053,18 @@ class NativePipelineHost:
                 )
                 try:
                     async with httpx.AsyncClient(timeout=20) as client:
-                        response = await client.post(
-                            endpoint, json=payload, headers={"Authorization": f"Bearer {token}"}
-                        )
-                    return _callback_api_success_result(response)
+                        return await post_callback_json(client, endpoint, payload, token)
+                except CallbackHTTPError as exc:
+                    logger.warning("human callback tool received HTTP {}", exc.status_code)
+                    return {
+                        "status": "error",
+                        "error": f"Callback scheduling service returned HTTP {exc.status_code}",
+                    }
+                except ValueError as exc:
+                    logger.warning("human callback tool received invalid JSON result: {}", exc)
+                    return {"status": "error", "error": str(exc)}
                 except Exception as exc:
-                    logger.error("human callback tool request failed: {}", type(exc).__name__)
+                    logger.error("human callback tool failed ({})", type(exc).__name__)
                     return {"status": "error", "error": "Callback scheduling service unavailable"}
             if name == "schedule_callback":
                 raw_time = (
@@ -1377,12 +1229,12 @@ class NativePipelineHost:
     async def prepare(self, snapshot: dict, tracker: ExchangeTracker, *, transport=None) -> None:
         self.tracker, self._snapshot = tracker, snapshot
         self._nodes = {node["id"]: node for node in snapshot["flow"]["nodes"]}
-        if snapshot.get("background_hooks") or any(
-            node.get("entry_actions") or node.get("exit_actions") for node in self._nodes.values()
-        ):
-            raise ValueError(
-                "Background hooks and entry/exit actions are not supported by live runtime"
-            )
+        action_errors = validate_node_actions(
+            snapshot,
+            snapshot.get("_resolved", {}).get("tools", {}),
+        )
+        if action_errors:
+            raise ValueError(action_errors[0])
         for binding_key, binding in snapshot["_resolved"]["tools"].items():
             definition = binding["definition"]
             if definition["kind"] != "registered":
@@ -1644,12 +1496,14 @@ class NativePipelineHost:
             llm=llm,
             context_aggregator=aggregators,
             transport=transport,
-                    tracker=tracker,
-                    bindings=snapshot["_resolved"]["tools"],
-                    snapshot=snapshot,
-                    observer=self.observer,
+            tracker=tracker,
+            bindings=snapshot["_resolved"]["tools"],
+            snapshot=snapshot,
+            observer=self.observer,
             context=context,
             classifier_runner=self._run_node_classifier,
+            action_runner=self._run_node_action,
+            end_call_runner=self._finish_end_call,
         )
         self.flow.state.update(flow_state)
 
@@ -1659,20 +1513,86 @@ class NativePipelineHost:
 
         @self.worker.event_handler("on_pipeline_error")
         async def failed(_worker, frame):
-            if not self._call_hung_up:
-                err_msg = getattr(frame, "error", None) or "inspect evidence"
-                logger.warning("Pipeline error during active call: {}", err_msg)
-                self.errors.append(f"Pipeline failed: {err_msg}")
-                if self.tracker is not None:
-                    diagnostic = text_error_diagnostic(str(err_msg))
-                    self.tracker.diagnostic(**diagnostic)
-            await self.worker.cancel()
+            await self._pipeline_failed(frame)
 
         runner = WorkerRunner(handle_sigint=False, handle_sigterm=False)
         await runner.add_workers(self.worker)
         self.runner_task = asyncio.create_task(runner.run(), name=f"pipeline-{self.run_id}")
         async with asyncio.timeout(15):
             await self.ready.wait()
+
+    async def _run_node_action(self, phase: str, node_key: str, binding_key: str) -> bool:
+        """Run one allow-listed action with no model supplied arguments."""
+        binding = self.flow.bindings[binding_key]
+        definition = binding["definition"]
+        handler_name = definition["handler"]
+        invocation_id = self.tracker.start_tool(
+            binding_key,
+            binding["version_id"],
+            f"node-action-{uuid4().hex}",
+            {},
+            None,
+        )
+        tool_ended = False
+        try:
+            result = await self._handler(handler_name)({}, self.flow)
+            if isinstance(result, tuple):
+                result = result[0]
+            result_failed = isinstance(result, dict) and result.get("status") == "error"
+            self.tracker.tool_result(invocation_id, result, is_final=True)
+            self.tracker.end_tool(
+                invocation_id,
+                "failed" if result_failed else "completed",
+                result,
+            )
+            tool_ended = True
+            if result_failed:
+                raise RuntimeError(result.get("error", "Lifecycle action returned an error"))
+            if (
+                handler_name == "end_call"
+                and isinstance(result, dict)
+                and result.get("status") == "ok"
+            ):
+                await self._finish_end_call()
+                return True
+        except Exception as exc:
+            if not tool_ended:
+                self.tracker.end_tool(
+                    invocation_id,
+                    "failed",
+                    {"error": f"{phase} action failed"},
+                )
+            self.tracker.diagnostic(
+                severity="error",
+                category="tool_failure",
+                source="runtime",
+                code="node_action_failed",
+                message=f"Configured {phase} action failed for node '{node_key}'",
+                metadata={"binding_key": binding_key, "error_type": type(exc).__name__},
+            )
+            raise
+        return False
+
+    async def _pipeline_failed(self, frame) -> None:
+        """A shutdown request does not make a subsequent pipeline failure successful."""
+        self.termination.request("pipeline_failure")
+        err_msg = getattr(frame, "error", None) or "inspect evidence"
+        logger.warning("Pipeline failed ({})", type(frame).__name__)
+        self.errors.append(f"Pipeline failed: {err_msg}")
+        if self.tracker is not None:
+            self.tracker.diagnostic(**text_error_diagnostic(str(err_msg)))
+        await self.worker.cancel()
+
+    async def _finish_end_call(self) -> None:
+        """Queue graceful shutdown once, after the final end-call tool result."""
+        if self._end_frame_queued:
+            return
+        self._end_frame_queued = True
+        try:
+            await self.worker.queue_frame(EndFrame())
+        except BaseException:
+            self._end_frame_queued = False
+            raise
 
     async def converse(self, modem_or_check=None) -> dict:
         """Run conversation until pipeline ends or call drops.
@@ -1698,8 +1618,21 @@ class NativePipelineHost:
             return await modem_or_check.state() == CallState.ACTIVE
 
         while self.runner_task and not self.runner_task.done():
-            if self.errors and not self._call_hung_up:
+            if self.errors:
                 raise RuntimeError(self.errors[-1])
+            if self.termination.graceful_deadline_expired(self._graceful_close_timeout_secs):
+                self.termination.request("drain_timeout")
+                self.tracker.diagnostic(
+                    severity="error",
+                    category="call_termination",
+                    source="runtime",
+                    code="graceful_close_timeout",
+                    message="Graceful pipeline shutdown exceeded its deadline",
+                    uncertain=True,
+                    metadata={"timeout_seconds": self._graceful_close_timeout_secs},
+                )
+                await self.worker.cancel()
+                raise TimeoutError("Graceful pipeline shutdown exceeded its deadline")
             await asyncio.sleep(1)
             if not await _check_active():
                 await self._record_call_termination(modem_or_check)
@@ -1708,11 +1641,14 @@ class NativePipelineHost:
                 break
         if self.runner_task:
             await self.runner_task
-        if self.errors and not self._call_hung_up:
+        if self.errors:
             raise RuntimeError(self.errors[-1])
-        return {"flow_node": self.flow.current_node}
+        self.termination.pipeline_finished()
+        return {"flow_node": self.flow.current_node, "termination": self.termination.snapshot()}
 
     async def _record_call_termination(self, modem_or_check) -> None:
+        # Liveness alone cannot distinguish a caller hangup from a network drop.
+        self.termination.request("disconnect_unknown")
         if self._termination_diagnostic_recorded or self.tracker is None:
             return
         self._termination_diagnostic_recorded = True
@@ -1799,18 +1735,56 @@ class NativePipelineHost:
         )
 
     async def close(self) -> None:
-        try:
-            if self.worker:
-                await self.worker.cancel()
-            if self.runner_task:
-                await self.runner_task
-            if self._end_task:
-                await self._end_task
-        finally:
-            if self.tracker:
-                self.tracker.end_visit("completed")
-                self.tracker.end_exchange("completed")
-            if self.observer:
-                self.observer.close()
-            if self.capture:
-                self.capture.close()
+        async with self._close_lock:
+            if self._close_error is not None:
+                raise self._close_error
+            if self._close_attempted:
+                return
+
+            primary_error: BaseException | None = None
+            cleanup_error: BaseException | None = None
+
+            try:
+                if (
+                    not self.termination.closing
+                    and self.termination.summary.pipeline_finished_at_ns is None
+                ):
+                    self.termination.request("cancelled")
+                elif self.runner_task and not self.runner_task.done():
+                    self.termination.request("cancelled")
+                if self.worker:
+                    await self.worker.cancel()
+                if self.runner_task:
+                    await self.runner_task
+                if self._end_task:
+                    await self._end_task
+            except asyncio.CancelledError as exc:
+                self.termination.request("cancelled")
+                primary_error = exc
+            except Exception as exc:
+                self.termination.request("pipeline_failure")
+                primary_error = exc
+            finally:
+                def attempt_cleanup(action) -> None:
+                    nonlocal cleanup_error
+                    try:
+                        action()
+                    except BaseException as exc:
+                        if cleanup_error is None:
+                            cleanup_error = exc
+
+                if self.tracker:
+                    status = self.termination.summary.evidence_status
+                    attempt_cleanup(lambda: self.tracker.end_visit(status))
+                    attempt_cleanup(lambda: self.tracker.end_exchange(status))
+                if self.observer:
+                    attempt_cleanup(self.observer.close)
+                if self.capture:
+                    attempt_cleanup(self.capture.close)
+
+            if cleanup_error is not None:
+                self.termination.summary.cleanup_status = "uncertain"
+            self._close_attempted = True
+            self._close_error = primary_error or cleanup_error
+            if self._close_error is not None:
+                raise self._close_error

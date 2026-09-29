@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
-import voice_runtime.execution.native as native_module
+import voice_runtime.execution.speech as speech_module
 from pydantic import ValidationError
 from voice_runtime.contracts.providers import TTSConfig
 from voice_runtime.execution.native import build_speech_services
@@ -46,8 +46,8 @@ def test_cartesia_settings_are_provider_specific_and_bounded():
 
 
 def test_cartesia_settings_reach_native_service(monkeypatch):
-    monkeypatch.setattr(native_module, "SarvamSTTService", _FakeService)
-    monkeypatch.setattr(native_module, "CartesiaTTSService", _FakeService)
+    monkeypatch.setattr(speech_module, "SarvamSTTService", _FakeService)
+    monkeypatch.setattr(speech_module, "CartesiaTTSService", _FakeService)
     config = TTSConfig.model_validate(
         {
             "provider": "cartesia",

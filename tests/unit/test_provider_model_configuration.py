@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
-import voice_runtime.execution.native as native_module
+import voice_runtime.execution.speech as speech_module
 from voice_runtime.contracts import TTSConfig
 from voice_runtime.execution.native import build_speech_services
 
@@ -18,8 +18,8 @@ class _FakeService:
 def test_snapshot_provider_values_reach_speech_service_constructors(monkeypatch):
     stt_service = type("FakeSTT", (_FakeService,), {})
     tts_service = type("FakeTTS", (_FakeService,), {})
-    monkeypatch.setattr(native_module, "SarvamSTTService", stt_service)
-    monkeypatch.setattr(native_module, "CartesiaTTSService", tts_service)
+    monkeypatch.setattr(speech_module, "SarvamSTTService", stt_service)
+    monkeypatch.setattr(speech_module, "CartesiaTTSService", tts_service)
 
     stt, tts = build_speech_services(
         SimpleNamespace(sarvam_api_key="sarvam-key", cartesia_api_key="cartesia-key"),

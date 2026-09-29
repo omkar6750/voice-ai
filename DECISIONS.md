@@ -14,3 +14,4 @@
 | [ADR-0021](docs/adr/ADR-0021-typed-evidence-and-shared-delivery.md) | Validate evidence events end-to-end, unify final draining, and recover durable spool records safely | Accepted |
 | [ADR-0022](docs/adr/ADR-0022-meta-hosted-whatsapp-media.md) | Store WhatsApp template media as connection-scoped Meta IDs; never retain uploaded image bytes locally | Accepted |
 | [ADR-0023](docs/adr/ADR-0023-whatsapp-delivery-receipts-in-timeline.md) | Surface correlated WhatsApp webhook delivery receipts as timeline evidence, distinct from send acceptance | Accepted |
+| [ADR-0024](docs/adr/ADR-0024-twilio-call-lifecycle.md) | One Twilio close owner, mark/clear playback facts, authenticated callbacks, and fenced dispatch | Accepted |

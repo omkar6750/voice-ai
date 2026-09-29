@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -12,7 +13,7 @@ from voice_api.api.deps import get_session, require_operator
 from voice_api.core.config import get_settings
 from voice_api.main import app
 from voice_api.models import Agent, AgentVersion, BrowserSession, Contact, Run
-from voice_api.models.common import new_id
+from voice_api.models.common import new_id, now
 from voice_api.schemas.browser_session import (
     WebRTCOfferRequest,
 )
@@ -60,6 +61,57 @@ async def test_create_browser_session_creates_run_and_session():
 
 
 @pytest.mark.asyncio
+async def test_expired_browser_offer_fails_preconnection_run():
+    session_id = new_id()
+    run_id = new_id()
+    browser_session = BrowserSession(
+        id=session_id,
+        run_id=run_id,
+        status="created",
+        expires_at=now() - timedelta(seconds=1),
+    )
+    run = Run(
+        id=run_id,
+        channel="browser",
+        transport_provider="dashboard",
+        status="claimed",
+        resolved_config={},
+    )
+    session = AsyncMock(spec=AsyncSession)
+
+    async def get_mock(model, ident, **_kwargs):
+        if model is BrowserSession:
+            return browser_session
+        if model is Run:
+            return run
+        return None
+
+    session.get.side_effect = get_mock
+    manager = BrowserSessionManager()
+    context = BrowserSessionContext(session_id, run_id, {})
+    context.host = AsyncMock()
+    context.request_handler = AsyncMock()
+    manager._sessions[session_id] = context
+
+    with patch("voice_api.services.browser_session_service.browser_session_manager", manager):
+        with pytest.raises(HTTPException) as exc_info:
+            await handle_browser_offer(
+                session_id=session_id,
+                body=WebRTCOfferRequest(sdp="offer", type="offer"),
+                settings=get_settings(),
+                session=session,
+            )
+
+    assert exc_info.value.status_code == 410
+    assert browser_session.status == "expired"
+    assert run.status == "failed"
+    assert run.error == "Browser session expired before connection"
+    context.host.close.assert_awaited_once()
+    context.request_handler.close.assert_awaited_once()
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_create_browser_session_rejects_version_from_another_agent():
     session = AsyncMock(spec=AsyncSession)
     version = AgentVersion(
@@ -96,7 +148,7 @@ async def test_create_browser_session_resolves_version_within_selected_agent():
         config={"flow": {"nodes": []}},
     )
 
-    async def get_mock(model, ident):
+    async def get_mock(model, ident, **_kwargs):
         if model is Agent and ident == "agent-a":
             return agent
         return None
@@ -148,7 +200,7 @@ async def test_create_browser_session_with_contact_and_override_number():
         metadata_json={"query": "Voice AI Platform"},
     )
 
-    async def get_mock(model, ident):
+    async def get_mock(model, ident, **_kwargs):
         if model == AgentVersion:
             return version
         if model == Contact and ident == contact_id:
@@ -296,7 +348,7 @@ async def test_webrtc_offer_and_duplicate_rejection():
 
     session_mock = AsyncMock(spec=AsyncSession)
 
-    async def mock_get(model, pk):
+    async def mock_get(model, pk, **_kwargs):
         if model is BrowserSession:
             return browser_session
         if model is Run:
@@ -314,8 +366,13 @@ async def test_webrtc_offer_and_duplicate_rejection():
     ):
         fake_conn = MagicMock()
         fake_conn.pc_id = "pc-12345"
+        fake_conn.disconnect = AsyncMock()
+        factory = MagicMock()
+        factory.return_value.__aenter__ = AsyncMock(return_value=session_mock)
+        factory.return_value.__aexit__ = AsyncMock(return_value=False)
 
         with (
+            patch("voice_api.services.browser_session_service.SessionFactory", factory),
             patch(
                 "voice_api.services.browser_session_service.SmallWebRTCRequestHandler.handle_web_request",
                 new_callable=AsyncMock,
@@ -376,7 +433,7 @@ async def test_end_browser_session_cleans_up():
 
     session_mock = AsyncMock(spec=AsyncSession)
 
-    async def mock_get(model, pk):
+    async def mock_get(model, pk, **_kwargs):
         if model is BrowserSession:
             return browser_session
         if model is Run:
@@ -403,7 +460,8 @@ async def test_end_browser_session_cleans_up():
         ctx.host.close.assert_awaited_once()
         ctx.request_handler.close.assert_awaited_once()
         assert browser_session.status == "disconnected"
-        assert run.status == "completed"
+        assert run.status == "failed"
+        assert run.final_state["termination"]["cause"] == "caller_hangup"
 
         # Repeated cleanup is safe and does not close resources a second time.
         await end_browser_session(session_id, session_mock)

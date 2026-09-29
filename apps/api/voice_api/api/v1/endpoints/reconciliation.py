@@ -33,6 +33,7 @@ async def reconcile(run_id: str, body: ReconcileBody, session: AsyncSession = Se
         raise HTTPException(409, "Only uncertain runs require reconciliation")
     run.status = "failed"
     run.final_state = {
+        **(run.final_state or {}),
         "evidence_incomplete": True,
         "reconciled_at": datetime.now(UTC).isoformat(),
         "transport_idle_verified": True,

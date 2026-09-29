@@ -189,16 +189,133 @@ async def attach_twilio_media(
     await session.commit()
 
 
+async def claim_twilio_media(
+    session: AsyncSession,
+    *,
+    call_id: str,
+    run_id: str,
+    provider_call_id: str,
+    stream_sid: str,
+) -> dict[str, Any] | None:
+    """Atomically claim the queued Run and attach its first Twilio media stream."""
+    call = await session.get(Call, call_id, with_for_update=True, populate_existing=True)
+    if call is None:
+        return None
+
+    run = await session.get(Run, run_id, with_for_update=True, populate_existing=True)
+    if run is None:
+        return None
+
+    terminal = {"completed", "failed", "canceled"}
+    meta = dict(call.provider_metadata or {})
+    if (
+        call.provider != "twilio"
+        or call.run_id != run_id
+        or call.status in terminal
+        or run.status != "queued"
+        or not isinstance(run.resolved_config, dict)
+        or (call.provider_call_id and call.provider_call_id != provider_call_id)
+        or (meta.get("stream_sid") and meta["stream_sid"] != stream_sid)
+        or meta.get("stream_status") in {"stopped", "error"}
+    ):
+        return None
+
+    current_time = now()
+    run.status = "claimed"
+    run.claim_token = new_id()
+    run.claimed_at = current_time
+    run.lease_expires_at = current_time + timedelta(seconds=300)
+    run.status = "running"
+    run.started_at = run.started_at or current_time
+
+    call.provider_call_id = provider_call_id
+    call.status = "active"
+    call.started_at = call.started_at or current_time
+    call.answered_at = call.answered_at or current_time
+    meta.update(
+        {
+            "stream_sid": stream_sid,
+            "stream_status": "started",
+            "twilio_status": "in-progress",
+        }
+    )
+    call.provider_metadata = meta
+    flag_modified(call, "provider_metadata")
+
+    resolved_config = run.resolved_config
+    await session.commit()
+    return resolved_config
+
+
 async def apply_twilio_call_status(
     session: AsyncSession,
     call: Call,
     twilio_status: str | None,
+    *,
+    sequence_number: int | None = None,
+    provider_call_id: str | None = None,
 ) -> None:
-    if not twilio_status:
+    if sequence_number is not None and (
+        isinstance(sequence_number, bool)
+        or not isinstance(sequence_number, int)
+        or sequence_number < 0
+    ):
+        raise ValueError("sequence_number must be a nonnegative integer")
+    if not twilio_status or not isinstance(twilio_status, str):
         return
-    norm = TWILIO_STATUS_MAP.get(twilio_status.lower(), call.status)
-    meta = dict(call.provider_metadata or {})
-    meta["twilio_status"] = twilio_status
+    raw_status = twilio_status.lower()
+    norm = TWILIO_STATUS_MAP.get(raw_status)
+    if norm is None:
+        return
+
+    # Callback delivery order is independent of Twilio's event order. Refresh the
+    # identity map after acquiring the row lock so concurrent callbacks serialize.
+    locked_call = await session.get(
+        Call, call.id, with_for_update=True, populate_existing=True
+    )
+    if locked_call is None:
+        return
+    current_meta = dict(locked_call.provider_metadata or {})
+    if (
+        provider_call_id is not None
+        and locked_call.provider_call_id is not None
+        and locked_call.provider_call_id != provider_call_id
+    ):
+        raise ValueError("Twilio Call SID does not match")
+    previous_sequence = current_meta.get("twilio_sequence_number")
+    if sequence_number is not None and previous_sequence is not None:
+        if sequence_number <= previous_sequence:
+            return
+
+    current_status = locked_call.status
+    terminal = {"completed", "failed", "canceled"}
+    ranks = {"queued": 0, "dialing": 1, "ringing": 2, "active": 3}
+    if current_status in terminal:
+        if norm != current_status:
+            return
+    elif norm in terminal:
+        pass
+    elif ranks.get(norm, -1) < ranks.get(current_status, -1):
+        if provider_call_id is not None and locked_call.provider_call_id is None:
+            locked_call.provider_call_id = provider_call_id
+            current_meta["twilio_status"] = raw_status
+            current_meta["twilio_raw_status"] = raw_status
+            if sequence_number is not None:
+                current_meta["twilio_sequence_number"] = sequence_number
+            locked_call.provider_metadata = current_meta
+            flag_modified(locked_call, "provider_metadata")
+            await session.commit()
+        return
+
+    call = locked_call
+    call.status = norm
+    if provider_call_id is not None and call.provider_call_id is None:
+        call.provider_call_id = provider_call_id
+    meta = current_meta
+    meta["twilio_status"] = raw_status
+    meta["twilio_raw_status"] = raw_status
+    if sequence_number is not None:
+        meta["twilio_sequence_number"] = sequence_number
     call.provider_metadata = meta
     flag_modified(call, "provider_metadata")
 
@@ -207,17 +324,20 @@ async def apply_twilio_call_status(
             call.answered_at = now()
         if not call.started_at:
             call.started_at = now()
-    elif norm in ("completed", "failed", "canceled"):
+    elif norm in terminal:
         if not call.ended_at:
             call.ended_at = now()
         if call.run_id:
             run = await session.get(Run, call.run_id)
-            if run and run.status not in ("completed", "failed", "canceled"):
-                run.status = "completed" if norm == "completed" else "failed"
-                if not run.ended_at:
-                    run.ended_at = now()
+            if run and run.status not in terminal:
+                if run.status in {"queued", "claimed"}:
+                    run.status = "failed"
+                    if not run.error:
+                        run.error = f"Twilio call ended with status: {raw_status}"
+                    run.ended_at = run.ended_at or now()
+                # A provider hangup says nothing about the agent's business result.
+                # Running Runs remain owned by native runtime finalization.
 
-    call.status = norm
     await session.commit()
 
 
@@ -228,18 +348,41 @@ async def apply_twilio_stream_status(
     stream_sid: str | None,
     event: str | None,
     error: str | None,
+    provider_call_id: str | None = None,
 ) -> None:
+    event_status = {
+        "stream-started": "started",
+        "stream-stopped": "stopped",
+        "stream-error": "error",
+    }.get(event)
+    if not stream_sid or event_status is None:
+        return
+
+    call = await session.get(Call, call.id, with_for_update=True, populate_existing=True)
+    if call is None:
+        return
+
+    if (
+        provider_call_id is not None
+        and call.provider_call_id is not None
+        and call.provider_call_id != provider_call_id
+    ):
+        raise ValueError("Twilio Call SID does not match")
     meta = dict(call.provider_metadata or {})
-    if stream_sid:
-        meta["stream_sid"] = stream_sid
-    if event == "stream-started":
-        meta["stream_status"] = "started"
-    elif event == "stream-stopped":
-        meta["stream_status"] = "stopped"
-    elif event == "stream-error":
-        meta["stream_status"] = "error"
-        if error:
-            meta["stream_error"] = error
+    pinned_stream_sid = meta.get("stream_sid")
+    if pinned_stream_sid and pinned_stream_sid != stream_sid:
+        return
+    if call.status in {"completed", "failed", "canceled"} and event_status == "started":
+        return
+    if meta.get("stream_status") in {"stopped", "error"} and event_status == "started":
+        return
+
+    if provider_call_id is not None and call.provider_call_id is None:
+        call.provider_call_id = provider_call_id
+    meta["stream_sid"] = stream_sid
+    meta["stream_status"] = event_status
+    if event_status == "error":
+        meta["stream_error"] = "Twilio reported a stream error"
     call.provider_metadata = meta
     flag_modified(call, "provider_metadata")
     await session.commit()

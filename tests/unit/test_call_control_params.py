@@ -21,7 +21,9 @@ def test_interruptions_and_idle_timeout_are_applied_to_turn_settings():
         {"call_limits": {"interruptions_enabled": False, "idle_timeout_secs": 12}}, vad
     )
     assert disabled.user_idle_timeout == 12
-    assert all(not strategy._enable_interruptions for strategy in disabled.user_turn_strategies.start)
+    assert all(
+        not strategy._enable_interruptions for strategy in disabled.user_turn_strategies.start
+    )
 
 
 async def test_one_idle_reprompt_then_bounded_call_end():
@@ -40,7 +42,7 @@ async def test_one_idle_reprompt_then_bounded_call_end():
     assert host.tracker.diagnostic.call_args.kwargs["code"] == "caller_idle_timeout"
 
 
-async def test_end_call_queues_graceful_end_once_instead_of_cancelling_audio():
+async def test_end_call_intent_does_not_queue_end_before_result_delivery():
     host = NativePipelineHost("test-run", Path("unused"), SimpleNamespace())
     host.worker = SimpleNamespace(queue_frame=AsyncMock(), cancel=AsyncMock())
     host.tracker = Mock()
@@ -48,6 +50,9 @@ async def test_end_call_queues_graceful_end_once_instead_of_cancelling_audio():
     handler = host._handler("end_call")
     assert await handler({}, None) == {"status": "ok"}
     assert await handler({}, None) == {"status": "ok"}
+    host.worker.queue_frame.assert_not_awaited()
+    await host._finish_end_call()
+    await host._finish_end_call()
     assert host.worker.queue_frame.await_count == 1
     assert isinstance(host.worker.queue_frame.await_args.args[0], EndFrame)
     host.worker.cancel.assert_not_awaited()

@@ -25,7 +25,7 @@ from voice_api.schemas.agent import (
     UpdatedAgentVersionResponse,
 )
 from voice_api.services.publication_service import clone_version, sync_bindings
-from voice_runtime.contracts import AgentConfig
+from voice_runtime.contracts import AgentConfig, validate_node_actions
 
 router = APIRouter(tags=["agents"])
 Session = Depends(get_session)
@@ -62,6 +62,17 @@ async def validate_agent_bindings(session: AsyncSession, version: AgentVersion) 
     configured = {key: value.tool_version_id for key, value in config.tool_bindings.items()}
     if database != configured:
         raise HTTPException(422, "Agent tool bindings do not match pinned tool versions")
+    tool_versions = (
+        await session.scalars(select(ToolVersion).where(ToolVersion.id.in_(configured.values())))
+    ).all()
+    definitions = {
+        key: version.config
+        for key, binding in config.tool_bindings.items()
+        if (version := next((row for row in tool_versions if row.id == binding.tool_version_id), None))
+    }
+    action_errors = validate_node_actions(config.model_dump(mode="json"), definitions)
+    if action_errors:
+        raise HTTPException(422, action_errors[0])
 
 
 @router.get("/agents")

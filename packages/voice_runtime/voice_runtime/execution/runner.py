@@ -14,6 +14,7 @@ from voice_runtime.execution.delivery import finalize_evidence, stream_evidence
 from voice_runtime.execution.evidence_client import ApiEvidenceIngestor
 from voice_runtime.execution.exchange import ExchangeTracker
 from voice_runtime.execution.spool import DurableSpool
+from voice_runtime.execution.termination import TerminationSummary
 
 
 class CallDriver(Protocol):
@@ -95,7 +96,23 @@ async def execute_call(
                 await delivery_task
             final_state = await call_task
         outcome = "completed"
+        if isinstance(final_state, dict) and "termination" in final_state:
+            termination = TerminationSummary.model_validate(final_state["termination"])
+            outcome = termination.execution_status
+            if outcome != "completed":
+                error = f"Call ended without flow completion: {termination.cause}"
+                diagnostics.append(
+                    diagnostic_dict(
+                        severity="warning",
+                        category="call_termination",
+                        source="call",
+                        code=termination.cause,
+                        message="Call ended without flow completion",
+                        uncertain=termination.cause in {"unknown", "disconnect_unknown"},
+                    )
+                )
     except Exception as exc:
+        outcome = "failed"
         logger.exception("Call task raised exception during run {}: {}", run_id, exc)
         error = f"Call execution failed: {exc}"
         diagnostics.append(
@@ -113,6 +130,11 @@ async def execute_call(
             async with asyncio.timeout(15):
                 await driver.close()
             released = True
+            if isinstance(final_state, dict) and isinstance(final_state.get("termination"), dict):
+                final_state = {
+                    **final_state,
+                    "termination": {**final_state["termination"], "cleanup_status": "confirmed"},
+                }
         except Exception:
             error = "Transport cleanup uncertain; endpoint remains reserved"
             diagnostics.append(
@@ -130,7 +152,6 @@ async def execute_call(
                 await after_close()
             except Exception:
                 incomplete = True
-                outcome, error = "failed", "Call artifacts incomplete; inspect runtime files"
                 diagnostics.append(
                     diagnostic_dict(
                         severity="error",

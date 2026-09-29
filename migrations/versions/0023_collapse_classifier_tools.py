@@ -21,6 +21,20 @@ def upgrade() -> None:
     ):
         bind.execute(sa.text(f"ALTER TABLE public.{table} DISABLE TRIGGER {trigger}"))
 
+    canonical_count = bind.scalar(sa.text("SELECT count(*) FROM tools WHERE name = 'classify_lead'"))
+    legacy_count = bind.scalar(
+        sa.text("SELECT count(*) FROM tools WHERE name IN ('classify_jev', 'classify_llm')")
+    )
+    if not canonical_count and not legacy_count:
+        for table, trigger in (
+            ("agent_versions", "validate_publication"),
+            ("agent_versions", "guard_published"),
+            ("tool_versions", "guard_published"),
+            ("agent_version_tools", "guard_binding"),
+        ):
+            bind.execute(sa.text(f"ALTER TABLE public.{table} ENABLE TRIGGER {trigger}"))
+        return
+
     bind.execute(
         sa.text(
             """
