@@ -31,7 +31,7 @@ class Settings(BaseSettings):
         default=None, validation_alias="CLERK_PUBLISHABLE_KEY"
     )
     clerk_authorized_parties: str = "http://localhost:5173,http://localhost:8000"
-    organization_creation_enabled: bool = False
+    organization_creation_enabled: bool = True
     public_base_url: str | None = None
     gemini_api_key: str | None = None
     integration_media_dir: str = "data/integration-media"
