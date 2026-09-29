@@ -267,9 +267,42 @@ async def handle_browser_offer(
     session: AsyncSession,
 ) -> dict[str, Any]:
     """Handle WebRTC offer from browser, setting up SmallWebRTC and NativePipelineHost."""
-    browser_session = await session.get(BrowserSession, session_id)
+    browser_session = await session.get(
+        BrowserSession, session_id, with_for_update=True
+    )
     if not browser_session:
         raise HTTPException(404, "Browser session not found")
+
+    if (
+        browser_session.status in ("created", "connecting")
+        and browser_session.expires_at is not None
+        and browser_session.expires_at <= now()
+    ):
+        browser_session.status = "expired"
+        browser_session.disconnected_at = now()
+        context = browser_session_manager.get_context(session_id)
+        run = await session.get(Run, browser_session.run_id)
+        if run is not None and run.status in ("claimed", "running"):
+            run.status = "failed"
+            run.ended_at = now()
+            run.error = "Browser session expired before connection"
+            termination = CallTermination()
+            termination.request("cancelled")
+            run.final_state = {
+                **(run.final_state or {}),
+                "termination": termination.snapshot(),
+                "evidence_incomplete": True,
+            }
+        await session.commit()
+        if context is not None:
+            context.request_end("cancelled")
+            try:
+                await context.close_runtime()
+            except BaseException:
+                logger.exception("Failed to clean up expired browser session {}", session_id)
+            finally:
+                await browser_session_manager.remove_context(session_id)
+        raise HTTPException(410, "Browser session has expired")
 
     if browser_session.status in ("disconnected", "expired", "failed"):
         raise HTTPException(410, "Browser session is no longer active")
@@ -297,11 +330,31 @@ async def handle_browser_offer(
         ctx.connected_event.set()
 
         async with SessionFactory() as db_session:
-            bs = await db_session.get(BrowserSession, session_id)
-            if bs:
-                bs.status = "connected"
-                bs.connected_at = now()
-                bs.connection_id = pipecat_connection.pc_id
+            bs = await db_session.get(
+                BrowserSession, session_id, with_for_update=True
+            )
+            if (
+                bs is None
+                or bs.status not in ("created", "connecting")
+                or (bs.expires_at is not None and bs.expires_at <= now())
+            ):
+                await db_session.rollback()
+                try:
+                    await pipecat_connection.disconnect()
+                except BaseException:
+                    logger.exception("Failed to disconnect expired browser peer {}", session_id)
+                finally:
+                    ctx.request_end("cancelled")
+                    try:
+                        await ctx.close_runtime()
+                    except BaseException:
+                        logger.exception("Failed to clean up expired browser session {}", session_id)
+                    finally:
+                        await browser_session_manager.remove_context(session_id)
+                raise HTTPException(410, "Browser session expired before connection")
+            bs.status = "connected"
+            bs.connected_at = now()
+            bs.connection_id = pipecat_connection.pc_id
             r = await db_session.get(Run, run.id)
             if r:
                 r.status = "running"
