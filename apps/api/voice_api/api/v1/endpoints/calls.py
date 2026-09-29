@@ -9,10 +9,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.core.config import get_settings
+from voice_api.core.hosting import require_hosted_call_admission
 from voice_api.core.security import allow_organization_member
 from voice_api.models import Call, Run
 from voice_api.schemas.call import StartCallBody
 from voice_api.services.call_service import queue_call
+from voice_api.services.credential_runtime_host import CredentialRuntimeHost as NativePipelineHost
 from voice_api.services.local_runtime_service import (
     LocalEvidenceIngestor,
     local_claim,
@@ -20,7 +22,6 @@ from voice_api.services.local_runtime_service import (
     register_local_artifacts,
 )
 from voice_api.services.provider_credentials import settings_for_run
-from voice_runtime.execution.native import NativePipelineHost
 from voice_runtime.execution.runner import execute_call
 from voice_runtime.telephony.driver import Sim7600CallDriver
 
@@ -164,6 +165,7 @@ async def dispatch_queued_call(
         raise HTTPException(404, "Call not found")
     if call.status != "queued":
         raise HTTPException(409, "Only queued calls can be dispatched")
+    require_hosted_call_admission(call.provider)
     run = await session.get(Run, call.run_id) if call.run_id else None
     if run is None:
         raise HTTPException(404, "Run not found")

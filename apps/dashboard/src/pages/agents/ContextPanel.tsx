@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { NumberField } from "./ConfigFields";
+import { CredentialBindingSelect, bindCredential } from "./CredentialBindingSelect";
 import type { AgentConfig, ProviderCatalog, SummarizerConfig } from "./types";
 
 export function ContextPanel({
@@ -134,6 +135,7 @@ export function ContextPanel({
               <option value="enabled">Enabled</option>
             </NativeSelect>
           </Field>
+          {summarizer.enabled && <CredentialBindingSelect stage="summarizer" provider={summaryModel.provider} value={config.credential_refs.summarizer} disabled={disabled} change={(id) => change(bindCredential(config, "summarizer", id))} />}
 
           <Field>
             <FieldLabel htmlFor="summary-provider">Summary LLM provider</FieldLabel>

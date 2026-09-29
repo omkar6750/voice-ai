@@ -308,7 +308,7 @@ async def test_websocket_ticket_and_duplicate_rejection():
         "voice_api.services.browser_session_service.browser_session_manager",
         manager,
     ):
-        response = await issue_browser_ticket(session_id, session_mock)
+        response = await issue_browser_ticket(session_id, session_mock, actor_user_id="user-test")
         assert response["ticket"]
         assert await manager.consume_ticket(session_id, "wrong") is None
         ctx = await manager.consume_ticket(session_id, response["ticket"])
@@ -316,12 +316,12 @@ async def test_websocket_ticket_and_duplicate_rejection():
         assert ctx.org_id == "org-test"
         assert await manager.consume_ticket(session_id, response["ticket"]) is None
         with pytest.raises(HTTPException) as exc_info:
-            await issue_browser_ticket(session_id, session_mock)
+            await issue_browser_ticket(session_id, session_mock, actor_user_id="user-test")
         assert exc_info.value.status_code == 409
 
         run.org_id = "org-other"
         with pytest.raises(HTTPException) as mismatched:
-            await issue_browser_ticket(session_id, session_mock)
+            await issue_browser_ticket(session_id, session_mock, actor_user_id="user-test")
         assert mismatched.value.status_code == 404
 
 

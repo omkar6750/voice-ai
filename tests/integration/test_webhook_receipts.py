@@ -17,7 +17,7 @@ from voice_api.models import (
 )
 from voice_api.models.common import new_id
 from voice_api.services import vault_service
-from voice_api.services.vault_service import CredentialVault
+from voice_api.services.vault_service import CredentialVault, SecretScope
 
 
 async def test_receipts_are_account_scoped_and_deduplicated(client, database, monkeypatch):
@@ -30,7 +30,6 @@ async def test_receipts_are_account_scoped_and_deduplicated(client, database, mo
         ),
     )
     encryption = CredentialVault({"test": key}, "test")
-    secret = encryption.encrypt("test-app-secret")
     connection_ids = [new_id(), new_id()]
     for connection_id in connection_ids:
         database.add(
@@ -47,9 +46,14 @@ async def test_receipts_are_account_scoped_and_deduplicated(client, database, mo
     version = AgentVersion(id=new_id(), agent_id=agent.id, version=1, config={})
     database.add(version)
     for connection_id in connection_ids:
+        secret_id = new_id()
+        secret = encryption.encrypt("test-app-secret", scope=SecretScope(
+            database.sync_session.info["organization_scope_id"], secret_id,
+            "whatsapp", "app_secret", 1,
+        ))
         database.add(
             IntegrationSecret(
-                id=new_id(),
+                id=secret_id,
                 connection_id=connection_id,
                 name="app_secret",
                 ciphertext=secret.ciphertext,

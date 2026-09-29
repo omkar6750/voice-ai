@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { FieldGroup } from "@/components/ui/field";
 import { useResource } from "@/lib/resources";
 import { NumberField } from "./ConfigFields";
+import { CredentialBindingSelect, bindCredential } from "./CredentialBindingSelect";
 import type { AgentConfig } from "./types";
 
 type Base = { id: string; name: string };
@@ -71,6 +72,7 @@ export function KnowledgePanel({
       <section className="flex flex-col gap-4">
         <h2 className="text-base font-semibold">Retrieval</h2>
         <FieldGroup>
+          {config.knowledge_base_ids.length > 0 && <CredentialBindingSelect stage="embedding" provider="gemini" value={config.credential_refs.embedding} disabled={disabled} change={(id) => change(bindCredential(config, "embedding", id))} />}
           <NumberField
             id="top-k"
             label="Top results"

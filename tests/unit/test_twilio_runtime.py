@@ -61,6 +61,9 @@ def runtime(monkeypatch, tmp_path):
 
     monkeypatch.setattr(service, "SessionFactory", session_factory)
     monkeypatch.setattr(service, "bind_run_organization", AsyncMock(return_value="org-test"))
+    from voice_api.services import provider_credentials
+
+    monkeypatch.setattr(provider_credentials, "settings_for_snapshot", AsyncMock(side_effect=lambda _session, _org, _snapshot, base, **_kwargs: base))
     persist = AsyncMock()
     monkeypatch.setattr(service, "persist_diagnostic", persist)
     spool = MagicMock()

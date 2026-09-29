@@ -22,7 +22,10 @@ def test_staged_org_backfill_covers_every_customer_model() -> None:
     customer_tables = set(ast.literal_eval(tables_assignment.value))
     modeled = {table.name for table in Base.metadata.tables.values() if "org_id" in table.c}
     # The later provider credential and runtime context event migrations add these tables.
-    assert modeled == customer_tables | {"provider_credentials", "run_context_events"}
-    assert len(modeled) == 39
+    assert modeled == customer_tables | {
+        "provider_credentials", "run_context_events", "credential_leases",
+        "recording_deletions", "recording_deletion_items",
+    }
+    assert len(modeled) == 42
     assert "runtime_endpoints" not in modeled
     assert "organizations" not in modeled

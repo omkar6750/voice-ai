@@ -55,13 +55,13 @@ async def validate_tool_registry(session: AsyncSession) -> ToolValidationReport:
         config = version.config or {}
         try:
             parsed = ToolConfig.model_validate(config)
-        except Exception as exc:
+        except Exception:
             issues.append(
                 _issue(
                     "error",
                     "invalid_tool_config",
                     "tool_version",
-                    f"Tool version config is invalid: {exc}",
+                    "Tool version config is invalid; correct its configuration.",
                     version.id,
                     version_number=version.version,
                 )
@@ -104,13 +104,13 @@ async def validate_tool_registry(session: AsyncSession) -> ToolValidationReport:
         row_map = {row.binding_key: row for row in rows}
         try:
             config = AgentConfig.model_validate(version.config or {})
-        except Exception as exc:
+        except Exception:
             issues.append(
                 _issue(
                     "error",
                     "invalid_agent_config",
                     "agent_version",
-                    f"Agent version config is invalid: {exc}",
+                    "Agent version config is invalid; correct its configuration.",
                     version.id,
                     version_number=version.version,
                 )
@@ -247,12 +247,12 @@ async def cleanup_unreferenced_drafts(session: AsyncSession) -> list[str]:
     bindings = set((await session.scalars(select(AgentVersionTool.tool_version_id))).all())
     invoked = set((await session.scalars(select(ToolInvocation.tool_version_id))).all())
     candidates = (
-        await session.scalars(
-            select(ToolVersion).where(ToolVersion.status == "draft")
-        )
+        await session.scalars(select(ToolVersion).where(ToolVersion.status == "draft"))
     ).all()
     removable = [row for row in candidates if row.id not in bindings and row.id not in invoked]
     if removable:
-        await session.execute(delete(ToolVersion).where(ToolVersion.id.in_([r.id for r in removable])))
+        await session.execute(
+            delete(ToolVersion).where(ToolVersion.id.in_([r.id for r in removable]))
+        )
         await session.commit()
     return [row.id for row in removable]

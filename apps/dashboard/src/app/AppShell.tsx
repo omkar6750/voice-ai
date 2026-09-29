@@ -23,6 +23,7 @@ import {
 const navigation = [
   { title: "Agents", path: "/agents", icon: AudioLines },
   { title: "Runs", path: "/runs", icon: Activity },
+  { title: "Recordings", path: "/recordings", icon: AudioLines },
   { title: "Contacts", path: "/contacts", icon: Users },
   { title: "Knowledge", path: "/knowledge", icon: Database },
   { title: "Tools", path: "/tools", icon: ListTodo },
@@ -49,7 +50,7 @@ function SideNavigation({ platformAdmin, canManageHardware, supportMode }: { pla
           <SidebarGroupLabel>Organization</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navigation.filter((item) => item.path !== "/endpoints" || canManageHardware).map(({ title, path, icon: Icon }) => (
+              {navigation.filter((item) => (item.path !== "/endpoints" || canManageHardware) && (item.path !== "/recordings" || !supportMode)).map(({ title, path, icon: Icon }) => (
                 <SidebarMenuItem key={path}>
                   <SidebarMenuButton asChild tooltip={title} isActive={pathname === path || pathname.startsWith(`${path}/`)}>
                     <NavLink to={path}><Icon aria-hidden="true" /><span>{title}</span></NavLink>

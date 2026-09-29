@@ -141,6 +141,7 @@ class AgentConfig(ConfigModel):
     knowledge_base_ids: list[Identifier] = Field(default_factory=list)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     stt: STTConfig = Field(default_factory=STTConfig)
+    credential_refs: dict[Literal["stt", "llm", "tts", "classifier", "summarizer", "embedding"], Identifier] = Field(default_factory=dict)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     tts: TTSConfig = Field(default_factory=TTSConfig)
     audio: AudioConfig = Field(default_factory=AudioConfig)

@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { useAuth } from "@clerk/react";
 import {
   Link,
   useNavigate,
@@ -139,6 +140,7 @@ export function IntegrationDetailPage() {
   const { connectionId = "" } = useParams();
   const [params, setParams] = useSearchParams();
   const api = useApi();
+  const { orgId } = useAuth();
   const { canManage } = useOrganizationAccess();
   const navigate = useNavigate();
   const {
@@ -165,6 +167,21 @@ export function IntegrationDetailPage() {
   const [wabaId, setWabaId] = useState("");
   const [apiVersion, setApiVersion] = useState("");
   const [accountSid, setAccountSid] = useState("");
+  const [credentialId, setCredentialId] = useState("");
+  const [twilioCredentials, setTwilioCredentials] = useState<components["schemas"]["CredentialStatus"][]>([]);
+  const [whatsappCredentials, setWhatsappCredentials] = useState<components["schemas"]["CredentialStatus"][]>([]);
+
+  useEffect(() => {
+    let active = true;
+    if (!orgId) { setTwilioCredentials([]); setWhatsappCredentials([]); return () => { active = false; }; }
+    void api<components["schemas"]["CredentialStatus"][]>(`/orgs/${orgId}/credentials`)
+      .then((rows) => { if (active) {
+        setTwilioCredentials(rows.filter((row) => row.provider === "twilio" && row.status === "stored"));
+        setWhatsappCredentials(rows.filter((row) => row.provider === "whatsapp" && row.status === "stored"));
+      } })
+      .catch(() => { if (active) { setTwilioCredentials([]); setWhatsappCredentials([]); } });
+    return () => { active = false; };
+  }, [api, orgId]);
 
   // Twilio testing & sync state
   const [testBusy, setTestBusy] = useState(false);
@@ -295,6 +312,7 @@ export function IntegrationDetailPage() {
     setEnabled(connection.enabled);
     if (connection.provider === "twilio_voice") {
       setAccountSid(connection.config?.account_sid || "");
+      setCredentialId(connection.credential_id || "");
     } else {
       setPhoneId(connection.config?.phone_number_id || "");
       setWabaId(connection.config?.waba_id || "");
@@ -328,6 +346,7 @@ export function IntegrationDetailPage() {
           enabled,
           config,
           expected_updated_at: connection.updated_at,
+          credential_id: credentialId || null,
         }),
       });
       toast.success("Account settings updated successfully");
@@ -754,6 +773,15 @@ export function IntegrationDetailPage() {
                         </Field>
 
                         {isTwilio ? (
+                          <>
+                          <Field>
+                            <FieldLabel htmlFor="edit-twilio-credential">Named Twilio credential</FieldLabel>
+                            <NativeSelect id="edit-twilio-credential" value={credentialId} onChange={(event) => setCredentialId(event.target.value)}>
+                              <option value="">Select a credential</option>
+                              {twilioCredentials.map((item) => <option key={item.id} value={item.id}>{item.name} · v{item.version}</option>)}
+                            </NativeSelect>
+                            <FieldDescription>Choose the saved Account SID, REST API key and webhook Auth Token bundle from Organization settings.</FieldDescription>
+                          </Field>
                           <Field>
                             <FieldLabel htmlFor="edit-account-sid">
                               Account SID
@@ -770,8 +798,17 @@ export function IntegrationDetailPage() {
                               Twilio Account SID (34 chars, starts with AC).
                             </FieldDescription>
                           </Field>
+                          </>
                         ) : (
                           <>
+                            <Field>
+                              <FieldLabel htmlFor="edit-whatsapp-credential">Named WhatsApp credential</FieldLabel>
+                              <NativeSelect id="edit-whatsapp-credential" value={credentialId} onChange={(event) => setCredentialId(event.target.value)}>
+                                <option value="">Select a credential</option>
+                                {whatsappCredentials.map((item) => <option key={item.id} value={item.id}>{item.name} · v{item.version}</option>)}
+                              </NativeSelect>
+                              <FieldDescription>Choose the saved Meta access token from Organization settings.</FieldDescription>
+                            </Field>
                             <Field>
                               <FieldLabel htmlFor="edit-phone-id">
                                 Phone number ID

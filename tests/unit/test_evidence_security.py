@@ -1,6 +1,3 @@
-import json
-from types import SimpleNamespace
-
 import pytest
 from cryptography.fernet import Fernet
 from voice_api.integrations import vault
@@ -24,23 +21,18 @@ def test_redaction_preserves_usage_and_removes_credentials():
 
 def test_vault_settings_rotation_and_wrong_key(monkeypatch):
     old_key, new_key = Fernet.generate_key().decode(), Fernet.generate_key().decode()
-    monkeypatch.setattr(
-        vault,
-        "get_settings",
-        lambda: SimpleNamespace(
-            integration_keys=json.dumps({"old": old_key}), integration_active_key="old"
-        ),
-    )
-    encrypted = vault.CredentialVault.from_env().encrypt("test-credential")
+    old = vault.CredentialVault({"old": old_key}, "old")
+    scope = vault.SecretScope("org", "secret", "twilio", "api_key", 1)
+    encrypted = old.encrypt("test-credential", scope=scope)
     rotating = vault.CredentialVault({"old": old_key, "new": new_key}, "new")
-    rotated = rotating.rotate(encrypted.ciphertext, encrypted.key_id)
+    rotated = rotating.rotate(encrypted.ciphertext, encrypted.key_id, scope=scope)
     assert rotated.key_id == "new"
     assert (
-        vault.CredentialVault({"new": new_key}, "new").decrypt(rotated.ciphertext, "new")
+        vault.CredentialVault({"new": new_key}, "new").decrypt(rotated.ciphertext, "new", scope=scope)
         == "test-credential"
     )
     with pytest.raises(vault.VaultError):
-        vault.CredentialVault({"old": new_key}, "old").decrypt(encrypted.ciphertext, "old")
+        vault.CredentialVault({"old": new_key}, "old").decrypt(encrypted.ciphertext, "old", scope=scope)
 
 
 def test_connection_config_cannot_accept_secret():

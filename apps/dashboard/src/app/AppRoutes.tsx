@@ -6,6 +6,7 @@ import { PendingPage } from "@/pages/PendingPage";
 const RunsPage = lazy(() =>
   import("@/pages/runs").then((page) => ({ default: page.RunsPage })),
 );
+const RecordingsPage = lazy(() => import("@/pages/recordings").then(page => ({ default: page.RecordingsPage })));
 const RunDetailPage = lazy(() =>
   import("@/pages/runs/detail").then((page) => ({
     default: page.RunDetailPage,
@@ -89,6 +90,7 @@ export function AppRoutes() {
         <Route path="/" element={<Navigate to="/runs" replace />} />
         <Route path="/platform/support" element={<Navigate to="/runs" replace />} />
         <Route path="/runs" element={<RunsPage />} />
+        <Route path="/recordings" element={<RecordingsPage />} />
         <Route path="/runs/:runId" element={<RunDetailPage />} />
         <Route path="/agents" element={<AgentsPage />} />
         <Route path="/agents/:agentId" element={<AgentDetailPage />} />

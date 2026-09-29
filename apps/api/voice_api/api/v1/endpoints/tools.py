@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner
+from voice_api.core.development import require_development_cleanup
 from voice_api.core.security import allow_organization_member
 from voice_api.models import (
     Agent,
@@ -581,6 +582,7 @@ async def tool_deletion_impact(
 
 @router.delete("/tools/{tool_id}")
 async def delete_tool(tool_id: str, session: AsyncSession = Session, _: None = Operator) -> dict:
+    require_development_cleanup()
     tool = await session.get(Tool, tool_id)
     if tool is None:
         raise HTTPException(404, "Tool not found")

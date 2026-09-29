@@ -21,6 +21,12 @@ from voice_api.models.common import new_id
 
 async def sync_bindings(session: AsyncSession, version: AgentVersion) -> None:
     config = AgentConfig.model_validate(version.config)
+    from voice_api.core.config import get_settings
+
+    if config.credential_refs or get_settings().env != "dev":
+        from voice_api.services.provider_credentials import resolve_references
+
+        await resolve_references(session, config.model_dump(mode="json"), strict=True)
     for binding in config.tool_bindings.values():
         tool = await session.get(ToolVersion, binding.tool_version_id)
         if tool is None or tool.tool_id != binding.tool_id or tool.status != "published":

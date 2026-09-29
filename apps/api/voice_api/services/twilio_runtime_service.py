@@ -16,7 +16,6 @@ from voice_runtime.contracts.diagnostics import diagnostic_dict
 from voice_runtime.execution.delivery import finalize_evidence, stream_evidence, supervise_execution
 from voice_runtime.execution.evidence_client import ApiEvidenceIngestor
 from voice_runtime.execution.exchange import ExchangeTracker
-from voice_runtime.execution.native import NativePipelineHost
 from voice_runtime.execution.spool import DurableSpool
 from voice_runtime.telephony.twilio_session import TERMINAL_STATUSES, TwilioMediaSession
 
@@ -27,6 +26,7 @@ from voice_api.models import Call, Run
 from voice_api.models.common import now
 from voice_api.schemas.diagnostics import DiagnosticInput
 from voice_api.services.call_service import TWILIO_STATUS_MAP
+from voice_api.services.credential_runtime_host import CredentialRuntimeHost as NativePipelineHost
 from voice_api.services.diagnostic_service import persist_diagnostic
 
 
@@ -73,6 +73,13 @@ async def run_twilio_pipeline(
         runtime_token = runtime_token_for_run(settings.runtime_service_token or "", run_id)
         ingestor = ApiEvidenceIngestor(client, run_id, runtime_token)
         try:
+            async with SessionFactory() as credential_session:
+                organization_id = await bind_run_organization(credential_session, run_id)
+                from voice_api.services.provider_credentials import settings_for_snapshot
+
+                settings = await settings_for_snapshot(
+                    credential_session, organization_id, snapshot, settings, run_id=run_id
+                )
             host = NativePipelineHost(
                 run_id=run_id,
                 recordings_dir=Path(settings.recordings_dir),

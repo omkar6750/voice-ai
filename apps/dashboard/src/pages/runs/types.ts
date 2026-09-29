@@ -123,14 +123,7 @@ export type FlowVisit = {
 
 export type Timeline = components["schemas"]["TimelineResponse"];
 
-export type Artifact = {
-  id: string;
-  kind: "input" | "output" | "mixed" | "pipeline_log";
-  size_bytes: number;
-  expires_at: string | null;
-  deleted_at: string | null;
-  deletion_error: string | null;
-};
+export type Artifact = components["schemas"]["RecordingResponse"];
 
 export type Selection =
   | { kind: "run" }

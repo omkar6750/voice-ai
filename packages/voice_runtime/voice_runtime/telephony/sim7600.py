@@ -6,8 +6,8 @@ import time
 from collections.abc import Callable
 
 import serial
-from loguru import logger
 
+from voice_runtime.safe_logs import RuntimeEvent, operational_event
 from voice_runtime.telephony.base import CallState, TelephonyTransport
 from voice_runtime.telephony.status import ModemStatus, ModemStatusReader, parse_call_state
 
@@ -99,16 +99,8 @@ class Sim7600Modem(TelephonyTransport):
         target = 1 if sample_rate == 16000 else 0
         current = await self.get_pcm_format()
         if current != target:
-            logger.info(
-                "Modem PCM format is {} ({}); switching to {} ({}Hz)",
-                current,
-                "16kHz" if current == 1 else "8kHz",
-                target,
-                sample_rate,
-            )
             await self._command(f"AT+CPCMFRM={target}")
-        else:
-            logger.info("Modem PCM format verified: {} ({}Hz)", target, sample_rate)
+        operational_event(RuntimeEvent.PCM_CONFIGURED, sample_rate=sample_rate)
 
     async def status(self) -> ModemStatus:
         await self.open()
@@ -170,7 +162,7 @@ class Sim7600Modem(TelephonyTransport):
     def _command_sync(self, command: str) -> list[str]:
         serial_port = self._serial
         label = "ATD<number>;" if command.startswith("ATD") else command
-        logger.info("AT TX {}", label)
+        operational_event(RuntimeEvent.MODEM_COMMAND, status="started")
         serial_port.write((command + "\r").encode("ascii"))
         lines: list[str] = []
         pending = bytearray()
@@ -188,7 +180,15 @@ class Sim7600Modem(TelephonyTransport):
                 line = raw_line.decode("ascii", errors="replace").strip()
                 if not line or line == command:
                     continue
-                logger.info("AT RX {}", redact_at_response(line.split(',"')[0]))
+                operational_event(
+                    RuntimeEvent.MODEM_RESPONSE,
+                    response="ok"
+                    if line == "OK"
+                    else "rejected"
+                    if line in {"ERROR", "NO CARRIER", "BUSY", "NO ANSWER"}
+                    or line.startswith(("+CME ERROR", "+CMS ERROR"))
+                    else "data",
+                )
                 lines.append(line)
                 if line == "OK":
                     return lines

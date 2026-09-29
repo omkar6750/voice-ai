@@ -1,4 +1,4 @@
-"""Plain pipeline logs and timestamp-aligned serial PCM recordings for the POC."""
+"""Safe operational events and timestamp-aligned serial PCM recordings."""
 
 import time
 import wave
@@ -6,8 +6,9 @@ from collections import Counter
 from pathlib import Path
 
 import numpy as np
-from loguru import logger
 from pipecat.observers.base_observer import BaseObserver, FramePushed
+
+from voice_runtime.safe_logs import RuntimeEvent, operational_event
 
 
 class CallCapture(BaseObserver):
@@ -47,9 +48,9 @@ class CallCapture(BaseObserver):
         self.pcm_bytes[direction] += len(audio)
         count = self.pcm_bytes[direction]
         if count == len(audio) or count // 16000 != (count - len(audio)) // 16000:
-            values = np.frombuffer(audio, dtype="<i2").astype(np.float64)
-            rms = float(np.sqrt(np.mean(values * values))) if samples else 0.0
-            logger.info("PCM {} bytes={} samples={} rms={:.1f}", direction, count, samples, rms)
+            operational_event(
+                RuntimeEvent.PCM_CAPTURED, direction=direction, bytes=count, samples=samples
+            )
 
     async def on_push_frame(self, data: FramePushed):
         frame = data.frame
@@ -74,19 +75,7 @@ class CallCapture(BaseObserver):
 
         if audio is not None and count != 1 and count % 50:
             return
-        detail = (
-            f"bytes={len(audio)} rate={frame.sample_rate} channels={frame.num_channels}"
-            if audio is not None
-            else getattr(frame, "text", getattr(frame, "error", ""))
-        )
-        logger.debug(
-            "PIPE {} -> {} {} {} count={} {}",
-            *edge[:2],
-            data.direction.name,
-            edge[2],
-            count,
-            detail,
-        )
+        operational_event(RuntimeEvent.FRAME_OBSERVED, level="DEBUG", count=count)
 
     def close(self):
         if self.closed:
@@ -108,5 +97,9 @@ class CallCapture(BaseObserver):
                     right, "<i2"
                 ).astype(np.int32)
                 mixed.writeframes(np.clip(values, -32768, 32767).astype("<i2").tobytes())
-        logger.info("CAPTURE serial bytes={}", dict(self.pcm_bytes))
-        logger.debug("CAPTURE frame counts={}", dict(self.frames))
+        operational_event(
+            RuntimeEvent.CAPTURE_CLOSED,
+            bytes=sum(self.pcm_bytes.values()),
+            count=sum(self.frames.values()),
+            duration_ms=(self.clock() - self.started) * 1000,
+        )

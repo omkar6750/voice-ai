@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 from fastapi import HTTPException
@@ -13,7 +14,7 @@ from twilio.rest import Client
 from voice_runtime.telephony.twilio import TwilioCredentials
 
 from voice_api.models import IntegrationConnection, IntegrationSecret
-from voice_api.services.vault_service import CredentialVault, VaultError
+from voice_api.services.vault_service import CredentialVault, SecretScope, VaultError
 
 
 async def resolve_twilio_credentials(
@@ -21,6 +22,7 @@ async def resolve_twilio_credentials(
     connection_id: str,
     *,
     require_enabled: bool = True,
+    run_id: str | None = None,
 ) -> tuple[IntegrationConnection, TwilioCredentials]:
     connection = await session.get(IntegrationConnection, connection_id)
     if connection is None:
@@ -29,6 +31,31 @@ async def resolve_twilio_credentials(
         raise HTTPException(422, "Connection is not a Twilio Voice connection")
     if require_enabled and not connection.enabled:
         raise HTTPException(422, "Twilio connection is disabled")
+    if connection.deleted_at is not None:
+        raise HTTPException(422, "Twilio connection is deleted")
+
+    if connection.credential_id:
+        from voice_api.services.credential_service import credential_scope, lookup
+
+        row = await lookup(session, connection.credential_id, lock=bool(run_id))
+        if run_id:
+            from voice_api.models import Run
+            from voice_api.services.credential_lease_service import issue
+
+            run = await session.get(Run, run_id)
+            pinned = run.resolved_config.get("_resolved", {}).get("telephony_credential") if run else None
+            if not pinned or pinned["credential_id"] != row.id or pinned["version"] != row.version:
+                raise HTTPException(422, "Twilio run credential was changed or revoked")
+            await issue(session, run_id, row)
+        if row.provider != "twilio" or row.purpose != "twilio_voice" or row.status != "stored":
+            raise HTTPException(422, "Twilio credential is unavailable")
+        try:
+            values = json.loads(CredentialVault.from_env().decrypt(row.ciphertext, row.key_id, scope=credential_scope(row)))
+            if values["account_sid"] != (connection.config or {}).get("account_sid"):
+                raise HTTPException(422, "Twilio credential Account SID does not match connection")
+            return connection, TwilioCredentials(**values)
+        except (VaultError, ValueError, KeyError, TypeError) as error:
+            raise HTTPException(503, "Twilio credential is unavailable") from error
 
     from sqlalchemy import select
 
@@ -42,7 +69,8 @@ async def resolve_twilio_credentials(
         raise HTTPException(422, "Twilio connection is missing auth_token secret")
 
     try:
-        auth_token = CredentialVault.from_env().decrypt(secret.ciphertext, secret.key_id)
+        auth_token = CredentialVault.from_env().decrypt(secret.ciphertext, secret.key_id,
+            scope=SecretScope(secret.org_id, secret.id, connection.provider, secret.name, secret.version))
     except VaultError as error:
         raise HTTPException(503, "Failed to decrypt Twilio auth token") from error
 
@@ -50,11 +78,21 @@ async def resolve_twilio_credentials(
     if not account_sid or not account_sid.startswith("AC"):
         raise HTTPException(422, "Invalid Twilio Account SID in connection config")
 
-    return connection, TwilioCredentials(account_sid=account_sid, auth_token=auth_token)
+    from voice_api.api.v1.endpoints.integrations import secret_value
+
+    # Webhook tokens remain readable; REST never substitutes one for a key.
+    extras = {}
+    for name in ("api_key_sid", "api_key_secret"):
+        try:
+            extras[name] = await secret_value(session, connection_id, name)
+        except HTTPException as error:
+            if error.status_code != 422:
+                raise
+    return connection, TwilioCredentials(account_sid=account_sid, auth_token=auth_token, **extras)
 
 
 async def test_twilio_connection(credentials: TwilioCredentials) -> dict[str, Any]:
-    client = Client(credentials.account_sid, credentials.auth_token)
+    client = Client(*credentials.rest_auth, account_sid=credentials.account_sid)
     try:
         account = await asyncio.to_thread(client.api.v2010.accounts(credentials.account_sid).fetch)
     except TwilioRestException as error:

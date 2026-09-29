@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.core.config import get_settings
 from voice_api.models import CalendarIntegration, CalendarIntegrationSecret
 from voice_api.models.common import new_id
-from voice_api.services.vault_service import CredentialVault
+from voice_api.services.vault_service import CredentialVault, SecretScope
 
 SCOPES = [
     "https://www.googleapis.com/auth/calendar.freebusy",
@@ -157,10 +157,6 @@ def generate_slots(
     return result
 
 
-def _secret(value: str) -> dict[str, str]:
-    return CredentialVault.from_env().encrypt(value).__dict__
-
-
 async def _secret_value(session: AsyncSession, integration_id: str, name: str) -> str | None:
     row = await session.scalar(
         select(CalendarIntegrationSecret).where(
@@ -170,11 +166,11 @@ async def _secret_value(session: AsyncSession, integration_id: str, name: str) -
     )
     if row is None:
         return None
-    return CredentialVault.from_env().decrypt(row.ciphertext, row.key_id)
+    return CredentialVault.from_env().decrypt(row.ciphertext, row.key_id,
+        scope=SecretScope(row.org_id, row.id, "google_calendar", row.name, row.version))
 
 
 async def _put_secret(session: AsyncSession, integration_id: str, name: str, value: str) -> None:
-    encrypted = _secret(value)
     row = await session.scalar(
         select(CalendarIntegrationSecret).where(
             CalendarIntegrationSecret.calendar_integration_id == integration_id,
@@ -182,13 +178,16 @@ async def _put_secret(session: AsyncSession, integration_id: str, name: str, val
         )
     )
     if row is None:
-        session.add(
-            CalendarIntegrationSecret(
-                id=new_id(), calendar_integration_id=integration_id, name=name, **encrypted
-            )
-        )
+        from voice_api.db.tenant_scope import required_organization
+
+        row = CalendarIntegrationSecret(id=new_id(), org_id=required_organization(session.sync_session),
+            calendar_integration_id=integration_id, name=name, version=1)
+        session.add(row)
     else:
-        row.ciphertext, row.key_id = encrypted["ciphertext"], encrypted["key_id"]
+        row.version += 1
+    encrypted = CredentialVault.from_env().encrypt(value,
+        scope=SecretScope(row.org_id, row.id, "google_calendar", name, row.version))
+    row.ciphertext, row.key_id = encrypted.ciphertext, encrypted.key_id
 
 
 def google_flow(state: str | None = None, *, code_verifier: str | None = None) -> Flow:

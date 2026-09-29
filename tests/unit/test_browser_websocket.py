@@ -49,7 +49,7 @@ def test_websocket_auth_and_binary_audio_round_trip():
 
     manager = BrowserSessionManager()
     app.dependency_overrides[get_session] = db_dependency
-    app.dependency_overrides[require_legacy_owner] = lambda: None
+    app.dependency_overrides[require_legacy_owner] = lambda: SimpleNamespace(user_id="user-test")
 
     async def echo_pipeline(_ctx, transport, _settings):
         socket = transport._client._websocket
@@ -66,6 +66,8 @@ def test_websocket_auth_and_binary_audio_round_trip():
         with (
             patch("voice_api.services.browser_session_service.browser_session_manager", manager),
             patch("voice_api.services.browser_session_service.SessionFactory", return_value=db),
+            patch("voice_api.services.browser_session_service.verify_ticket_actor", new_callable=AsyncMock),
+            patch("voice_api.services.browser_session_service.acquire", new_callable=AsyncMock),
             patch(
                 "voice_api.services.browser_session_service._run_browser_pipeline",
                 side_effect=echo_pipeline,
@@ -151,7 +153,9 @@ async def test_pipeline_finalizes_disconnect_or_provider_failure(tmp_path, provi
         host.prepare.side_effect = RuntimeError("provider offline")
     with (
         patch("voice_api.services.browser_session_service.SessionFactory", return_value=db),
+        patch("voice_api.services.browser_session_service.settings_for_snapshot", new_callable=AsyncMock, side_effect=lambda _session, _org, _snapshot, base, **_kwargs: base),
         patch("voice_api.services.browser_session_service.NativePipelineHost", return_value=host),
+        patch("voice_api.services.browser_session_service.release", new_callable=AsyncMock),
         patch("voice_api.services.browser_session_service.DurableSpool"),
         patch("voice_api.services.browser_session_service.ExchangeTracker"),
         patch("voice_api.services.browser_session_service.stream_evidence", new_callable=AsyncMock),

@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { NumberField } from "./ConfigFields";
+import { CredentialBindingSelect, bindCredential } from "./CredentialBindingSelect";
 import type {
   AgentConfig,
   JevQuestion,
@@ -496,6 +497,7 @@ export function ClassifierPanel({
                     </NativeSelect>
                   </Field>
                 </div>
+                <CredentialBindingSelect stage="classifier" provider={currentLlm.provider} value={config.credential_refs.classifier} disabled={disabled} change={(id) => change(bindCredential(config, "classifier", id))} />
 
               </FieldGroup>
             </>
@@ -522,6 +524,7 @@ export function ClassifierPanel({
               </div>
 
               <FieldGroup>
+                <CredentialBindingSelect stage="classifier" provider="jev" value={config.credential_refs.classifier} disabled={disabled} change={(id) => change(bindCredential(config, "classifier", id))} />
                 <div className="grid grid-cols-2 gap-4">
                   <Field>
                     <FieldLabel htmlFor="jev-model">Jev Model</FieldLabel>

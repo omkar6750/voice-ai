@@ -1,5 +1,5 @@
 from .analysis import Classification, ContactFact, ContextSummary
-from .artifacts import RunArtifact
+from .artifacts import RecordingDeletion, RecordingDeletionItem, RunArtifact
 from .configuration import (
     Agent,
     AgentVersion,
@@ -24,6 +24,8 @@ from .integrations import (
     CalendarIntegration,
     CalendarIntegrationSecret,
     CalendarOAuthState,
+    CallAdmission,
+    CredentialLease,
     InboundWebhookMessage,
     IntegrationConnection,
     IntegrationMedia,
@@ -62,6 +64,7 @@ __all__ = [
     "CalendarIntegrationSecret",
     "CalendarOAuthState",
     "Call",
+    "CallAdmission",
     "Callback",
     "Classification",
     "ClassifierContextDelivery",
@@ -71,6 +74,7 @@ __all__ = [
     "ContactFact",
     "ContextSummary",
     "ConversationMessage",
+    "CredentialLease",
     "Exchange",
     "FlowNodeVisit",
     "InboundWebhookMessage",
@@ -88,6 +92,8 @@ __all__ = [
     "PlatformAdministrator",
     "PlatformSupportSession",
     "ProviderCredential",
+    "RecordingDeletion",
+    "RecordingDeletionItem",
     "Run",
     "RunArtifact",
     "RunContextEvent",

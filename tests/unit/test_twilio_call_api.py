@@ -539,9 +539,15 @@ async def test_exception_sanitization_on_dial_failure():
             "voice_api.services.twilio_dispatch_service.resolve_twilio_credentials",
             return_value=(
                 conn,
-                TwilioCredentials(account_sid="AC123", auth_token="auth_token_secret_12345"),
+                TwilioCredentials(
+                    account_sid="AC" + "a" * 32,
+                    auth_token="auth_token_secret_12345",
+                    api_key_sid="SK" + "b" * 32,
+                    api_key_secret="rest_secret",
+                ),
             ),
         ),
+        patch("voice_api.services.twilio_dispatch_service.acquire", new_callable=AsyncMock),
         patch("voice_runtime.telephony.twilio.TwilioCallController.dial", side_effect=mock_dial),
     ):
         body = StartCallBody(

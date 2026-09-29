@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner
+from voice_api.core.config import get_settings
 from voice_api.models import Agent, AgentVersion, Run, RuntimeEndpoint
 from voice_api.schemas.execution import EndpointConfig
 
@@ -23,8 +24,10 @@ async def dial_options(session: AsyncSession = Session) -> dict:
         )
     ).all()
     endpoints = (
-        await session.scalars(select(RuntimeEndpoint).order_by(RuntimeEndpoint.name))
-    ).all()
+        []
+        if get_settings().env != "dev"
+        else (await session.scalars(select(RuntimeEndpoint).order_by(RuntimeEndpoint.name))).all()
+    )
     active = (
         await session.scalars(
             select(Run).where(Run.status.in_(("claimed", "running", "uncertain")))

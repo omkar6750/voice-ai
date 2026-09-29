@@ -74,6 +74,21 @@ async def test_analysis_sources_replay_and_failure(client, database):
 
 
 async def test_artifact_retention_and_disabled_logs(client, database, tmp_path, monkeypatch):
+    from voice_api.api.v1.endpoints import artifacts
+    from voice_api.services.recording_storage import StoredRecording
+
+    class FakeRecordingStorage:
+        payload: bytes = b""
+
+        async def upload(self, path, public_id, checksum, size):
+            self.payload = path.read_bytes()
+            return StoredRecording(public_id, "asset-test", 1, "wav", size)
+
+        async def read(self, _public_id, _format):
+            return self.payload
+
+    storage = FakeRecordingStorage()
+    monkeypatch.setattr(artifacts, "get_recording_storage", lambda: storage)
     monkeypatch.setattr(get_settings(), "recordings_dir", str(tmp_path))
     run_id = await create_run(client, logging_override=False)
     folder = tmp_path / run_id
@@ -102,7 +117,8 @@ async def test_artifact_retention_and_disabled_logs(client, database, tmp_path, 
     await database.commit()
     media = tmp_path / "reusable.bin"
     media.write_bytes(b"keep")
-    assert (await client.post("/api/artifacts/expire")).json() == {"deleted": 1, "failed": 0}
-    assert not (folder / "input.wav").exists() and media.exists()
+    # Recording expiry blocks playback but never silently removes remote media.
+    assert (await client.post("/api/artifacts/expire")).json() == {"deleted": 0, "failed": 0}
+    assert (folder / "input.wav").exists() and media.exists()
     assert (await client.get(f"/api/artifacts/{body['id']}/file")).status_code == 410
     assert (await client.post("/api/artifacts/expire")).json()["deleted"] == 0

@@ -56,7 +56,7 @@ async def post_ticket(
     session: AsyncSession = Session,
     _: None = Operator,
 ) -> dict:
-    return await issue_browser_ticket(session_id, session)
+    return await issue_browser_ticket(session_id, session, actor_user_id=getattr(_, "user_id", None))
 
 
 @router.websocket("/{session_id}/ws")

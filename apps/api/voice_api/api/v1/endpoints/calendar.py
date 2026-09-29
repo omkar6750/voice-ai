@@ -35,7 +35,7 @@ from voice_api.services.calendar_service import (
     sign_slot,
     verify_slot,
 )
-from voice_api.services.vault_service import CredentialVault
+from voice_api.services.vault_service import CredentialVault, SecretScope
 from voice_runtime.contracts import AgentConfig
 
 router = APIRouter(tags=["calendar"])
@@ -113,10 +113,12 @@ async def connect_calendar(
     await session.flush()
     raw_state = token_urlsafe(32)
     code_verifier = token_urlsafe(64)
-    encrypted_verifier = CredentialVault.from_env().encrypt(code_verifier)
+    state_id = new_id()
+    encrypted_verifier = CredentialVault.from_env().encrypt(code_verifier,
+        scope=SecretScope(row.org_id, state_id, "google_calendar", "pkce_verifier"))
     session.add(
         CalendarOAuthState(
-            id=new_id(),
+            id=state_id,
             state_hash=hashlib.sha256(raw_state.encode()).hexdigest(),
             calendar_integration_id=row.id,
             expires_at=now() + timedelta(minutes=10),
@@ -165,7 +167,8 @@ async def oauth_callback(
         )
     try:
         code_verifier = CredentialVault.from_env().decrypt(
-            state_row.pkce_verifier_ciphertext, state_row.pkce_verifier_key_id
+            state_row.pkce_verifier_ciphertext, state_row.pkce_verifier_key_id,
+            scope=SecretScope(state_row.org_id, state_row.id, "google_calendar", "pkce_verifier")
         )
         flow = google_flow(state, code_verifier=code_verifier)
         flow.fetch_token(code=code)
@@ -207,10 +210,12 @@ async def reconnect(
         raise HTTPException(404, "Calendar integration not found")
     raw_state = token_urlsafe(32)
     code_verifier = token_urlsafe(64)
-    encrypted_verifier = CredentialVault.from_env().encrypt(code_verifier)
+    state_id = new_id()
+    encrypted_verifier = CredentialVault.from_env().encrypt(code_verifier,
+        scope=SecretScope(integration.org_id, state_id, "google_calendar", "pkce_verifier"))
     session.add(
         CalendarOAuthState(
-            id=new_id(),
+            id=state_id,
             state_hash=hashlib.sha256(raw_state.encode()).hexdigest(),
             calendar_integration_id=integration.id,
             expires_at=now() + timedelta(minutes=10),

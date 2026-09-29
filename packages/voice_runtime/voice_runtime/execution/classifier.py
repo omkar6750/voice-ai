@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
-from loguru import logger
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.groq.llm import GroqLLMService
 
 from voice_runtime.diagnostics import exception_diagnostic, provider_error_diagnostic
+from voice_runtime.execution.credential_keys import stage_api_key
+from voice_runtime.safe_logs import RuntimeEvent, error_category, operational_event
 
 DEFAULT_OUTPUT_FIELDS = {
     "lead_temperature": ["hot", "warm", "cold"],
@@ -33,7 +33,9 @@ def _diagnostic_error(provider: str, message: str, exc: Exception | None = None)
             retryable=True,
         )
         if exc is not None
-        else provider_error_diagnostic(provider=provider, status_code=401, body={"message": message})
+        else provider_error_diagnostic(
+            provider=provider, status_code=401, body={"message": message}
+        )
     )
     return result
 
@@ -59,11 +61,7 @@ def normalize_classifier_result(
         return result
 
     allowed = output_fields or DEFAULT_OUTPUT_FIELDS
-    allowed_map = (
-        allowed
-        if isinstance(allowed, dict)
-        else {field: [] for field in allowed}
-    )
+    allowed_map = allowed if isinstance(allowed, dict) else {field: [] for field in allowed}
     result: dict[str, Any] = {}
     for field, labels in allowed_map.items():
         value = raw.get(field)
@@ -94,7 +92,9 @@ class PipecatLLMClassifierRunner:
     async def run(self, *, settings, config: dict[str, Any], transcript: str) -> dict[str, Any]:
         provider = config.get("provider", "groq")
         model = config.get("model", "qwen/qwen3.8-27b")
-        prompt = config.get("prompt", "Classify the supplied conversation using only observed evidence.")
+        prompt = config.get(
+            "prompt", "Classify the supplied conversation using only observed evidence."
+        )
         output_fields = config.get("output_fields") or DEFAULT_OUTPUT_FIELDS
         max_tokens = min(int(config.get("max_output_tokens", 96)), 512)
         schema = json.dumps(output_fields, separators=(",", ":"), ensure_ascii=False)
@@ -102,7 +102,7 @@ class PipecatLLMClassifierRunner:
             f"{prompt}\nReturn only one compact JSON object. Allowed fields and labels: {schema}."
         )
         if provider == "groq":
-            api_key = getattr(settings, "groq_api_key", None) or os.getenv("VOICE_GROQ_API_KEY", "")
+            api_key = stage_api_key(settings, "classifier", "groq")
             if not api_key:
                 return _diagnostic_error("groq", "Groq API key is not configured")
             service = GroqLLMService(
@@ -116,7 +116,7 @@ class PipecatLLMClassifierRunner:
                 ),
             )
         elif provider == "gemini":
-            api_key = getattr(settings, "gemini_api_key", None) or os.getenv("GEMINI_API_KEY", "")
+            api_key = stage_api_key(settings, "classifier", "gemini")
             if not api_key:
                 return _diagnostic_error("gemini", "Gemini API key is not configured")
             service = GoogleLLMService(
@@ -136,10 +136,17 @@ class PipecatLLMClassifierRunner:
             raw = await service.run_inference(context, max_tokens=max_tokens)
             result = normalize_classifier_result(raw, output_fields)
             if isinstance(raw, str) and result.get("status") == "error":
-                logger.warning("{} classifier returned malformed output", provider)
+                operational_event(
+                    RuntimeEvent.CLASSIFIER_INVALID, level="WARNING", provider=provider
+                )
             return result
         except Exception as exc:
-            logger.exception("{} classifier failed", provider)
+            operational_event(
+                RuntimeEvent.CLASSIFIER_FAILED,
+                level="ERROR",
+                provider=provider,
+                error_category=error_category(exc),
+            )
             return _diagnostic_error(provider, f"{provider} classifier request failed", exc)
 
 
@@ -157,7 +164,9 @@ class JevClassifierRunner:
         )
 
 
-async def run_selected_classifier(*, settings, classifier: dict[str, Any], transcript: str, jev_request):
+async def run_selected_classifier(
+    *, settings, classifier: dict[str, Any], transcript: str, jev_request
+):
     classifier_type = classifier.get("classifier_type", "llm")
     if classifier_type == "jev":
         return await JevClassifierRunner(jev_request).run(

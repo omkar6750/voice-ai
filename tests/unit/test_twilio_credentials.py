@@ -117,7 +117,7 @@ async def test_resolve_twilio_credentials_validation():
 
 @pytest.mark.asyncio
 async def test_test_twilio_connection_full_account():
-    creds = TwilioCredentials(account_sid="AC12345678901234567890123456789012", auth_token="token")
+    creds = TwilioCredentials(account_sid="AC12345678901234567890123456789012", auth_token="token", api_key_sid="synthetic-api-key-sid", api_key_secret="api-secret")
 
     with patch("voice_api.services.twilio_service.Client") as mock_client_cls:
         client = mock_client_cls.return_value
@@ -150,7 +150,7 @@ async def test_test_twilio_connection_full_account():
 
 @pytest.mark.asyncio
 async def test_test_twilio_connection_trial_account_warning():
-    creds = TwilioCredentials(account_sid="AC12345678901234567890123456789012", auth_token="token")
+    creds = TwilioCredentials(account_sid="AC12345678901234567890123456789012", auth_token="token", api_key_sid="synthetic-api-key-sid", api_key_secret="api-secret")
 
     with patch("voice_api.services.twilio_service.Client") as mock_client_cls:
         client = mock_client_cls.return_value

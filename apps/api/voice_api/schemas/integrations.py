@@ -41,6 +41,7 @@ class ConnectionBody(BaseModel):
     provider: str = Field(pattern=r"^(whatsapp|twilio_voice)$")
     config: WhatsAppConfig | TwilioVoiceConfig
     enabled: bool = False
+    credential_id: str | None = Field(default=None, min_length=1, max_length=36)
 
     @model_validator(mode="after")
     def validate_provider_config(self) -> "ConnectionBody":
@@ -57,6 +58,7 @@ class UpdateConnectionBody(BaseModel):
     config: WhatsAppConfig | TwilioVoiceConfig | None = None
     enabled: bool | None = None
     expected_updated_at: str | None = None
+    credential_id: str | None = Field(default=None, min_length=1, max_length=36)
 
 
 class SecretBody(BaseModel):

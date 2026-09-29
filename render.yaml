@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=https://render.com/schema/render.yaml.json
+# Apply only after docs/deployment/ACCEPTANCE.md gates pass. No resources are created here.
+previews:
+  generation: "off"
+services:
+  - type: web
+    name: voice-ai-api-demo
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeployTrigger: "off"
+    healthCheckPath: /health
+    maxShutdownDelaySeconds: 300
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: VOICE_ENV
+        value: production
+      # Parent must wire and enforce these settings before any public deployment.
+      - key: VOICE_HOSTED_CALLS_ENABLED
+        value: "false"
+      - key: VOICE_MAX_CONCURRENT_CALLS
+        value: "1"
+      - key: VOICE_CALL_MAX_DURATION_SECONDS
+        value: "300"
+      - key: VOICE_ORGANIZATION_CREATION_ENABLED
+        value: "true"
+      - key: VOICE_RECORDINGS_DIR
+        value: /app/data/recordings
+      - key: VOICE_DATABASE_URL
+        sync: false
+      - key: VOICE_INTEGRATION_KEYS
+        sync: false
+      - key: VOICE_INTEGRATION_ACTIVE_KEY
+        sync: false
+      - key: VOICE_RUNTIME_SERVICE_TOKEN
+        sync: false
+      - key: VOICE_PUBLIC_BASE_URL
+        sync: false
+      - key: VOICE_CLERK_AUTHORIZED_PARTIES
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_WEBHOOK_SIGNING_SECRET
+        sync: false
+      - key: VOICE_CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: VOICE_CLOUDINARY_API_KEY
+        sync: false
+      - key: VOICE_CLOUDINARY_API_SECRET
+        sync: false
+      - key: VOICE_SUPABASE_URL
+        sync: false
+      - key: VOICE_SUPABASE_SERVICE_KEY
+        sync: false
+      - key: VOICE_SUPABASE_PRIVATE_BUCKET
+        value: voice-private

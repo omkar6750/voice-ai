@@ -14,6 +14,7 @@ from voice_runtime.telephony.twilio import PublicTelephonyUrls, TwilioCallContro
 
 from voice_api.models import Call, Run
 from voice_api.models.common import now
+from voice_api.services.credential_lease_service import acquire, admit_settings
 from voice_api.services.twilio_service import resolve_twilio_credentials
 
 DISPATCH_TIMEOUT_SECS = 15.0
@@ -121,7 +122,9 @@ async def dispatch_twilio_call(
     """Fence one Twilio create attempt, then reconcile it with racing callbacks."""
     public_base_url = validate_twilio_dispatch_settings(settings)
 
-    _, credentials = await resolve_twilio_credentials(session, call.telephony_connection_id)
+    admit_settings(settings)
+    await acquire(session, run.id)
+    _, credentials = await resolve_twilio_credentials(session, call.telephony_connection_id, run_id=run.id)
 
     try:
         urls = PublicTelephonyUrls(public_base_url)

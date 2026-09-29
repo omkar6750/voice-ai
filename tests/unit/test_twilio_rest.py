@@ -11,6 +11,8 @@ from voice_runtime.telephony.twilio_rest import TwilioCallApiError, TwilioRestCa
 ACCOUNT_SID = "AC" + "a" * 32
 CALL_SID = "CA" + "b" * 32
 TOKEN = "super-secret-token"
+API_KEY_SID = "SK" + "c" * 32
+API_KEY_SECRET = "api-key-secret"
 URL = f"https://api.twilio.com/2010-04-01/Accounts/{ACCOUNT_SID}/Calls/{CALL_SID}.json"
 
 
@@ -22,7 +24,7 @@ def response(status: str = "completed", **overrides: object) -> httpx.Response:
 
 def make_call(client: httpx.AsyncClient, *, timeout_secs: float = 0.5) -> TwilioRestCall:
     return TwilioRestCall(
-        TwilioCredentials(ACCOUNT_SID, TOKEN),
+        TwilioCredentials(ACCOUNT_SID, TOKEN, API_KEY_SID, API_KEY_SECRET),
         CALL_SID,
         client=client,
         timeout_secs=timeout_secs,
@@ -43,7 +45,7 @@ async def test_complete_sends_authenticated_form_post_and_returns_status() -> No
     request = seen[0]
     assert request.method == "POST"
     assert str(request.url) == URL
-    encoded_auth = base64.b64encode(f"{ACCOUNT_SID}:{TOKEN}".encode()).decode()
+    encoded_auth = base64.b64encode(f"{API_KEY_SID}:{API_KEY_SECRET}".encode()).decode()
     assert request.headers["authorization"] == f"Basic {encoded_auth}"
     assert request.headers["content-type"].startswith("application/x-www-form-urlencoded")
     assert request.content == b"Status=completed"
@@ -66,18 +68,18 @@ async def test_status_get_returns_status() -> None:
 @pytest.mark.parametrize("sid", ["CA/../x", "CA" + "a" * 31, "AC" + "a" * 32, "CA" + "g" * 32])
 def test_rejects_invalid_call_sid(sid: str) -> None:
     with pytest.raises(ValueError):
-        TwilioRestCall(TwilioCredentials(ACCOUNT_SID, TOKEN), sid)
+        TwilioRestCall(TwilioCredentials(ACCOUNT_SID, TOKEN, API_KEY_SID, API_KEY_SECRET), sid)
 
 
 def test_rejects_invalid_account_sid() -> None:
     with pytest.raises(ValueError):
-        TwilioRestCall(TwilioCredentials("AC/../x", TOKEN), CALL_SID)
+        TwilioRestCall(TwilioCredentials("AC/../x", TOKEN, API_KEY_SID, API_KEY_SECRET), CALL_SID)
 
 
 @pytest.mark.parametrize("timeout", [0, -1, float("inf"), float("nan")])
 def test_rejects_invalid_timeout(timeout: float) -> None:
     with pytest.raises(ValueError):
-        TwilioRestCall(TwilioCredentials(ACCOUNT_SID, TOKEN), CALL_SID, timeout_secs=timeout)
+        TwilioRestCall(TwilioCredentials(ACCOUNT_SID, TOKEN, API_KEY_SID, API_KEY_SECRET), CALL_SID, timeout_secs=timeout)
 
 
 @pytest.mark.asyncio
@@ -177,7 +179,7 @@ async def test_aclose_preserves_injected_client() -> None:
 
 @pytest.mark.asyncio
 async def test_aclose_closes_owned_client() -> None:
-    call = TwilioRestCall(TwilioCredentials(ACCOUNT_SID, TOKEN), CALL_SID)
+    call = TwilioRestCall(TwilioCredentials(ACCOUNT_SID, TOKEN, API_KEY_SID, API_KEY_SECRET), CALL_SID)
     client = call._client
     await call.aclose()
     assert client.is_closed

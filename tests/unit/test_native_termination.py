@@ -25,7 +25,7 @@ async def test_pipeline_failure_after_agent_end_intent_is_not_suppressed():
     value = host()
     await value._handler("end_call")({}, None)
     await value._pipeline_failed(SimpleNamespace(error="TTS failed"))
-    with pytest.raises(RuntimeError, match="TTS failed"):
+    with pytest.raises(RuntimeError, match="Pipeline failed"):
         await value.converse()
     await value.close()
     assert value.termination.summary.cause == "pipeline_failure"
@@ -64,6 +64,7 @@ async def test_unexplained_pipeline_finish_is_not_a_successful_call():
 
 async def test_liveness_loss_is_not_assumed_caller_hangup():
     value = host()
+
     async def inactive():
         return False
 

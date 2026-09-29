@@ -40,7 +40,7 @@ def test_usage_metric_preserves_provider_total_instead_of_recomputing_it():
     }
 
 
-def test_provider_error_frame_fails_active_operation_and_keeps_request_diagnostics():
+def test_provider_error_frame_fails_active_operation_and_discards_vendor_payloads():
     class Response:
         status_code = 400
 
@@ -97,7 +97,10 @@ def test_provider_error_frame_fails_active_operation_and_keeps_request_diagnosti
     assert observer.llm_operation is None
     assert any(
         record.get("kind") == "diagnostic"
-        and record.get("metadata", {}).get("failed_generation") == "{bad-json"
+        and record.get("category") == "provider_request_failed"
+        and record.get("detail") is None
+        and record.get("provider_request_id") is None
+        and "failed_generation" not in record.get("metadata", {})
         for record in sink.records
     )
     assert any(
