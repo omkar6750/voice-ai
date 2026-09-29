@@ -54,6 +54,9 @@ class BrowserSessionContext:
         self.cleanup_lock = asyncio.Lock()
         self.cleanup_complete = False
         self.disconnect_task: asyncio.Task | None = None
+        self._resources_lock = asyncio.Lock()
+        self._resources_closed = False
+        self._cleanup_error: BaseException | None = None
 
     def mark_ended(self) -> None:
         self.is_active = False
@@ -83,10 +86,24 @@ class BrowserSessionContext:
             self.cleanup_complete = True
 
     async def _close_resources(self) -> None:
-        if self.host:
-            await self.host.close()
-        if self.request_handler:
-            await self.request_handler.close()
+        # Separate from cleanup_lock: an external closer may hold that lock
+        # while waiting for the pipeline's own finally block to finish.
+        async with self._resources_lock:
+            if not self._resources_closed:
+                try:
+                    if self.host:
+                        await self.host.close()
+                except BaseException as exc:
+                    self._cleanup_error = exc
+                try:
+                    if self.request_handler:
+                        await self.request_handler.close()
+                except BaseException as exc:
+                    if self._cleanup_error is None:
+                        self._cleanup_error = exc
+                self._resources_closed = True
+            if self._cleanup_error is not None:
+                raise self._cleanup_error
 
 
 class BrowserSessionManager:
