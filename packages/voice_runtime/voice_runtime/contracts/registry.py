@@ -14,6 +14,7 @@ class RegisteredHandlerSpec(ConfigModel):
     description: str
     parameters: dict[str, Any] = Field(default_factory=dict)
     runtime_supported: bool = True
+    node_action_supported: bool = False
     category: Identifier
 
 
@@ -45,6 +46,7 @@ _HANDLER_SPECS: tuple[RegisteredHandlerSpec, ...] = (
                 }
             },
         },
+        node_action_supported=True,
         category="telephony",
     ),
     RegisteredHandlerSpec(
@@ -167,3 +169,33 @@ def registered_handler_names() -> frozenset[str]:
 
 def is_registered_handler(name: str | None) -> bool:
     return bool(name and name in registered_handler_names())
+
+
+def supports_node_action(definition: dict[str, Any]) -> bool:
+    """Whether a registered tool can run without model-supplied arguments."""
+    if definition.get("kind") != "registered":
+        return False
+    spec = next(
+        (item for item in _HANDLER_SPECS if item.name == definition.get("handler")),
+        None,
+    )
+    required = definition.get("parameters", {}).get("required", [])
+    return bool(spec and spec.runtime_supported and spec.node_action_supported and not required)
+
+
+def validate_node_actions(config: dict[str, Any], tools: dict[str, dict[str, Any]]) -> list[str]:
+    """Return actionable errors for configured lifecycle actions and background hooks."""
+    errors = []
+    if config.get("background_hooks"):
+        errors.append("Background hooks are not supported by the live runtime")
+    for node in config.get("flow", {}).get("nodes", []):
+        for phase in ("entry", "exit"):
+            for binding_key in node.get(f"{phase}_actions", []):
+                binding = tools.get(binding_key, {})
+                definition = binding.get("definition", binding)
+                if not supports_node_action(definition):
+                    errors.append(
+                        f"{phase.title()} action '{binding_key}' on node '{node.get('id', '')}' "
+                        "is not supported by the live runtime"
+                    )
+    return errors

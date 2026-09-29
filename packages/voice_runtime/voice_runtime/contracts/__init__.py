@@ -20,6 +20,8 @@ from .registry import (
     is_registered_handler,
     registered_handler_names,
     registered_handler_specs,
+    supports_node_action,
+    validate_node_actions,
 )
 from .tools import (
     HTTPToolConfig,
@@ -65,4 +67,6 @@ __all__ = [
     "registered_handler_names",
     "registered_handler_specs",
     "runtime_provider_capability",
+    "supports_node_action",
+    "validate_node_actions",
 ]

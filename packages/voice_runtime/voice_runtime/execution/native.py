@@ -14,6 +14,7 @@ from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import httpx
 from loguru import logger
@@ -41,7 +42,7 @@ from pipecat.utils.context.llm_context_summarization import (
 from pipecat.workers.runner import WorkerRunner
 
 from voice_runtime.call_capture import CallCapture
-from voice_runtime.contracts import is_registered_handler
+from voice_runtime.contracts import is_registered_handler, validate_node_actions
 from voice_runtime.contracts.prompt_references import compile_tool_references
 from voice_runtime.diagnostics import (
     exception_diagnostic,
@@ -1236,12 +1237,12 @@ class NativePipelineHost:
     async def prepare(self, snapshot: dict, tracker: ExchangeTracker, *, transport=None) -> None:
         self.tracker, self._snapshot = tracker, snapshot
         self._nodes = {node["id"]: node for node in snapshot["flow"]["nodes"]}
-        if snapshot.get("background_hooks") or any(
-            node.get("entry_actions") or node.get("exit_actions") for node in self._nodes.values()
-        ):
-            raise ValueError(
-                "Background hooks and entry/exit actions are not supported by live runtime"
-            )
+        action_errors = validate_node_actions(
+            snapshot,
+            snapshot.get("_resolved", {}).get("tools", {}),
+        )
+        if action_errors:
+            raise ValueError(action_errors[0])
         for binding_key, binding in snapshot["_resolved"]["tools"].items():
             definition = binding["definition"]
             if definition["kind"] != "registered":
@@ -1509,6 +1510,7 @@ class NativePipelineHost:
             observer=self.observer,
             context=context,
             classifier_runner=self._run_node_classifier,
+            action_runner=self._run_node_action,
             end_call_runner=self._finish_end_call,
         )
         self.flow.state.update(flow_state)
@@ -1526,6 +1528,58 @@ class NativePipelineHost:
         self.runner_task = asyncio.create_task(runner.run(), name=f"pipeline-{self.run_id}")
         async with asyncio.timeout(15):
             await self.ready.wait()
+
+    async def _run_node_action(self, phase: str, node_key: str, binding_key: str) -> bool:
+        """Run one allow-listed action with no model supplied arguments."""
+        binding = self.flow.bindings[binding_key]
+        definition = binding["definition"]
+        handler_name = definition["handler"]
+        invocation_id = self.tracker.start_tool(
+            binding_key,
+            binding["version_id"],
+            f"node-action-{uuid4().hex}",
+            {},
+            None,
+        )
+        tool_ended = False
+        try:
+            result = await self._handler(handler_name)({}, self.flow)
+            if isinstance(result, tuple):
+                result = result[0]
+            result_failed = isinstance(result, dict) and result.get("status") == "error"
+            self.tracker.tool_result(invocation_id, result, is_final=True)
+            self.tracker.end_tool(
+                invocation_id,
+                "failed" if result_failed else "completed",
+                result,
+            )
+            tool_ended = True
+            if result_failed:
+                raise RuntimeError(result.get("error", "Lifecycle action returned an error"))
+            if (
+                handler_name == "end_call"
+                and isinstance(result, dict)
+                and result.get("status") == "ok"
+            ):
+                await self._finish_end_call()
+                return True
+        except Exception as exc:
+            if not tool_ended:
+                self.tracker.end_tool(
+                    invocation_id,
+                    "failed",
+                    {"error": f"{phase} action failed"},
+                )
+            self.tracker.diagnostic(
+                severity="error",
+                category="tool_failure",
+                source="runtime",
+                code="node_action_failed",
+                message=f"Configured {phase} action failed for node '{node_key}'",
+                metadata={"binding_key": binding_key, "error_type": type(exc).__name__},
+            )
+            raise
+        return False
 
     async def _pipeline_failed(self, frame) -> None:
         """A shutdown request does not make a subsequent pipeline failure successful."""

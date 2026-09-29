@@ -26,6 +26,7 @@ class TracedFlowManager(FlowManager):
         observer: EvidenceObserver,
         context: LLMContext,
         classifier_runner: Callable[[str, str], Awaitable[tuple[str, dict[str, str]] | None]],
+        action_runner: Callable[[str, str, str], Awaitable[bool | None]] | None = None,
         end_call_runner: Callable[[], Awaitable[None]] | None = None,
         **kwargs,
     ):
@@ -36,6 +37,7 @@ class TracedFlowManager(FlowManager):
         self.observer = observer
         self._context_for_evidence = context
         self._classifier_runner = classifier_runner
+        self._action_runner = action_runner
         self._end_call_runner = end_call_runner
         self._transition_tool_id: str | None = None
 
@@ -51,10 +53,14 @@ class TracedFlowManager(FlowManager):
             if classifier is not None:
                 _, message = classifier
                 classifier_messages.append(message)
+            if await self._run_node_actions("exit", current_node):
+                return
         classifier = await self._classifier_runner("entry", node_id)
         if classifier is not None:
             _, message = classifier
             classifier_messages.append(message)
+        if await self._run_node_actions("entry", node_id):
+            return
         if classifier_messages:
             node_config = dict(node_config)
             node_config["task_messages"] = [
@@ -68,6 +74,24 @@ class TracedFlowManager(FlowManager):
         except BaseException:
             self.tracker.end_visit("failed")
             raise
+
+    async def _run_node_actions(self, phase: str, node_id: str) -> bool:
+        if self._action_runner is None:
+            return False
+        node = next(
+            (
+                node
+                for node in getattr(self, "_snapshot", {}).get("flow", {}).get("nodes", [])
+                if node.get("id") == node_id
+            ),
+            {},
+        )
+        stopped = False
+        for binding_key in node.get(f"{phase}_actions", []):
+            stopped = bool(await self._action_runner(phase, node_id, binding_key)) or stopped
+            if stopped:
+                break
+        return stopped
 
     async def _create_transition_func(self, name, handler):
         execute = await super()._create_transition_func(name, handler)
