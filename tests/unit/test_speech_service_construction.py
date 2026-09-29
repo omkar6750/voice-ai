@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-import voice_runtime.execution.native as native_module
+import voice_runtime.execution.speech as speech_module
 from voice_runtime.execution.native import build_speech_services
 
 
@@ -21,9 +21,9 @@ def _install_service_mocks(monkeypatch):
     stt = _ServiceConstructor("SarvamSTTService")
     sarvam_tts = _ServiceConstructor("SarvamTTSService")
     cartesia_tts = _ServiceConstructor("CartesiaTTSService")
-    monkeypatch.setattr(native_module, "SarvamSTTService", stt)
-    monkeypatch.setattr(native_module, "SarvamTTSService", sarvam_tts)
-    monkeypatch.setattr(native_module, "CartesiaTTSService", cartesia_tts)
+    monkeypatch.setattr(speech_module, "SarvamSTTService", stt)
+    monkeypatch.setattr(speech_module, "SarvamTTSService", sarvam_tts)
+    monkeypatch.setattr(speech_module, "CartesiaTTSService", cartesia_tts)
     return stt, sarvam_tts, cartesia_tts
 
 
