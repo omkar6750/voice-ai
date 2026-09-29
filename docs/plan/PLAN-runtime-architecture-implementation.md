@@ -37,7 +37,7 @@ Live dashboard WebSocket monitoring and automatic callback dispatch remain
 deferred until Clerk/production work as previously requested. Historical data
 cleanup is not repeated in this isolated checkout.
 
-## Progress
+## Historical foundation progress (before runtime wiring)
 
 - Read both research attachments completely and inspected current main.
 - Created an isolated managed worktree and branch; installing locked dependencies.
@@ -108,7 +108,7 @@ reconciliation audit keys compatible; require pipeline completion rather than
 close intent for success; retain first immediate external cause during cleanup;
 preserve unknown pipeline completion; ensure malformed termination sets failed.
 
-Latest complete suite: **262 passed, 33 skipped, two upstream deprecation
+First-batch complete suite: **262 passed, 33 skipped, two upstream deprecation
 warnings**. Repository Ruff and diff checks pass. Skipped cases require an
 isolated PostgreSQL database. No real contacts were called; no hardware, browser
 audio, or Twilio carrier playback was verified. No migration or dashboard build
@@ -116,9 +116,10 @@ verification has been completed in this worktree yet. Protected demo unchanged.
 
 ## Remaining implementation order
 
-1. Terminal-node close after response playback, bounded graceful draining,
-   idempotent resource cleanup, and playback observations. Current end-call
-   ordering is fixed, but carrier playback is not proven by pipeline completion.
+1. Idempotent resource cleanup and source-scoped playback observations. Terminal
+   nodes now use ordered Pipecat output actions, and graceful shutdown has a
+   monotonic deadline. Carrier/browser playback is still not proven by pipeline
+   completion; transport-specific acknowledgement remains required.
 2. Browser lifecycle: distinguish explicit operator stop, peer disconnect,
    successful terminal completion and pipeline failure. The browser supervisor
    still uses its existing final-status rules; native evidence fixes alone do
@@ -140,10 +141,9 @@ verification has been completed in this worktree yet. Protected demo unchanged.
 7. Continue extracting actual action implementations and provider construction
    where this improves locality, not by adding pass-through wrappers. Add
    debugging instructions and capability tests for remaining saved settings.
-8. Evidence/artifact failures must not overwrite a successfully completed call;
-   the executor's existing artifact-registration failure policy still needs its
-   own reviewed slice. Add audit/idempotency/concurrency reconciliation coverage
-   against PostgreSQL, not just mocked session tests.
+8. Add audit/idempotency/concurrency reconciliation coverage against PostgreSQL,
+   not just mocked session tests. Executor artifact-registration failure now
+   preserves the primary outcome/error and separately marks evidence incomplete.
 9. Generate OpenAPI dashboard contracts, type-check/build, migration/model checks,
    and validate preserved demo/source history. Original checkout remains untouched;
    these commits are not merged or pushed.
@@ -151,3 +151,38 @@ verification has been completed in this worktree yet. Protected demo unchanged.
 Deferred by user: live dashboard WebSocket monitoring and automatic callback
 dispatch until the Clerk/production work is ready. Do not silently implement
 either as part of these refactors.
+
+## Second reviewed batch, 2026-09-29
+
+Previous goal turn made concrete progress (committed runtime changes), not a
+no-progress wait. Inspected the authoritative clean branch before continuing.
+One small `gpt-6-luna` worker implemented artifact-outcome separation; parent
+reviewed its patch and ran its tests before committing. Terminal lifecycle work
+was implemented and reviewed locally. The complete objective remains active.
+
+| Commit | Slice | Evidence |
+| --- | --- | --- |
+| `e249fa8` | Start flow visit before node response dispatch | Success/failure ordering and transition provenance tests; classifier entry/exit order unchanged |
+| `713ed93` | Terminal-node shutdown via ordered Pipecat function action | Installed ActionManager exercised; no close on mere entry; stale/duplicate/disconnected/failed actions guarded; queue failure cannot become success |
+| `b7c5d73` | Artifact registration failure separate from call outcome | Completed call stays completed/incomplete; prior pipeline-failure cause/error remain intact |
+| `4729a1b` | Bounded graceful shutdown | Default 15-second constructor deadline; monotonic timer unaffected by duplicate requests; immediate/completed calls exempt; timeout causes failed evidence and cancellation |
+
+Latest complete suite: **281 passed, 33 skipped, three upstream Pipecat/Python
+deprecation warnings**. Ruff and whitespace gates passed before commits. The
+additional warning comes from Pipecat's built-in legacy action-handler signature,
+not the application's two-argument terminal handler. No vendor source was edited.
+
+Verified against installed Pipecat **1.11.0**, rather than assuming the research
+attachment's 1.12.0 semantics: its TTS serialization routes downstream non-system
+frames after audio context; base output routes synchronized frames through the
+audio queue; Flows invokes FunctionActionFrame at the downstream end. Terminal
+action completion is therefore local-output ordering evidence, not proof that a
+browser speaker or Twilio carrier rendered the final sample. Playback status
+remains unknown until actual source-scoped observations are wired.
+
+Still pending: browser/Twilio finalization and transport acknowledgements,
+concurrent/idempotent cleanup, provider usage/pricing persistence and UI, supported
+node actions, database/contract/build gates, and physical checks. Main advanced
+independently after the branch base; integration must merge and reverify those
+changes before completion. Do not use a current-main diff to attribute unrelated
+main work to this branch; review this branch's commits from `bcb8d67`.

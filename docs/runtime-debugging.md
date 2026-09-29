@@ -7,6 +7,7 @@ Use `uv run`; tests use fake credentials and never dial a real contact.
 
 ```powershell
 uv run pytest tests/unit/test_end_call_ordering.py tests/unit/test_call_control_params.py --basetemp .pytest_call_verify -o addopts=--strict-markers -q
+uv run pytest tests/unit/test_terminal_node_shutdown.py tests/unit/test_graceful_close_deadline.py tests/unit/test_flow_visit_ordering.py --basetemp .pytest_close_verify -o addopts=--strict-markers -q
 uv run pytest tests/unit/test_native_termination.py tests/unit/test_runner_termination.py tests/unit/test_termination.py --basetemp .pytest_termination_verify -o addopts=--strict-markers -q
 uv run pytest tests/unit/test_callback_http.py tests/unit/test_reconciliation_history.py --basetemp .pytest_actions_verify -o addopts=--strict-markers -q
 uv run pytest tests/unit/test_accounting.py --basetemp .pytest_accounting_verify -o addopts=--strict-markers -q
