@@ -56,9 +56,52 @@ Twilio played the last audio sample. `cleanup_status=confirmed` is reported by t
 executor only after driver cleanup succeeds. Native close alone does not prove
 the modem/carrier was released. Browser context and native host now share the
 termination facts; browser cleanup confirms local resource closure, not audible
-speaker playback. Twilio supervisor/status callbacks still need separate lifecycle
-wiring; their existing completed statuses are not flow-completion proof.
+speaker playback. Twilio now records native termination separately from provider
+Call status. Its `twilio_mark` source and confirmed REST release are transport
+facts, not human comprehension or flow-completion proof.
 
 Missing usage/price is not zero. Accounting uses explicit billable dimensions to
 avoid charging gross input plus cached input, or output plus included reasoning
 tokens, twice. The independent accounting module is not a current billing report.
+
+## Twilio checks without an account
+
+```powershell
+uv run pytest tests/unit/test_twilio_rest.py tests/unit/test_twilio_protocol.py tests/unit/test_twilio_session.py tests/unit/test_twilio_endpoint_contract.py tests/unit/test_twilio_status_ordering.py tests/unit/test_twilio_stream_ordering.py tests/unit/test_twilio_media_claim.py tests/unit/test_twilio_runtime.py tests/unit/test_twilio_dispatch.py tests/unit/test_twilio_call_api.py -q
+```
+
+The tests exercise fake signed callbacks, protocol payloads and HTTP responses.
+They include installed Pipecat input/output stop and its actual receive loop;
+audio queue internals/providers remain isolated. They never call a telephone
+number or use real secrets. No simulated mark proves actual carrier playback.
+
+Start with `telephony/twilio_protocol.py` for authentication/handshake rejection,
+`telephony/twilio_session.py` for media/clear/mark/REST release, and API
+`twilio_dispatch_service.py` for an uncertain create or duplicate attempt.
+`twilio_runtime_service.py` owns Run finalization and independent artifact errors.
+Inspect `termination`, `release_status`, `rest_status`, `twilio_dispatch_state`,
+`twilio_sequence_number`, `evidence_incomplete` and `artifacts_incomplete` together.
+Do not manually reset an uncertain attempt to queued to force a redial.
+
+Before enabling real Twilio calls:
+
+- Configure a reachable canonical `VOICE_PUBLIC_BASE_URL` with HTTPS, a valid WSS
+  certificate/443 route, operator token, encrypted account auth token and an
+  account-owned voice-capable From number. Do not substitute forwarded host headers.
+- Verify deployed WSS handshake signatures, including trailing-slash handling;
+  validate account/SID/run identity without logging secrets or media payloads.
+- On a consenting test number, exercise terminal goodbye, end-call tool, caller
+  hangup, barge-in during goodbye, socket loss, provider error and cancellation.
+  Confirm ordered final mark, one REST attempt, terminal readback, and correct
+  independent Run and Call outcomes.
+- Run actual PostgreSQL races: concurrent dispatch, callbacks versus media claim,
+  callback versus finalization, duplicate sockets, and lease/restart reconciliation.
+  The mocked row-lock assertions are not transaction-concurrency proof.
+- Verify provider playback, account permissions/restrictions, public proxy routing,
+  and delayed callbacks/readback. REST ambiguity stays visible and is not retried
+  as a write. Restart/manual uncertain-attempt reconciliation remains unfinished.
+
+The current Full-account policy is retained. Twilio's current trial documentation
+mentions Media Streams free units but also restricts custom Voice instructions;
+do not infer trial compatibility from a free-unit allowance without account checks.
+See [Twilio Voice trials](https://www.twilio.com/docs/usage/trials/try-out-voice).

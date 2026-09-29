@@ -124,9 +124,10 @@ verification has been completed in this worktree yet. Protected demo unchanged.
    and the modal handles peer closure without stale React state. Verify real audio
    drain and browser rendering; cover abandoned session-creation responses and
    database races. Do not infer physical playback from local pipeline completion.
-3. Twilio lifecycle: one hangup owner, mark/clear acknowledgements, bounded drain,
-   confirmed REST completion, callback ordering and duplicate-event rules. No
-   assumptions about carrier playback or caller disinterest from disconnect.
+3. Twilio follow-up: local lifecycle wiring is implemented and tested offline
+   below. Still verify deployed signatures, real carrier playback/release,
+   PostgreSQL races, lease/restart reconciliation and uncertain-create handling.
+   Never infer caller disinterest from disconnect.
 4. SIM7600 release and cancellation races: preserve confirmed-idle fencing,
    verify hangup/USB cleanup and failure paths; physical firmware check remains
    necessary before claiming full hardware correctness.
@@ -226,3 +227,50 @@ paths and is tested. Browser late session-creation responses are ignored after
 attempt cancellation, so abandoned pre-connection run/session expiry still needs
 an explicit server-side lifecycle test and cleanup policy. These remain pending,
 not silently classified as completed work.
+
+## Twilio offline integration batch, 2026-09-29
+
+This section supersedes the pre-Twilio status immediately above. Three small
+`gpt-6-luna` workers handled disjoint scopes, with small-model production reviews
+and parent integration checks before commits. Official Twilio documentation and
+installed Pipecat 1.11.0 source, not a live account, informed the implementation.
+The architecture skill concentrated protocol, media lifecycle and Run ownership
+into Modules instead of extending the endpoint's previous monolith.
+
+| Commit | Slice | Verification |
+| --- | --- | --- |
+| `55430fa` | Bounded sanitized Call-resource REST Adapter | Auth/form/status/identity, redirects, timeouts, no write retries, ownership |
+| `23677a3` | Callback ordering and business/carrier separation | Duplicate/older events ignored; provider completion never proves Run success |
+| `e1c8cf0` | Single close owner, final mark and clear invalidation | Installed Pipecat reader survives graceful input stop; drain/timeout/cancel/REST races |
+| `c495d48` | Signed canonical URL and bounded start validation | Account/call/stream/run identity, required format, trailing-slash WSS fallback |
+| `2e87acf` | Atomic media claim and callback identity pinning | Call then Run locks; no intermediate committed claim; terminal/duplicate/foreign streams rejected |
+| `99517ed` | Fenced outbound create and callback reconciliation | No duplicate/redial; callbacks cannot be reset; ambiguous writes remain uncertain |
+| `9b4beba` | Authenticated endpoint and truthful Run finalization | Startup/cancel/host/artifact failures; history retained; release independent of business outcome |
+| `5ca9f3d` | Dispatch preflight before queue creation | Missing public URL/operator token creates no queued orphan |
+| `babe259` | Stock codec equivalence | Identical Pipecat media payloads at 8, 16 and 24 kHz pipeline rates |
+
+Review corrections included retaining a first queued callback's SID, distinguishing
+local setup errors from uncertain writes, reporting contradictory 4xx/callback
+evidence as uncertain, finalizing post-claim startup failure, avoiding duplicate
+cancellation persistence, and retaining confirmed carrier release after capture
+cleanup fails. An unbounded draft fixture wait and an invalid diagnostic assertion
+were fixed before the final regression gates; interrupted draft runs are not
+completion evidence.
+
+Final verification: **482 Python tests passed, 33 database tests skipped**, three
+upstream warnings; **six Node tests passed**. Ruff, whitespace checks, OpenAPI
+export, generated dashboard contracts and production build pass. Existing
+506.8-kB main bundle warning remains. Protected demo unchanged from `bcb8d67`.
+The original checkout is untouched; this branch is not merged or pushed.
+
+Not verified: a live Twilio account, deployed TLS/proxy handshake, human/carrier
+playback, PostgreSQL concurrent transactions or migrations against a database.
+No contacts were called and no real credentials were used. Offline tests do not
+establish a foolproof production deployment. See ADR-0023, runtime debugging
+instructions and the feature scratchpad for account/DB follow-ups.
+
+Still unfinished across the overall architecture task: Twilio restart/lease and
+uncertain-create reconciliation, SIM7600 release races, provider usage/pricing
+collection/persistence/UI, supported typed entry/exit actions, remaining settings
+capability audit and integration with independently updated main. Live dashboard
+WebSocket monitoring and automatic callback dispatch remain deferred by the user.

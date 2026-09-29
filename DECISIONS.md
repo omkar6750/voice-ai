@@ -13,3 +13,4 @@
 | [ADR-0020](docs/adr/ADR-0020-node-scoped-transition-tool-schemas.md) | Scope `change_node` destinations to each flow node's transitions | Accepted |
 | [ADR-0021](docs/adr/ADR-0021-typed-evidence-and-shared-delivery.md) | Validate evidence events end-to-end, unify final draining, and recover durable spool records safely | Accepted |
 | [ADR-0022](docs/adr/ADR-0022-meta-hosted-whatsapp-media.md) | Store WhatsApp template media as connection-scoped Meta IDs; never retain uploaded image bytes locally | Accepted |
+| [ADR-0023](docs/adr/ADR-0023-twilio-call-lifecycle.md) | One Twilio close owner, mark/clear playback facts, authenticated callbacks, and fenced dispatch | Accepted |
