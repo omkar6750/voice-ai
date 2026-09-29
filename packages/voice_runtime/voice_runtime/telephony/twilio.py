@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
+from twilio.http.http_client import TwilioHttpClient
 from twilio.rest import Client
 from twilio.twiml.voice_response import VoiceResponse
 
@@ -75,6 +76,7 @@ class TwilioCallController:
         self.client = Client(
             credentials.account_sid,
             credentials.auth_token,
+            http_client=TwilioHttpClient(timeout=10, max_retries=0),
         )
 
     async def dial(
@@ -96,21 +98,22 @@ class TwilioCallController:
             run_id=run_id,
         )
 
-        call = await asyncio.to_thread(
-            self.client.calls.create,
-            to=to,
-            from_=from_number,
-            twiml=twiml,
-            timeout=ringing_timeout,
-            status_callback=status_callback_url,
-            status_callback_method="POST",
-            status_callback_event=[
-                "initiated",
-                "ringing",
-                "answered",
-                "completed",
-            ],
-        )
+        async with asyncio.timeout(12):
+            call = await asyncio.to_thread(
+                self.client.calls.create,
+                to=to,
+                from_=from_number,
+                twiml=twiml,
+                timeout=ringing_timeout,
+                status_callback=status_callback_url,
+                status_callback_method="POST",
+                status_callback_event=[
+                    "initiated",
+                    "ringing",
+                    "answered",
+                    "completed",
+                ],
+            )
 
         return str(call.sid)
 

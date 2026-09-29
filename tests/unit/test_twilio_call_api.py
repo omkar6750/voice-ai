@@ -452,6 +452,11 @@ async def test_exception_sanitization_on_dial_failure():
         provider_metadata={},
     )
 
+    async def locked_get(model, _identity, **_kwargs):
+        return {Call: call_mock, Run: run_mock}.get(model)
+
+    session_mock.get.side_effect = locked_get
+
     with (
         patch("voice_api.api.v1.endpoints.calls.queue_call", return_value=(run_mock, call_mock)),
         patch(
@@ -459,7 +464,7 @@ async def test_exception_sanitization_on_dial_failure():
             return_value=SimpleNamespace(public_base_url="https://test.com", operator_token="tok"),
         ),
         patch(
-            "voice_api.services.twilio_service.resolve_twilio_credentials",
+            "voice_api.services.twilio_dispatch_service.resolve_twilio_credentials",
             return_value=(
                 conn,
                 TwilioCredentials(account_sid="AC123", auth_token="auth_token_secret_12345"),
@@ -480,9 +485,9 @@ async def test_exception_sanitization_on_dial_failure():
 
         assert exc_info.value.status_code == 502
         assert "auth_token_secret_12345" not in exc_info.value.detail
-        assert "[REDACTED]" in exc_info.value.detail
-        assert "auth_token_secret_12345" not in call_mock.provider_metadata["error"]
-        assert "[REDACTED]" in call_mock.provider_metadata["error"]
+        assert exc_info.value.detail == "Twilio call dispatch outcome is uncertain"
+        assert "auth_token_secret_12345" not in str(call_mock.provider_metadata)
+        assert call_mock.provider_metadata["twilio_dispatch_error"] == "create_failed_uncertain"
 
 
 def test_call_capture_creates_wav_files_on_close(tmp_path):
