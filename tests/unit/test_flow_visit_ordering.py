@@ -8,7 +8,9 @@ from voice_runtime.execution.flow_manager import TracedFlowManager
 
 
 @pytest.mark.parametrize("fail", [False, True])
-async def test_visit_exists_before_response_dispatch_and_failed_setup_is_recorded(monkeypatch, fail):
+async def test_visit_exists_before_response_dispatch_and_failed_setup_is_recorded(
+    monkeypatch, fail
+):
     flow = object.__new__(TracedFlowManager)
     flow._current_node = "prior"
     flow._classifier_runner = AsyncMock(return_value=None)
@@ -34,5 +36,6 @@ async def test_visit_exists_before_response_dispatch_and_failed_setup_is_recorde
     flow.tracker.start_visit.assert_called_once_with("closing", "tool-1")
     assert flow._transition_tool_id is None
     assert [call.args for call in flow._classifier_runner.await_args_list] == [
-        ("exit", "prior"), ("entry", "closing")
+        ("exit", "prior"),
+        ("entry", "closing"),
     ]

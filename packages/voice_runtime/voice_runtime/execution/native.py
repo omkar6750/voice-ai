@@ -407,7 +407,7 @@ class NativePipelineHost:
                     handler=self._handler(name),
                 )
             )
-        return NodeConfig(
+        config = NodeConfig(
             name=key,
             role_message=role_message or "",
             task_messages=task_messages,
@@ -417,6 +417,43 @@ class NativePipelineHost:
                 strategy=ContextStrategy(node.get("context_strategy", "append"))
             ),
         )
+        if node.get("terminal"):
+            # Pipecat serializes this control frame behind synthesis and local
+            # output audio. It is not a claim of browser/carrier playback.
+            config["post_actions"] = [
+                {"type": "function", "handler": self._terminal_response_finished, "node": key}
+            ]
+        return config
+
+    async def _terminal_response_finished(self, action: dict, manager: FlowManager) -> None:
+        """Complete a terminal visit only when its ordered post-action reaches output."""
+        node = action["node"]
+        if manager.current_node != node or self.termination.closing:
+            return
+        self.termination.summary.terminal_node = node
+        self.termination.request("terminal_completed", graceful=True)
+        self._call_hung_up = True
+        self.tracker.diagnostic(
+            severity="info",
+            category="call_termination",
+            source="call",
+            code="terminal_completed",
+            message="Terminal node response reached local output completion",
+            metadata={"node": node, "playback_scope": "local_output"},
+        )
+        try:
+            await self._finish_end_call()
+        except Exception:
+            self.termination.request("pipeline_failure")
+            self.errors.append("Terminal shutdown could not be queued")
+            self.tracker.diagnostic(
+                severity="error",
+                category="call_termination",
+                source="runtime",
+                code="terminal_shutdown_failed",
+                message="Terminal shutdown could not be queued",
+            )
+            raise
 
     async def _handle_user_idle(self) -> None:
         if self._call_hung_up or self.worker is None:
