@@ -53,9 +53,14 @@ class EvidenceFinalization:
 async def supervise_execution(operation: Awaitable[Any], delivery_task: asyncio.Task) -> Any:
     """Fail live execution promptly if its evidence writer/uploader becomes unhealthy."""
     operation_task = asyncio.ensure_future(operation)
-    done, _ = await asyncio.wait(
-        (operation_task, delivery_task), return_when=asyncio.FIRST_COMPLETED
-    )
+    try:
+        done, _ = await asyncio.wait(
+            (operation_task, delivery_task), return_when=asyncio.FIRST_COMPLETED
+        )
+    except asyncio.CancelledError:
+        operation_task.cancel()
+        await asyncio.gather(operation_task, return_exceptions=True)
+        raise
     if operation_task in done:
         return await operation_task
     if delivery_task in done:
