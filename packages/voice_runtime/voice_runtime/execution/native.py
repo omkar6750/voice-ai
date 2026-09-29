@@ -395,6 +395,7 @@ class TracedFlowManager(FlowManager):
         observer: EvidenceObserver,
         context: LLMContext,
         classifier_runner: Callable[[str, str], Awaitable[tuple[str, dict[str, str]] | None]],
+        end_call_runner: Callable[[], Awaitable[None]] | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -404,6 +405,7 @@ class TracedFlowManager(FlowManager):
         self.observer = observer
         self._context_for_evidence = context
         self._classifier_runner = classifier_runner
+        self._end_call_runner = end_call_runner
         self._transition_tool_id: str | None = None
 
     def _context_message_index(self) -> int | None:
@@ -506,6 +508,13 @@ class TracedFlowManager(FlowManager):
                 ):
                     self._transition_tool_id = invocation_id
                 result_properties = properties or FunctionCallResultProperties(is_final=is_final)
+                if (
+                    name == "end_call"
+                    and is_final
+                    and isinstance(result, dict)
+                    and result.get("status") == "ok"
+                ):
+                    result_properties = replace(result_properties, run_llm=False)
                 previous_context_callback = result_properties.on_context_updated
 
                 async def context_updated() -> None:
@@ -538,6 +547,16 @@ class TracedFlowManager(FlowManager):
                     self.tracker.end_tool(
                         invocation_id, "failed", {"error": "No final tool result"}
                     )
+            # The tool result must be delivered before EndFrame can stop the worker.
+            # Keep shutdown outside Flows' exception-to-tool-result conversion.
+            if (
+                name == "end_call"
+                and final_sent
+                and isinstance(final_result, dict)
+                and final_result.get("status") == "ok"
+                and self._end_call_runner is not None
+            ):
+                await self._end_call_runner()
             return final_result
 
         return traced
@@ -551,6 +570,7 @@ class NativePipelineHost:
         self.ready = asyncio.Event()
         self.errors: list[str] = []
         self._call_hung_up: bool = False
+        self._end_frame_queued = False
         self._termination_diagnostic_recorded = False
         self._end_task: asyncio.Task | None = None
         self._idle_reprompts = 0
@@ -836,7 +856,6 @@ class NativePipelineHost:
                     code="agent_hangup",
                     message="Agent requested call termination",
                 )
-                await self.worker.queue_frame(EndFrame())
                 return {"status": "ok"}
             if name == "check_whatsapp_window":
                 contact = (
@@ -1657,12 +1676,13 @@ class NativePipelineHost:
             llm=llm,
             context_aggregator=aggregators,
             transport=transport,
-                    tracker=tracker,
-                    bindings=snapshot["_resolved"]["tools"],
-                    snapshot=snapshot,
-                    observer=self.observer,
+            tracker=tracker,
+            bindings=snapshot["_resolved"]["tools"],
+            snapshot=snapshot,
+            observer=self.observer,
             context=context,
             classifier_runner=self._run_node_classifier,
+            end_call_runner=self._finish_end_call,
         )
         self.flow.state.update(flow_state)
 
@@ -1686,6 +1706,17 @@ class NativePipelineHost:
         self.runner_task = asyncio.create_task(runner.run(), name=f"pipeline-{self.run_id}")
         async with asyncio.timeout(15):
             await self.ready.wait()
+
+    async def _finish_end_call(self) -> None:
+        """Queue graceful shutdown once, after the final end-call tool result."""
+        if self._end_frame_queued:
+            return
+        self._end_frame_queued = True
+        try:
+            await self.worker.queue_frame(EndFrame())
+        except BaseException:
+            self._end_frame_queued = False
+            raise
 
     async def converse(self, modem_or_check=None) -> dict:
         """Run conversation until pipeline ends or call drops.
