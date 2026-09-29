@@ -91,7 +91,11 @@ async def start_call(
 ) -> dict:
     is_twilio = body.telephony is not None and body.telephony.provider == "twilio"
     if body.dispatch:
-        if not is_twilio:
+        if is_twilio:
+            from voice_api.services.twilio_dispatch_service import validate_twilio_dispatch_settings
+
+            validate_twilio_dispatch_settings(get_settings())
+        else:
             endpoint = body.telephony.endpoint_id if body.telephony else body.endpoint_id
             if not endpoint or not get_settings().operator_token:
                 raise HTTPException(422, "Dispatch needs an endpoint and operator token")

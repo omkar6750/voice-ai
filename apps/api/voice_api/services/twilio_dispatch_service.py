@@ -54,6 +54,14 @@ def _has_callback_evidence(call: Call) -> bool:
     )
 
 
+def validate_twilio_dispatch_settings(settings: Any) -> str:
+    """Reject invalid deployment settings before creating a queued request."""
+    public_base_url = _canonical_public_base_url(settings.public_base_url)
+    if not settings.operator_token:
+        raise HTTPException(422, "Twilio dispatch requires the operator token")
+    return public_base_url
+
+
 async def _locked_rows(
     session: AsyncSession, call_id: str, run_id: str
 ) -> tuple[Call | None, Run | None]:
@@ -111,9 +119,7 @@ async def dispatch_twilio_call(
     settings: Any,
 ) -> tuple[Call, Run]:
     """Fence one Twilio create attempt, then reconcile it with racing callbacks."""
-    public_base_url = _canonical_public_base_url(settings.public_base_url)
-    if not settings.operator_token:
-        raise HTTPException(422, "Twilio dispatch requires the operator token")
+    public_base_url = validate_twilio_dispatch_settings(settings)
 
     _, credentials = await resolve_twilio_credentials(session, call.telephony_connection_id)
 

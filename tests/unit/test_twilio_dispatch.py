@@ -1,13 +1,42 @@
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
 from twilio.base.exceptions import TwilioRestException
+from voice_api.api.v1.endpoints import calls as calls_endpoint
+from voice_api.schemas.call import StartCallBody, TelephonySelection
 from voice_api.services import twilio_dispatch_service as dispatch
 
 CALL_SID = "CA" + "a" * 32
 OTHER_SID = "CA" + "b" * 32
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"public_base_url": None, "operator_token": "token"},
+        {"public_base_url": "https://voice.example.com", "operator_token": None},
+    ],
+)
+async def test_dispatch_configuration_fails_before_persisting_queued_request(monkeypatch, values):
+    queue = AsyncMock()
+    monkeypatch.setattr(calls_endpoint, "queue_call", queue)
+    monkeypatch.setattr(calls_endpoint, "get_settings", lambda: SimpleNamespace(**values))
+    body = StartCallBody(
+        contact_id="contact",
+        agent_version_id="version",
+        dispatch=True,
+        telephony=TelephonySelection(
+            provider="twilio", connection_id="conn", from_number="+14155551212"
+        ),
+    )
+    with pytest.raises(HTTPException) as caught:
+        await calls_endpoint.start_call(body, session=None, _=None)
+    assert caught.value.status_code == 422
+    queue.assert_not_awaited()
 
 
 class FakeSession:
