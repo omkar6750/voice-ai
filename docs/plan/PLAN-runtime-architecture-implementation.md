@@ -120,10 +120,10 @@ verification has been completed in this worktree yet. Protected demo unchanged.
    nodes now use ordered Pipecat output actions, and graceful shutdown has a
    monotonic deadline. Carrier/browser playback is still not proven by pipeline
    completion; transport-specific acknowledgement remains required.
-2. Browser lifecycle: distinguish explicit operator stop, peer disconnect,
-   successful terminal completion and pipeline failure. The browser supervisor
-   still uses its existing final-status rules; native evidence fixes alone do
-   not fix that supervisor.
+2. Browser lifecycle follow-up: the supervisor now shares native termination,
+   and the modal handles peer closure without stale React state. Verify real audio
+   drain and browser rendering; cover abandoned session-creation responses and
+   database races. Do not infer physical playback from local pipeline completion.
 3. Twilio lifecycle: one hangup owner, mark/clear acknowledgements, bounded drain,
    confirmed REST completion, callback ordering and duplicate-event rules. No
    assumptions about carrier playback or caller disinterest from disconnect.
@@ -167,7 +167,7 @@ was implemented and reviewed locally. The complete objective remains active.
 | `b7c5d73` | Artifact registration failure separate from call outcome | Completed call stays completed/incomplete; prior pipeline-failure cause/error remain intact |
 | `4729a1b` | Bounded graceful shutdown | Default 15-second constructor deadline; monotonic timer unaffected by duplicate requests; immediate/completed calls exempt; timeout causes failed evidence and cancellation |
 
-Latest complete suite: **281 passed, 33 skipped, three upstream Pipecat/Python
+Second-batch complete suite: **281 passed, 33 skipped, three upstream Pipecat/Python
 deprecation warnings**. Ruff and whitespace gates passed before commits. The
 additional warning comes from Pipecat's built-in legacy action-handler signature,
 not the application's two-argument terminal handler. No vendor source was edited.
@@ -186,3 +186,43 @@ node actions, database/contract/build gates, and physical checks. Main advanced
 independently after the branch base; integration must merge and reverify those
 changes before completion. Do not use a current-main diff to attribute unrelated
 main work to this branch; review this branch's commits from `bcb8d67`.
+
+## Browser and cleanup batch, 2026-09-29
+
+| Commit | Slice | Evidence |
+| --- | --- | --- |
+| `3471e89` | Browser resource cleanup once, including error paths | Both resource closes attempted; repeated failure remains visible; concurrent and self-finalizer paths tested |
+| `bf09392` | Cleanup test import correction | Fixed one import-spacing lint finding; no runtime change |
+| `338f627` | Supervisor cancellation joins the conversation task | Child finally finishes before cancellation returns; uploader remains owned by evidence finalization |
+| `53c4b36` | Browser and native host share termination facts | Operator stop, disconnect, unknown finish, terminal/agent success and pipeline error distinguished; no provider startup after an already observed stop |
+| `e6206d8` | Browser artifact failures are visible and independent | 2xx success; redirects/server errors/timeouts mark incomplete; next file attempted; no retries or raw response persistence |
+| `e34a9dd` | Native cleanup serialized and idempotent | Seven tests; tracker/observer failure cannot skip capture; original error/cancellation retained; resource error does not replace completed terminal outcome |
+| `aa6b18e` | Dashboard current-peer lifecycle and startup/stop guards | Six Node tests; no stale React state check; actual peer event drives connected; late stop/SDP cannot clear a newer attempt |
+
+Small `gpt-6-luna` workers handled independent scopes. Focused small-model reviews
+found no concrete issue in the artifact/native/dashboard final diffs; the parent
+reviewed integration and ran all verification before committing. Review corrections
+included the successful-close sentinel, preserving repeated cleanup failures,
+stop-response attempt identity, and cancelling dialog startup. The dashboard
+skill kept existing primitives/styles intact; its file formatting also normalized
+existing source. No UI redesign or browser automation was performed.
+
+Latest verification: **316 Python tests passed, 33 database tests skipped**, three
+upstream warnings; **six Node tests passed**; repository Ruff and whitespace gates
+passed. OpenAPI export, generated dashboard contracts, and dashboard production
+build passed in this worktree. Generated contracts remain ignored build artifacts.
+Build warns about an existing main JavaScript chunk above 500 kB. No migration
+or PostgreSQL concurrency check, physical modem/browser playback, or real Twilio
+call was performed. Protected demo is unchanged from `bcb8d67`.
+
+Still open: Twilio supervisor/callback outcomes (they still equate provider
+completion with business completion), a single observable hangup owner, mark/clear
+acknowledgements, provider usage/pricing persistence and UI, supported node actions,
+saved-settings audit, database/race tests, further runtime module extraction, and
+integration with updated main. Installed Pipecat's Twilio auto-hangup catches/logs
+REST errors instead of propagating them; successful EndFrame alone cannot prove
+carrier release. Do not disable auto-hangup until its replacement owns all close
+paths and is tested. Browser late session-creation responses are ignored after
+attempt cancellation, so abandoned pre-connection run/session expiry still needs
+an explicit server-side lifecycle test and cleanup policy. These remain pending,
+not silently classified as completed work.

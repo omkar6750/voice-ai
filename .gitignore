@@ -15,6 +15,7 @@ venv/
 .pytest_temp/
 .pytest_temp-*/
 .pytest_tmp/
+.pytest_*/
 .pytest_*_verify/
 .pytest_*_baseline/
 .pytest_*_suite/
