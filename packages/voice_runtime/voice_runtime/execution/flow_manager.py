@@ -61,9 +61,13 @@ class TracedFlowManager(FlowManager):
                 *node_config.get("task_messages", []),
                 *classifier_messages,
             ]
-        await super()._set_node(node_id, node_config)
         self.tracker.start_visit(node_id, self._transition_tool_id)
         self._transition_tool_id = None
+        try:
+            await super()._set_node(node_id, node_config)
+        except BaseException:
+            self.tracker.end_visit("failed")
+            raise
 
     async def _create_transition_func(self, name, handler):
         execute = await super()._create_transition_func(name, handler)
