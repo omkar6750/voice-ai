@@ -79,6 +79,42 @@ async def test_evidence_reaches_api_before_hangup(tmp_path):
     assert control.progress[-1]["final_state"]["evidence_incomplete"] is False
 
 
+async def test_local_runner_delivers_without_http_or_service_token(tmp_path):
+    control = FakeControl()
+    driver = WaitingDriver(control)
+
+    async def post(suffix, body):
+        if suffix == "claim":
+            return {
+                "status": "claimed",
+                "destination": "+15551234567",
+                "resolved_config": {"call_limits": {"max_duration_secs": 10}},
+            }
+        assert suffix == "progress"
+        control.progress.append(body)
+        return {"status": body["status"]}
+
+    class LocalIngestor:
+        async def ingest(self, records):
+            control.records.extend(records)
+            control.received.set()
+
+    outcome = await execute_call(
+        None,
+        "",
+        "run",
+        "endpoint",
+        driver,
+        tmp_path / "local-call.jsonl",
+        local_post=post,
+        local_ingestor=LocalIngestor(),
+    )
+    assert outcome == "completed"
+    assert driver.closed
+    assert {record["kind"] for record in control.records} == {"exchange", "message"}
+    assert control.progress[-1]["final_state"]["evidence_incomplete"] is False
+
+
 async def test_spool_close_failure_reports_terminal_failure(tmp_path, monkeypatch):
     original = DurableSpool.close
 

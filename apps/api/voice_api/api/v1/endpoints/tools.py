@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner
+from voice_api.core.security import allow_organization_member
 from voice_api.models import Agent, AgentVersion, AgentVersionTool, Tool, ToolVersion
 from voice_api.models.common import new_id
 from voice_api.schemas.agent import ExpectedRevision
@@ -35,14 +36,14 @@ Operator = Depends(require_legacy_owner)
 
 
 @router.get("/tools", response_model=ToolListResponse)
+@allow_organization_member
 async def tools(session: AsyncSession = Session, _: None = Operator) -> ToolListResponse:
     rows = (await session.scalars(select(Tool).order_by(Tool.name))).all()
-    return ToolListResponse(
-        tools=[ToolSummaryResponse(id=row.id, name=row.name) for row in rows]
-    )
+    return ToolListResponse(tools=[ToolSummaryResponse(id=row.id, name=row.name) for row in rows])
 
 
 @router.get("/tools/handlers")
+@allow_organization_member
 async def tool_handlers(_: None = Operator) -> ToolHandlerCatalog:
     return {
         "handlers": [
@@ -245,6 +246,7 @@ async def tool_handlers(_: None = Operator) -> ToolHandlerCatalog:
 
 
 @router.get("/tools/validation", response_model=ToolValidationReport)
+@allow_organization_member
 async def validate_tools(
     session: AsyncSession = Session, _: None = Operator
 ) -> ToolValidationReport:
@@ -284,6 +286,7 @@ async def create_tool(
 
 
 @router.get("/tools/{tool_id}/versions", response_model=ToolVersionsResponse)
+@allow_organization_member
 async def tool_versions(
     tool_id: str, session: AsyncSession = Session, _: None = Operator
 ) -> ToolVersionsResponse:
@@ -389,10 +392,13 @@ async def publish_tool(
 async def clone_tool(
     version_id: str, body: ExpectedRevision, session: AsyncSession = Session, _: None = Operator
 ) -> ToolVersionMutationResponse:
-    return ToolVersionMutationResponse(**await clone_version(session, version_id, "tool", body.revision))
+    return ToolVersionMutationResponse(
+        **await clone_version(session, version_id, "tool", body.revision)
+    )
 
 
 @router.get("/tools/{tool_id}/impact", response_model=ToolImpactResponse)
+@allow_organization_member
 async def tool_deletion_impact(
     tool_id: str, session: AsyncSession = Session, _: None = Operator
 ) -> ToolImpactResponse:

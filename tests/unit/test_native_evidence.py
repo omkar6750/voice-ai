@@ -85,15 +85,9 @@ def test_caller_barge_in_interrupts_active_generation_and_tools_once():
     tracker = ExchangeTracker("run-1", sink)
     tracker.begin("caller")
     speech = tracker.start_operation("caller speech", "speech")
-    tracker.start_operation(
-        "transcription", "stt", parent_operation_id=speech["operation_id"]
-    )
-    llm = tracker.start_operation(
-        "inference", "llm", parent_operation_id=speech["operation_id"]
-    )
-    tts = tracker.start_operation(
-        "synthesis", "tts", parent_operation_id=llm["operation_id"]
-    )
+    tracker.start_operation("transcription", "stt", parent_operation_id=speech["operation_id"])
+    llm = tracker.start_operation("inference", "llm", parent_operation_id=speech["operation_id"])
+    tts = tracker.start_operation("synthesis", "tts", parent_operation_id=llm["operation_id"])
     playback = tracker.start_operation(
         "serial playback", "playback", parent_operation_id=tts["operation_id"]
     )
@@ -149,11 +143,15 @@ def test_classifier_result_is_delivered_and_consumed_by_next_llm():
         "classifier_context_updated",
         "classifier_result_consumed",
     }
-    assert any(record.result_id == result_id for record in records if record.kind == "classifier_result")
+    assert any(
+        record.result_id == result_id for record in records if record.kind == "classifier_result"
+    )
 
 
 @pytest.mark.asyncio
-async def test_configured_node_classifier_runs_once_and_returns_context_message(monkeypatch, tmp_path):
+async def test_configured_node_classifier_runs_once_and_returns_context_message(
+    monkeypatch, tmp_path
+):
     host = NativePipelineHost("run-1", tmp_path, SimpleNamespace(groq_api_key="test-key"))
     host.context = LLMContext([{"role": "user", "content": "Caller: interested"}])
     sink = MemorySink()
@@ -237,7 +235,7 @@ async def test_call_dispatch_leaves_claim_to_executor(monkeypatch):
             pass
 
     monkeypatch.setattr(calls, "queue_call", queue)
-    monkeypatch.setattr(calls, "get_settings", lambda: SimpleNamespace(runtime_service_token="test"))
+    monkeypatch.setattr(calls, "get_settings", lambda: SimpleNamespace(runtime_service_token=None))
     monkeypatch.setattr(
         calls, "_spawn_call_task", lambda run, endpoint: spawned.append((run, endpoint))
     )

@@ -34,13 +34,21 @@ async def test_rebuild_fencing_and_source_deletion(database):
     source.ingestion_token = "replacement"
     await database.flush()
     assert not await activate_build(database, source.id, "first", [Chunk("stale", {})], vectors)
-    assert (await database.scalar(select(KnowledgeChunk))).content == "website design"
+    first_chunk = await database.scalar(
+        select(KnowledgeChunk).where(KnowledgeChunk.source_id == source.id)
+    )
+    assert first_chunk.content == "website design"
     assert await activate_build(database, source.id, "replacement", [Chunk("current", {})], vectors)
     await database.flush()
-    assert (await database.scalar(select(KnowledgeChunk))).content == "current"
+    current_chunk = await database.scalar(
+        select(KnowledgeChunk).where(KnowledgeChunk.source_id == source.id)
+    )
+    assert current_chunk.content == "current"
     await database.execute(delete(KnowledgeSource).where(KnowledgeSource.id == source.id))
     await database.flush()
-    assert await database.scalar(select(KnowledgeChunk)) is None
+    assert await database.scalar(
+        select(KnowledgeChunk).where(KnowledgeChunk.source_id == source.id)
+    ) is None
     assert not await activate_build(database, source.id, "replacement", chunks, vectors)
 
 

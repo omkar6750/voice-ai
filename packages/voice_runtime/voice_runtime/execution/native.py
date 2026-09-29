@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
@@ -83,9 +82,7 @@ def render_opening(text: str, state: dict[str, Any]) -> str:
         value: Any = state
         for part in match.group(1).split("."):
             if not isinstance(value, dict) or part not in value:
-                raise ValueError(
-                    f"Opening references unavailable variable '{match.group(1)}'"
-                )
+                raise ValueError(f"Opening references unavailable variable '{match.group(1)}'")
             value = value[part]
         return "" if value is None else str(value)
 
@@ -506,9 +503,7 @@ class TracedFlowManager(FlowManager):
                     if previous_context_callback is not None:
                         await previous_context_callback()
 
-                result_properties = replace(
-                    result_properties, on_context_updated=context_updated
-                )
+                result_properties = replace(result_properties, on_context_updated=context_updated)
                 await original_callback(result, properties=result_properties)
                 if is_final:
                     final_result, final_sent = result, True
@@ -631,7 +626,9 @@ class NativePipelineHost:
         classifier_cfg = self._snapshot.get("classifier", {})
         if not classifier_cfg.get("enabled", True):
             return None
-        configured_nodes = classifier_cfg.get("node_entries" if phase == "entry" else "node_exits", [])
+        configured_nodes = classifier_cfg.get(
+            "node_entries" if phase == "entry" else "node_exits", []
+        )
         if node_key not in configured_nodes or self.tracker is None:
             return None
 
@@ -642,8 +639,9 @@ class NativePipelineHost:
             provider, model = "typesafe", jev_cfg.get("model", "jev-latest")
         else:
             llm_cfg = classifier_cfg.get("model", {})
-            provider, model = llm_cfg.get("provider", "groq"), llm_cfg.get(
-                "model", "llama-3.3-70b-versatile"
+            provider, model = (
+                llm_cfg.get("provider", "groq"),
+                llm_cfg.get("model", "llama-3.3-70b-versatile"),
             )
 
         operation = self.tracker.start_classifier(
@@ -663,10 +661,10 @@ class NativePipelineHost:
                 if not questions:
                     from voice_runtime.contracts.cadence import default_jev_questions
 
-                    questions = {key: value.model_dump() for key, value in default_jev_questions().items()}
-                jev_key = getattr(self.settings, "jev_api_key", None) or os.getenv(
-                    "VOICE_JEV_API_KEY", ""
-                )
+                    questions = {
+                        key: value.model_dump() for key, value in default_jev_questions().items()
+                    }
+                jev_key = getattr(self.settings, "jev_api_key", None) or ""
                 raw_result = await run_jev_classification(
                     api_key=jev_key,
                     transcript=transcript,
@@ -675,9 +673,7 @@ class NativePipelineHost:
                     api_url=jev_cfg.get("api_url", "https://api.typesafe.ai/v1/systemone"),
                 )
             elif provider == "groq":
-                groq_key = getattr(self.settings, "groq_api_key", None) or os.getenv(
-                    "VOICE_GROQ_API_KEY", ""
-                )
+                groq_key = getattr(self.settings, "groq_api_key", None) or ""
                 raw_result = await run_llm_classification(
                     api_key=groq_key,
                     transcript=transcript,
@@ -703,9 +699,7 @@ class NativePipelineHost:
             error = str(result["error"])
 
         status = "failed" if error else "completed"
-        result_id, message = self.tracker.finish_classifier(
-            operation, status, result, error=error
-        )
+        result_id, message = self.tracker.finish_classifier(operation, status, result, error=error)
         return result_id, message
 
     async def _whatsapp_runtime_config(
@@ -715,12 +709,8 @@ class NativePipelineHost:
         local_media_id: str | None = None,
     ) -> tuple[str, str, str | None, str, str | None, str | None]:
         """Resolve WhatsApp credentials and an optional catalog media record."""
-        access_token = getattr(self.settings, "whatsapp_access_token", None) or os.getenv(
-            "VOICE_WHATSAPP_ACCESS_TOKEN", ""
-        )
-        phone_number_id = getattr(self.settings, "whatsapp_phone_number_id", None) or os.getenv(
-            "VOICE_WHATSAPP_PHONE_NUMBER_ID", ""
-        )
+        access_token = getattr(self.settings, "whatsapp_access_token", None) or ""
+        phone_number_id = getattr(self.settings, "whatsapp_phone_number_id", None) or ""
         connection_id = None
         api_version = "v21.0"
         header_media_id = None
@@ -729,6 +719,7 @@ class NativePipelineHost:
             try:
                 from sqlalchemy import select
                 from voice_api.db.session import SessionFactory
+                from voice_api.db.tenant_scope import bind_run_organization
                 from voice_api.models import (
                     IntegrationConnection,
                     IntegrationMedia,
@@ -737,6 +728,7 @@ class NativePipelineHost:
                 from voice_api.services.vault_service import CredentialVault
 
                 async with SessionFactory() as session:
+                    await bind_run_organization(session, self.run_id)
                     query = select(IntegrationConnection).where(
                         IntegrationConnection.provider == "whatsapp",
                         IntegrationConnection.enabled.is_(True),
@@ -749,7 +741,9 @@ class NativePipelineHost:
                             phone_number_id
                         ):
                             connection_id = str(row.id)
-                            phone_number_id = str(row.config.get("phone_number_id") or phone_number_id)
+                            phone_number_id = str(
+                                row.config.get("phone_number_id") or phone_number_id
+                            )
                             api_version = str(row.config.get("api_version") or api_version)
                             if local_media_id:
                                 media = await session.scalar(
@@ -833,9 +827,11 @@ class NativePipelineHost:
                 try:
                     from sqlalchemy import select
                     from voice_api.db.session import SessionFactory
+                    from voice_api.db.tenant_scope import bind_run_organization
                     from voice_api.models import InboundWebhookMessage
 
                     async with SessionFactory() as db_session:
+                        await bind_run_organization(db_session, self.run_id)
                         inbound_row = await db_session.scalar(
                             select(InboundWebhookMessage)
                             .where(
@@ -879,9 +875,11 @@ class NativePipelineHost:
                 try:
                     from sqlalchemy import select
                     from voice_api.db.session import SessionFactory
+                    from voice_api.db.tenant_scope import bind_run_organization
                     from voice_api.models import InboundWebhookMessage
 
                     async with SessionFactory() as db_session:
+                        await bind_run_organization(db_session, self.run_id)
                         inbound_row = await db_session.scalar(
                             select(InboundWebhookMessage)
                             .where(
@@ -1117,9 +1115,7 @@ class NativePipelineHost:
                             )
                         for k in sorted(args.keys()):
                             if k.startswith("param_") and k != "param_1":
-                                body_params.append(
-                                    {"type": "text", "text": str(args[k])[:1024]}
-                                )
+                                body_params.append({"type": "text", "text": str(args[k])[:1024]})
                     components.append({"type": "body", "parameters": body_params})
 
                 template_lang = str(whatsapp_config.get("language") or "en")
@@ -1205,9 +1201,7 @@ class NativePipelineHost:
                         k: (v.model_dump() if hasattr(v, "model_dump") else v)
                         for k, v in questions.items()
                     }
-                jev_key = getattr(self.settings, "jev_api_key", None) or os.getenv(
-                    "VOICE_JEV_API_KEY", ""
-                )
+                jev_key = getattr(self.settings, "jev_api_key", None) or ""
                 res = await run_jev_classification(
                     api_key=jev_key,
                     transcript=transcript,
@@ -1225,9 +1219,7 @@ class NativePipelineHost:
                 transcript = _extract_transcript(getattr(self, "context", None), self.tracker)
                 classifier_cfg = self._snapshot.get("classifier", {})
                 llm_cfg = classifier_cfg.get("model", {})
-                groq_key = getattr(self.settings, "groq_api_key", None) or os.getenv(
-                    "VOICE_GROQ_API_KEY", ""
-                )
+                groq_key = getattr(self.settings, "groq_api_key", None) or ""
                 res = await run_llm_classification(
                     api_key=groq_key,
                     transcript=transcript,
@@ -1243,17 +1235,13 @@ class NativePipelineHost:
                 return trimmed
 
             if name in ("check_callback_availability", "book_callback"):
-                endpoint = (
-                    "http://localhost:8000/api/v1/callback-scheduling/availability"
-                    if name == "check_callback_availability"
-                    else "http://localhost:8000/api/v1/callback-scheduling/book"
-                )
                 contact = (
                     self._snapshot.get("_resolved", {}).get("contact")
                     or self._snapshot.get("contact_snapshot")
                     or {}
                 )
                 payload = {
+                    "run_id": self.run_id,
                     "agent_version_id": self._snapshot.get("agent_version_id"),
                     "contact_id": contact.get("id") or self._snapshot.get("contact_id"),
                 }
@@ -1270,15 +1258,10 @@ class NativePipelineHost:
                             "reason": args.get("reason", "Customer requested callback"),
                         }
                     )
-                token = getattr(self.settings, "runtime_service_token", None) or os.getenv(
-                    "VOICE_RUNTIME_SERVICE_TOKEN", ""
-                )
                 try:
-                    async with httpx.AsyncClient(timeout=20) as client:
-                        response = await client.post(
-                            endpoint, json=payload, headers={"X-Voice-Runtime-Token": token}
-                        )
-                    return response.json()
+                    from voice_api.services.local_runtime_service import local_callback
+
+                    return await local_callback(name, self.run_id, payload)
                 except Exception as exc:
                     logger.error("human callback tool failed: {}", exc)
                     return {"status": "error", "error": "Callback scheduling service unavailable"}
@@ -1314,10 +1297,12 @@ class NativePipelineHost:
                     from uuid import uuid4
 
                     from voice_api.db.session import SessionFactory
+                    from voice_api.db.tenant_scope import bind_run_organization
                     from voice_api.models import Callback
 
                     request_key = f"{self.run_id}_{uuid4().hex[:8]}"
                     async with SessionFactory() as session:
+                        await bind_run_organization(session, self.run_id)
                         cb = Callback(
                             request_key=request_key,
                             contact_id=contact_id,
@@ -1343,7 +1328,10 @@ class NativePipelineHost:
                     return {"status": "error", "error": f"Failed to persist callback: {exc}"}
 
             definition = (
-                self._snapshot.get("_resolved", {}).get("tools", {}).get(name, {}).get("definition", {})
+                self._snapshot.get("_resolved", {})
+                .get("tools", {})
+                .get(name, {})
+                .get("definition", {})
             )
             if definition.get("handler") == "query_knowledge_base":
                 query_text = (
@@ -1371,19 +1359,19 @@ class NativePipelineHost:
                 all_hits = []
                 try:
                     from voice_api.db.session import SessionFactory
+                    from voice_api.db.tenant_scope import bind_run_organization
                     from voice_api.knowledge.embeddings import GeminiEmbedder
                     from voice_api.services.knowledge_service import search
 
                     from voice_runtime.contracts.knowledge import RetrievalConfig
 
-                    gemini_key = getattr(self.settings, "gemini_api_key", None) or os.getenv(
-                        "GEMINI_API_KEY", ""
-                    )
+                    gemini_key = getattr(self.settings, "gemini_api_key", None) or ""
                     retrieval_cfg = RetrievalConfig.model_validate(
                         self._snapshot.get("retrieval", {})
                     )
 
                     async with SessionFactory() as db_session, httpx.AsyncClient() as http_client:
+                        await bind_run_organization(db_session, self.run_id)
                         embedder = GeminiEmbedder(gemini_key, http_client) if gemini_key else None
                         hits = await search(db_session, kb_id, query_text, retrieval_cfg, embedder)
                         all_hits.extend(hits)
@@ -1401,8 +1389,7 @@ class NativePipelineHost:
                     }
 
                 context_excerpts = "\n\n".join(
-                    f"[{h.title}; chunk {h.chunk_id}]\n{h.content[:600]}"
-                    for h in top_hits[:3]
+                    f"[{h.title}; chunk {h.chunk_id}]\n{h.content[:600]}" for h in top_hits[:3]
                 )
                 return {
                     "status": "ok",
@@ -1424,7 +1411,9 @@ class NativePipelineHost:
 
         return handle
 
-    async def prepare(self, snapshot: dict, tracker: ExchangeTracker, *, transport=None) -> None:
+    async def prepare(
+        self, snapshot: dict, tracker: ExchangeTracker, *, transport=None, enable_rtvi=False
+    ) -> None:
         self.tracker, self._snapshot = tracker, snapshot
         self._nodes = {node["id"]: node for node in snapshot["flow"]["nodes"]}
         if snapshot.get("background_hooks") or any(
@@ -1445,14 +1434,23 @@ class NativePipelineHost:
             for name in self._nodes[key]["tool_bindings"]:
                 if name not in snapshot["_resolved"]["tools"]:
                     raise ValueError("Node references unavailable tool binding")
-        for name, value in (
-            ("sarvam_api_key", self.settings.sarvam_api_key),
-            ("groq_api_key", self.settings.groq_api_key),
-        ):
-            if not value:
-                raise ValueError(f"{name} is not configured")
-        if snapshot["tts"]["provider"] == "cartesia" and not self.settings.cartesia_api_key:
-            raise ValueError("cartesia_api_key is not configured")
+        required_credentials = {
+            "sarvam_api_key": snapshot["stt"]["provider"] == "sarvam",
+            "groq_api_key": snapshot["llm"]["provider"] == "groq",
+            "gemini_api_key": snapshot["llm"]["provider"] == "gemini",
+            "cartesia_api_key": snapshot["tts"]["provider"] == "cartesia",
+        }
+        classifier = snapshot.get("classifier", {})
+        if classifier.get("classifier_type") == "jev":
+            required_credentials["jev_api_key"] = True
+        elif classifier.get("classifier_type") == "llm":
+            classifier_provider = (classifier.get("model") or {}).get("provider", "groq")
+            if classifier_provider in {"groq", "gemini"}:
+                required_credentials[f"{classifier_provider}_api_key"] = True
+        for name, required in required_credentials.items():
+            value = getattr(self.settings, name, None)
+            if required and not value:
+                raise ValueError(f"{name} is not configured for this organization")
         rate = snapshot["audio"]["sample_rate"]
         self.directory.mkdir(parents=True, exist_ok=True)
         self.capture = CallCapture(self.directory, rate)
@@ -1486,8 +1484,6 @@ class NativePipelineHost:
                 settings=GroqLLMService.Settings(**llm_settings),
             )
         elif llm_config["provider"] == "gemini":
-            if not self.settings.gemini_api_key:
-                raise ValueError("Gemini API key is not configured")
             # Preserve provider-default thinking. No universal disable setting exists.
             llm = GoogleLLMService(
                 api_key=self.settings.gemini_api_key,
@@ -1521,9 +1517,7 @@ class NativePipelineHost:
 
         configured_opening = snapshot.get("greeting") or ""
         self._verbatim_opening = (
-            render_opening(configured_opening, flow_state)
-            if configured_opening.strip()
-            else None
+            render_opening(configured_opening, flow_state) if configured_opening.strip() else None
         )
         initial_messages: list[dict[str, str]] = []
         if not self._verbatim_opening:
@@ -1583,7 +1577,7 @@ class NativePipelineHost:
         self.worker = PipelineWorker(
             pipeline,
             observers=[self.observer, self.capture],
-            enable_rtvi=False,
+            enable_rtvi=enable_rtvi,
             params=PipelineParams(
                 enable_metrics=True,
                 enable_usage_metrics=True,

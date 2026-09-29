@@ -1,50 +1,131 @@
+from collections.abc import Callable
+from datetime import UTC, datetime
+from hashlib import sha256
 from secrets import compare_digest
 from typing import Any
 
-from clerk_backend_api import Clerk
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from voice_api.core.clerk_auth import ClerkPrincipal, require_clerk_user
+from voice_api.core.clerk_organizations import (
+    ClerkOrganizationDirectory,
+    get_clerk_organization_directory,
+)
 from voice_api.core.config import get_settings
+from voice_api.db.session import get_session
+from voice_api.db.tenant_scope import bind_organization
+from voice_api.models import (
+    LegacyDataTenant,
+    Organization,
+    PlatformAdministrator,
+    PlatformSupportSession,
+    User,
+)
 
 Principal = Depends(require_clerk_user)
+Session = Depends(get_session)
+Directory = Depends(get_clerk_organization_directory)
 
 
-async def require_legacy_owner(
+def allow_organization_member(endpoint: Callable) -> Callable:
+    """Explicitly mark a route as safe for Clerk organization members."""
+    endpoint.__allow_organization_member__ = True
+    return endpoint
+
+
+async def require_organization_access(
+    request: Request,
     principal: ClerkPrincipal = Principal,
+    session: AsyncSession = Session,
+    directory: ClerkOrganizationDirectory = Directory,
 ) -> ClerkPrincipal:
-    """Only the mapped Clerk owner can access unscoped legacy data."""
-    settings = get_settings()
-    owner_id = settings.clerk_legacy_owner_user_id
-    if owner_id and compare_digest(principal.user_id, owner_id):
-        return principal
-    expected_email = settings.clerk_legacy_owner_email
-    if owner_id or not expected_email:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Workspace access required"
+    """Verify live Clerk membership and bind the registered active org to DB scope."""
+    support_token = request.headers.get("x-platform-support-session")
+    if support_token:
+        if len(support_token) > 256:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Platform support session invalid")
+        token_hash = sha256(support_token.encode("utf-8")).hexdigest()
+        user_id = await session.scalar(
+            select(User.id).where(
+                User.clerk_user_id == principal.user_id,
+                User.disabled_at.is_(None),
+            )
         )
+        assignment = (
+            await session.scalar(
+                select(PlatformAdministrator.id).where(PlatformAdministrator.user_id == user_id)
+            )
+            if user_id
+            else None
+        )
+        support_session = await session.get(PlatformSupportSession, token_hash)
+        if (
+            not user_id
+            or not assignment
+            or support_session is None
+            or support_session.user_id != user_id
+            or support_session.revoked_at is not None
+            or support_session.expires_at <= datetime.now(UTC)
+        ):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Platform support session invalid")
+        organization = await session.get(Organization, support_session.organization_id)
+        if organization is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Organization not found")
+        request.state.platform_support_session = token_hash
+        bind_organization(session.sync_session, organization.id)
+        return ClerkPrincipal(user_id=principal.user_id, org_id=organization.clerk_org_id)
+    if not principal.org_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Organization access required")
     try:
-        async with Clerk(bearer_auth=settings.clerk_secret_key) as clerk:
-            user = await clerk.users.get_async(user_id=principal.user_id)
-    except Exception as exc:
-        raise HTTPException(503, "Clerk identity lookup unavailable") from exc
-    primary = next(
-        (
-            address
-            for address in user.email_addresses
-            if address.id == user.primary_email_address_id
-        ),
-        None,
+        organization_id = await session.scalar(
+            select(Organization.id).where(Organization.clerk_org_id == principal.org_id)
+        )
+    except SQLAlchemyError as exc:
+        raise HTTPException(503, "Organization access unavailable") from exc
+    if organization_id is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Organization access required")
+    membership = await directory.membership(principal.org_id, principal.user_id)
+    if membership is None or membership.role not in {"org:admin", "org:member"}:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Organization access required")
+    disabled_user = await session.scalar(
+        select(User.id).where(
+            User.clerk_user_id == principal.user_id,
+            User.disabled_at.is_not(None),
+        )
     )
-    verification = getattr(primary, "verification", None)
-    verification_status = getattr(verification, "status", None)
-    if (
-        primary is None
-        or primary.email_address.casefold() != expected_email.strip().casefold()
-        or getattr(verification_status, "value", verification_status) != "verified"
-    ):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Workspace access required")
+    if disabled_user is not None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Account access is disabled")
+    if membership.role == "org:member":
+        route = request.scope.get("route")
+        endpoint = getattr(route, "endpoint", None)
+        if not getattr(endpoint, "__allow_organization_member__", False):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Organization admin required")
+    bind_organization(session.sync_session, organization_id)
     return principal
+
+
+async def require_legacy_data_access(
+    request: Request,
+    principal: ClerkPrincipal = Principal,
+    session: AsyncSession = Session,
+    directory: ClerkOrganizationDirectory = Directory,
+) -> ClerkPrincipal:
+    """Restrict legacy-only operations to members of the migrated Original org."""
+    principal = await require_organization_access(request, principal, session, directory)
+    try:
+        legacy_org_id = await session.scalar(select(LegacyDataTenant.organization_id))
+    except SQLAlchemyError as exc:
+        raise HTTPException(503, "Legacy organization access unavailable") from exc
+    if not legacy_org_id or session.sync_session.info.get("organization_scope_id") != legacy_org_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Legacy organization access required")
+    return principal
+
+
+# Kept as an import alias for route modules during the RBAC dependency rename.
+require_legacy_owner = require_organization_access
 
 
 async def require_runtime_service(

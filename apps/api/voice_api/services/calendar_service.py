@@ -260,7 +260,7 @@ def sign_slot(payload: dict) -> str:
         .decode()
         .rstrip("=")
     )
-    key_value = get_settings().integration_active_key or get_settings().runtime_service_token
+    key_value = get_settings().callback_slot_signing_key
     if not key_value:
         raise SchedulingError("Callback slot signing is not configured")
     key = key_value.encode()
@@ -273,7 +273,7 @@ def verify_slot(value: str) -> dict:
         raw, signature = value.split(".", 1)
     except ValueError as exc:
         raise SchedulingError("Invalid callback slot") from exc
-    key_value = get_settings().integration_active_key or get_settings().runtime_service_token
+    key_value = get_settings().callback_slot_signing_key
     if not key_value:
         raise SchedulingError("Callback slot signing is not configured")
     key = key_value.encode()

@@ -5,11 +5,20 @@ import os
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 from voice_api.api.v1.endpoints.execution import claim
-from voice_api.models import Agent, AgentVersion, Call, Contact, Run, RuntimeEndpoint
+from voice_api.db.tenant_scope import bind_organization
+from voice_api.models import (
+    Agent,
+    AgentVersion,
+    Call,
+    Contact,
+    LegacyDataTenant,
+    Run,
+    RuntimeEndpoint,
+)
 from voice_api.models.common import new_id
 from voice_api.schemas.execution import Claim
 from voice_runtime.contracts import AgentConfig
@@ -28,6 +37,10 @@ async def test_two_workers_cannot_claim_same_endpoint():
     ).model_dump(mode="json")
     try:
         async with AsyncSession(engine) as session:
+            org_id = await session.scalar(select(LegacyDataTenant.organization_id))
+            if org_id is None:
+                pytest.fail("Integration database must contain the isolated legacy organization")
+            bind_organization(session.sync_session, org_id)
             session.add_all(
                 [
                     Agent(id=agent_id, name=agent_id),
@@ -74,6 +87,7 @@ async def test_two_workers_cannot_claim_same_endpoint():
 
         async def compete(run_id):
             async with AsyncSession(engine, expire_on_commit=False) as session:
+                bind_organization(session.sync_session, org_id)
                 try:
                     await claim(run_id, Claim(token=new_id(), endpoint_id=endpoint_id), session)
                     return 200

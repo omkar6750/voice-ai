@@ -1,13 +1,16 @@
 ---
 id: RFC-0014
 title: Clerk authentication, customer organizations, workspaces, and production access
-status: In progress
+status: Superseded by ADR-0023 and PLAN-0033
 version: 1
 date: 2026-09-27
 related: [RFC-0003, RFC-0004, ADR-0020, PLAN-0030]
 ---
 
 # Problem and scope
+
+> Historical proposal only. ADR-0023 and PLAN-0033 are authoritative for the
+> org-only implementation. Do not implement the nested tenant proposal below.
 
 The current control plane uses one operator bearer token and one settings row.
 Agents, tools, contacts, knowledge, integrations, runs, and media are not tenant
@@ -75,7 +78,8 @@ retains their IDs and published versions. Providers show a clear missing-key
 state. A customer can add workspace-scoped keys through write-only forms,
 verify them, and start a browser agent test. Twilio outbound calls require an
 enabled customer Twilio integration and verified from-number. Browser agent
-testing uses WebRTC and the customer's AI provider keys; Twilio is not required.
+testing uses the Pipecat WebSocket browser transport (ADR-0021) and the
+customer's AI provider keys; Twilio is not required.
 
 # Contracts and invariants
 

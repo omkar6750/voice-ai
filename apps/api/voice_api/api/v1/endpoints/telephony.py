@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from uuid import NAMESPACE_URL, uuid5
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, WebSocket
 from loguru import logger
 from pipecat.runner.utils import parse_telephony_websocket
@@ -20,6 +18,7 @@ from twilio.request_validator import RequestValidator
 from voice_api.api.deps import get_session
 from voice_api.core.config import get_settings
 from voice_api.db.session import SessionFactory
+from voice_api.db.tenant_scope import bind_call_organization, bind_organization
 from voice_api.models import Call, Run
 from voice_api.models.common import now
 from voice_api.schemas.diagnostics import DiagnosticInput
@@ -31,10 +30,11 @@ from voice_api.services.call_service import (
     get_by_correlation_id,
 )
 from voice_api.services.diagnostic_service import persist_diagnostic
+from voice_api.services.local_runtime_service import LocalEvidenceIngestor, register_local_artifacts
+from voice_api.services.provider_credentials import settings_for_organization
 from voice_api.services.twilio_service import resolve_twilio_credentials
 from voice_runtime.diagnostics import text_error_diagnostic
 from voice_runtime.execution.delivery import stream_evidence
-from voice_runtime.execution.evidence_client import ApiEvidenceIngestor
 from voice_runtime.execution.exchange import ExchangeTracker
 from voice_runtime.execution.native import NativePipelineHost
 from voice_runtime.execution.spool import DurableSpool
@@ -50,8 +50,9 @@ async def twilio_call_status(
     request: Request,
     session: AsyncSession = Session,
 ) -> Response:
+    await bind_call_organization(session, correlation_id)
     call = await get_by_correlation_id(session, correlation_id)
-    if call is None or call.provider != "twilio":
+    if call is None or call.provider != "twilio" or not call.org_id:
         raise HTTPException(404, "Call not found")
 
     _, credentials = await resolve_twilio_credentials(
@@ -61,15 +62,16 @@ async def twilio_call_status(
     signature = request.headers.get("x-twilio-signature", "")
 
     settings = get_settings()
-    if settings.public_base_url:
-        public_urls = PublicTelephonyUrls(settings.public_base_url)
-        validator = RequestValidator(credentials.auth_token)
-        if not signature or not validator.validate(
-            public_urls.twilio_call_status(correlation_id),
-            form,
-            signature,
-        ):
-            raise HTTPException(403, "Invalid Twilio signature")
+    if not settings.public_base_url:
+        raise HTTPException(503, "Twilio callbacks are not configured")
+    public_urls = PublicTelephonyUrls(settings.public_base_url)
+    validator = RequestValidator(credentials.auth_token)
+    if not signature or not validator.validate(
+        public_urls.twilio_call_status(correlation_id),
+        form,
+        signature,
+    ):
+        raise HTTPException(403, "Invalid Twilio signature")
 
     if (
         call.provider_call_id
@@ -92,8 +94,9 @@ async def twilio_stream_status(
     request: Request,
     session: AsyncSession = Session,
 ) -> Response:
+    await bind_call_organization(session, correlation_id)
     call = await get_by_correlation_id(session, correlation_id)
-    if call is None or call.provider != "twilio":
+    if call is None or call.provider != "twilio" or not call.org_id:
         raise HTTPException(404, "Call not found")
 
     _, credentials = await resolve_twilio_credentials(
@@ -103,15 +106,16 @@ async def twilio_stream_status(
     signature = request.headers.get("x-twilio-signature", "")
 
     settings = get_settings()
-    if settings.public_base_url:
-        public_urls = PublicTelephonyUrls(settings.public_base_url)
-        validator = RequestValidator(credentials.auth_token)
-        if not signature or not validator.validate(
-            public_urls.twilio_stream_status(correlation_id),
-            form,
-            signature,
-        ):
-            raise HTTPException(403, "Invalid Twilio signature")
+    if not settings.public_base_url:
+        raise HTTPException(503, "Twilio callbacks are not configured")
+    public_urls = PublicTelephonyUrls(settings.public_base_url)
+    validator = RequestValidator(credentials.auth_token)
+    if not signature or not validator.validate(
+        public_urls.twilio_stream_status(correlation_id),
+        form,
+        signature,
+    ):
+        raise HTTPException(403, "Invalid Twilio signature")
 
     await apply_twilio_stream_status(
         session,
@@ -129,8 +133,16 @@ async def twilio_media_endpoint(
     correlation_id: str,
 ) -> None:
     async with SessionFactory() as session:
+        try:
+            org_id = await bind_call_organization(session, correlation_id)
+        except HTTPException:
+            await websocket.close(code=1008)
+            return
         call = await get_by_correlation_id(session, correlation_id)
-        if call is None or call.provider != "twilio":
+        if call is None or call.provider != "twilio" or not call.org_id:
+            await websocket.close(code=1008)
+            return
+        if call.org_id != org_id:
             await websocket.close(code=1008)
             return
 
@@ -147,19 +159,22 @@ async def twilio_media_endpoint(
         _, credentials = await resolve_twilio_credentials(
             session, connection_id, require_enabled=True
         )
+        provider_settings = await settings_for_organization(session, org_id, get_settings())
 
-    settings = get_settings()
+    settings = provider_settings
     signature = websocket.headers.get("x-twilio-signature", "")
-    if settings.public_base_url:
-        public_urls = PublicTelephonyUrls(settings.public_base_url)
-        validator = RequestValidator(credentials.auth_token)
-        if not signature or not validator.validate(
-            public_urls.twilio_media(correlation_id),
-            {},
-            signature,
-        ):
-            await websocket.close(code=1008)
-            return
+    if not settings.public_base_url:
+        await websocket.close(code=1008)
+        return
+    public_urls = PublicTelephonyUrls(settings.public_base_url)
+    validator = RequestValidator(credentials.auth_token)
+    if not signature or not validator.validate(
+        public_urls.twilio_media(correlation_id),
+        {},
+        signature,
+    ):
+        await websocket.close(code=1008)
+        return
 
     await websocket.accept()
 
@@ -198,6 +213,7 @@ async def twilio_media_endpoint(
         return
 
     async with SessionFactory() as session:
+        bind_organization(session.sync_session, org_id)
         claimed = await atomically_claim_run(session, run_id)
         if not claimed:
             await websocket.close(code=1008)
@@ -265,73 +281,50 @@ async def twilio_media_endpoint(
         )
         if s
     )
-    tracker = ExchangeTracker(run_id, spool, secrets=(*secrets, settings.runtime_service_token or ""))
+    tracker = ExchangeTracker(run_id, spool, secrets=secrets)
+    ingestor = LocalEvidenceIngestor(run_id, org_id=org_id)
+    delivery_task = asyncio.create_task(stream_evidence(spool, ingestor))
 
-    from voice_api.main import app
+    try:
+        await host.prepare(snapshot, tracker, transport=transport)
+        await host.converse(lifecycle)
+    except Exception as exc:
+        logger.exception("Twilio pipeline failed during run {}: {}", run_id, exc)
+        async with SessionFactory() as session:
+            bind_organization(session.sync_session, org_id)
+            r = await session.get(Run, run_id)
+            if r:
+                await persist_diagnostic(
+                    session,
+                    run_id,
+                    DiagnosticInput.model_validate(text_error_diagnostic(str(exc))),
+                )
+            if r and r.status not in ("completed", "canceled"):
+                r.status = "failed"
+                r.error = f"Pipeline execution failed: {exc}"
+                r.ended_at = now()
+            c = await session.get(Call, call_id)
+            if c and c.status not in ("completed", "canceled"):
+                c.status = "failed"
+                c.ended_at = now()
+            await session.commit()
+    finally:
+        lifecycle.mark_ended()
+        await host.close()
+        delivery_task.cancel()
 
-    headers = {"X-Voice-Runtime-Token": settings.runtime_service_token or ""}
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://runtime.local"
-    ) as client:
-        ingestor = ApiEvidenceIngestor(client, run_id, settings.runtime_service_token or "")
-        delivery_task = asyncio.create_task(stream_evidence(spool, ingestor))
-
-        try:
-            await host.prepare(snapshot, tracker, transport=transport)
-            await host.converse(lifecycle)
-        except Exception as exc:
-            logger.exception("Twilio pipeline failed during run {}: {}", run_id, exc)
-            async with SessionFactory() as session:
-                r = await session.get(Run, run_id)
-                if r:
-                    await persist_diagnostic(
-                        session,
-                        run_id,
-                        DiagnosticInput.model_validate(
-                            text_error_diagnostic(str(exc))
-                        ),
-                    )
-                if r and r.status not in ("completed", "canceled"):
-                    r.status = "failed"
-                    r.error = f"Pipeline execution failed: {exc}"
+        async with SessionFactory() as session:
+            bind_organization(session.sync_session, org_id)
+            r = await session.get(Run, run_id)
+            if r and r.status in ("claimed", "running"):
+                r.status = "completed"
+                if not r.ended_at:
                     r.ended_at = now()
-                c = await session.get(Call, call_id)
-                if c and c.status not in ("completed", "canceled"):
-                    c.status = "failed"
+            c = await session.get(Call, call_id)
+            if c and c.status in ("dialing", "ringing", "active"):
+                c.status = "completed"
+                if not c.ended_at:
                     c.ended_at = now()
-                await session.commit()
-        finally:
-            lifecycle.mark_ended()
-            await host.close()
-            delivery_task.cancel()
+            await session.commit()
 
-            async with SessionFactory() as session:
-                r = await session.get(Run, run_id)
-                if r and r.status in ("claimed", "running"):
-                    r.status = "completed"
-                    if not r.ended_at:
-                        r.ended_at = now()
-                c = await session.get(Call, call_id)
-                if c and c.status in ("dialing", "ringing", "active"):
-                    c.status = "completed"
-                    if not c.ended_at:
-                        c.ended_at = now()
-                await session.commit()
-
-            if host.directory.exists():
-                for kind in ("input", "output", "mixed", "pipeline_log"):
-                    filename = "pipeline.log" if kind == "pipeline_log" else f"{kind}.wav"
-                    if not (host.directory / filename).is_file():
-                        continue
-                    try:
-                        await client.post(
-                            f"/api/runs/{run_id}/artifacts",
-                            headers=headers,
-                            json={
-                                "id": str(uuid5(NAMESPACE_URL, f"{run_id}/{kind}")),
-                                "kind": kind,
-                                "path": f"{run_id}/{filename}",
-                            },
-                        )
-                    except Exception:
-                        pass
+        await register_local_artifacts(run_id, host.directory, org_id=org_id)

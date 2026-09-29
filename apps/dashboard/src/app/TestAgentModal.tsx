@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { PipecatClient } from "@pipecat-ai/client-js";
+import { ProtobufFrameSerializer, WebSocketTransport } from "@pipecat-ai/websocket-transport";
 import { Link } from "react-router-dom";
 import {
   ChevronDown,
@@ -13,7 +15,7 @@ import {
   Volume2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useApi } from "./api";
+import { useApi, websocketUrl } from "./api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -67,6 +69,7 @@ type BrowserSessionResponse = {
   contact_id?: string | null;
   created_at?: string;
   expires_at?: string;
+  sample_rate: number;
 };
 
 export function TestAgentModal() {
@@ -104,14 +107,9 @@ export function TestAgentModal() {
   const [duration, setDuration] = useState(0);
   const [runId, setRunId] = useState<string | null>(null);
 
-  const pcRef = useRef<RTCPeerConnection | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
+  const clientRef = useRef<PipecatClient | null>(null);
   const sessionIdRef = useRef<string | null>(null);
-  const pcIdRef = useRef<string | null>(null);
   const timerRef = useRef<number | null>(null);
-  const animFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -171,24 +169,10 @@ export function TestAgentModal() {
   }, [callState]);
 
   const cleanupCall = () => {
-    if (animFrameRef.current) {
-      cancelAnimationFrame(animFrameRef.current);
-      animFrameRef.current = null;
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close().catch(() => {});
-      audioContextRef.current = null;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    if (pcRef.current) {
-      pcRef.current.close();
-      pcRef.current = null;
-    }
+    const client = clientRef.current;
+    clientRef.current = null;
+    if (client) void client.disconnect().catch(() => {});
     sessionIdRef.current = null;
-    pcIdRef.current = null;
     setIsMuted(false);
     setIsSpeaking(false);
   };
@@ -258,124 +242,39 @@ export function TestAgentModal() {
       setRunId(session.run_id);
       setCallState("connecting");
 
-      // 2. Access microphone
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
+      const client = new PipecatClient({
+        transport: new WebSocketTransport({
+          serializer: new ProtobufFrameSerializer(),
+          recorderSampleRate: session.sample_rate,
+          playerSampleRate: session.sample_rate,
+        }),
+        enableMic: true,
+        enableCam: false,
+        callbacks: {
+          onBotStartedSpeaking: () => setIsSpeaking(true),
+          onBotStoppedSpeaking: () => setIsSpeaking(false),
+          onDisconnected: () => {
+            setCallState("ended");
+            setIsSpeaking(false);
+          },
         },
       });
-      streamRef.current = stream;
-
-      // 3. Create WebRTC PeerConnection
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-      });
-      pcRef.current = pc;
-
-      // Add local audio tracks
-      stream.getAudioTracks().forEach((track) => {
-        pc.addTrack(track, stream);
-      });
-
-      // Handle remote incoming audio track
-      pc.ontrack = (event) => {
-        if (audioRef.current && event.streams[0]) {
-          audioRef.current.srcObject = event.streams[0];
-          audioRef.current.play().catch(console.error);
-
-          // Audio level detection to identify if agent is speaking
-          try {
-            const AudioCtx =
-              window.AudioContext ||
-              (window as unknown as { webkitAudioContext: typeof AudioContext })
-                .webkitAudioContext;
-            const ctx = new AudioCtx();
-            audioContextRef.current = ctx;
-            const source = ctx.createMediaStreamSource(event.streams[0]);
-            const analyser = ctx.createAnalyser();
-            analyser.fftSize = 256;
-            source.connect(analyser);
-
-            const dataArray = new Uint8Array(analyser.frequencyBinCount);
-            const checkVolume = () => {
-              analyser.getByteFrequencyData(dataArray);
-              let sum = 0;
-              for (let i = 0; i < dataArray.length; i++) {
-                sum += dataArray[i];
-              }
-              const avg = sum / dataArray.length;
-              setIsSpeaking(avg > 15);
-              animFrameRef.current = requestAnimationFrame(checkVolume);
-            };
-            checkVolume();
-          } catch {
-            // Audio context visualizer fallback
-          }
-        }
-      };
-
-      // Trickle ICE candidate handler
-      pc.onicecandidate = (event) => {
-        if (event.candidate && pcIdRef.current && sessionIdRef.current) {
-          api(`/browser-sessions/${sessionIdRef.current}/offer`, {
-            method: "PATCH",
-            body: JSON.stringify({
-              pc_id: pcIdRef.current,
-              candidates: [
-                {
-                  candidate: event.candidate.candidate,
-                  sdpMid: event.candidate.sdpMid || "0",
-                  sdpMLineIndex: event.candidate.sdpMLineIndex ?? 0,
-                },
-              ],
-            }),
-          }).catch(() => {});
-        }
-      };
-
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "connected") {
-          setCallState("connected");
-        } else if (
-          pc.connectionState === "disconnected" ||
-          pc.connectionState === "failed" ||
-          pc.connectionState === "closed"
-        ) {
-          if (callState === "connected") {
-            setCallState("ended");
-            cleanupCall();
-          }
-        }
-      };
-
-      // 4. Create and send offer
-      const offer = await pc.createOffer({ offerToReceiveAudio: true });
-      await pc.setLocalDescription(offer);
-
-      const answer = await api<{ sdp: string; type: string; pc_id: string }>(
-        `/browser-sessions/${session.id}/offer`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            sdp: offer.sdp,
-            type: offer.type,
-          }),
-        }
+      clientRef.current = client;
+      await client.initDevices();
+      const { ticket } = await api<{ ticket: string }>(
+        `/browser-sessions/${session.id}/ticket`,
+        { method: "POST" },
       );
-
-      pcIdRef.current = answer.pc_id;
-      await pc.setRemoteDescription(
-        new RTCSessionDescription({
-          sdp: answer.sdp,
-          type: answer.type as RTCSdpType,
-        })
-      );
+      await client.connect({
+        wsUrl: websocketUrl(`/browser-sessions/${session.id}/ws?ticket=${encodeURIComponent(ticket)}`),
+      });
       setCallState("connected");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       toast.error("Failed to start test call: " + msg);
+      if (sessionIdRef.current) {
+        void api(`/browser-sessions/${sessionIdRef.current}`, { method: "DELETE" }).catch(() => {});
+      }
       setCallState("idle");
       cleanupCall();
     }
@@ -396,14 +295,10 @@ export function TestAgentModal() {
   };
 
   const toggleMute = () => {
-    if (streamRef.current) {
-      const audioTracks = streamRef.current.getAudioTracks();
-      const nextMuted = !isMuted;
-      audioTracks.forEach((track) => {
-        track.enabled = !nextMuted;
-      });
-      setIsMuted(nextMuted);
-    }
+    if (!clientRef.current) return;
+    const nextMuted = !isMuted;
+    clientRef.current.enableMic(!nextMuted);
+    setIsMuted(nextMuted);
   };
 
   const formatTimer = (seconds: number) => {
@@ -425,7 +320,6 @@ export function TestAgentModal() {
 
   return (
     <>
-      <audio ref={audioRef} autoPlay playsInline className="hidden" />
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogTrigger asChild>
           <Button variant="outline" size="sm" className="gap-2">
@@ -808,7 +702,7 @@ export function TestAgentModal() {
           )}
 
           <DialogFooter className="sm:justify-between">
-            <span className="text-[11px] text-muted-foreground">Pipecat SmallWebRTC</span>
+            <span className="text-[11px] text-muted-foreground">Pipecat WebSocket</span>
             {callState === "ended" && (
               <Button variant="ghost" size="sm" onClick={() => setCallState("idle")}>
                 Done

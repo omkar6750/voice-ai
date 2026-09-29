@@ -28,6 +28,7 @@ from .integrations import (
     IntegrationConnection,
     IntegrationMedia,
     IntegrationSecret,
+    ProviderCredential,
 )
 from .knowledge import AgentVersionKnowledge, KnowledgeBase, KnowledgeChunk, KnowledgeSource
 from .operations import (
@@ -38,6 +39,15 @@ from .operations import (
     RunDiagnostic,
     ToolContextDelivery,
     ToolInvocationResult,
+)
+from .tenancy import (
+    LegacyDataTenant,
+    Organization,
+    OrganizationAudit,
+    OrganizationCreationClaim,
+    PlatformAdministrator,
+    PlatformSupportSession,
+    User,
 )
 
 __all__ = [
@@ -68,6 +78,13 @@ __all__ = [
     "KnowledgeBase",
     "KnowledgeChunk",
     "KnowledgeSource",
+    "LegacyDataTenant",
+    "Organization",
+    "OrganizationAudit",
+    "OrganizationCreationClaim",
+    "PlatformAdministrator",
+    "PlatformSupportSession",
+    "ProviderCredential",
     "Run",
     "RunArtifact",
     "RunDiagnostic",
@@ -78,5 +95,6 @@ __all__ = [
     "ToolInvocationResult",
     "ToolVersion",
     "TraceSpan",
+    "User",
     "WorkspaceSettings",
 ]

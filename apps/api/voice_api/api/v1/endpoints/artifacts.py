@@ -13,6 +13,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner, require_runtime_service
 from voice_api.core.config import get_settings
+from voice_api.core.security import allow_organization_member
+from voice_api.db.tenant_scope import bind_run_organization
 from voice_api.models import Run
 from voice_api.models.artifacts import RunArtifact
 from voice_api.services.artifact_service import artifact_path, file_metadata
@@ -32,6 +34,7 @@ class ArtifactBody(ConfigModel):
     "/runs/{run_id}/artifacts", status_code=201, dependencies=[Depends(require_runtime_service)]
 )
 async def register(run_id: str, body: ArtifactBody, session: AsyncSession = Session) -> dict:
+    await bind_run_organization(session, run_id)
     run = await session.get(Run, run_id, with_for_update=True)
     if run is None:
         raise HTTPException(404, "Run not found")
@@ -70,6 +73,7 @@ async def register(run_id: str, body: ArtifactBody, session: AsyncSession = Sess
 
 
 @router.get("/runs/{run_id}/artifacts", dependencies=[Depends(require_legacy_owner)])
+@allow_organization_member
 async def list_artifacts(run_id: str, session: AsyncSession = Session) -> dict:
     rows = (
         await session.scalars(
@@ -93,6 +97,7 @@ async def list_artifacts(run_id: str, session: AsyncSession = Session) -> dict:
 
 
 @router.get("/artifacts/{artifact_id}/file", dependencies=[Depends(require_legacy_owner)])
+@allow_organization_member
 async def download(artifact_id: str, session: AsyncSession = Session):
     row = await session.get(RunArtifact, artifact_id)
     if row is None:

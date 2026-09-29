@@ -2,6 +2,17 @@ import { createContext, useContext } from "react";
 
 export type Api = <T>(path: string, init?: RequestInit) => Promise<T>;
 export const ApiContext = createContext<Api | null>(null);
+const apiOrigin = (import.meta.env.VITE_API_ORIGIN ?? "").replace(/\/$/, "");
+
+export function apiUrl(path: string): string {
+  return `${apiOrigin}/api/v1${path}`;
+}
+
+export function websocketUrl(path: string): string {
+  const url = new URL(apiUrl(path), window.location.href);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
+}
 
 export function useApi(): Api {
   const api = useContext(ApiContext);
@@ -13,12 +24,14 @@ export async function request<T>(
   sessionToken: string,
   path: string,
   init: RequestInit = {},
+  supportSession?: string | null,
 ): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${sessionToken}`);
+  if (supportSession) headers.set("X-Platform-Support-Session", supportSession);
   if (init.body && !(init.body instanceof FormData))
     headers.set("Content-Type", "application/json");
-  const response = await fetch(`/api/v1${path}`, { ...init, headers });
+  const response = await fetch(apiUrl(path), { ...init, headers });
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
     const detail = payload?.detail;

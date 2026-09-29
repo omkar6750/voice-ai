@@ -1,12 +1,15 @@
 ---
 id: ADR-0020
 title: Clerk identity with application-owned workspaces and authorization
-status: Accepted
+status: Superseded by ADR-0023
 date: 2026-09-27
 related: [RFC-0003, RFC-0004, RFC-0014, ADR-0006, ADR-0007, PLAN-0030]
 ---
 
 # Decision
+
+> Historical decision only. ADR-0023 and PLAN-0033 replace the nested tenant
+> model below. Do not implement the second tenant layer described here.
 
 The new Clerk development application is `Voice AI B2B`
 (`app_3Jutc4GvIX2mItzJoPGOxccUsYi`). This identifier is public configuration;

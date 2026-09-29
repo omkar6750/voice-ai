@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner, require_runtime_service
 from voice_api.core.security import safe_evidence
+from voice_api.db.tenant_scope import bind_run_organization
 from voice_api.models import Call, Callback, Run, RuntimeEndpoint
 from voice_api.models.common import new_id
 from voice_api.schemas.execution import (
@@ -204,6 +205,7 @@ async def claim(run_id: str, body: Claim, session: AsyncSession = Session) -> di
     endpoint = await session.get(RuntimeEndpoint, body.endpoint_id, with_for_update=True)
     if endpoint is None:
         raise HTTPException(404, "Runtime endpoint not found")
+    await bind_run_organization(session, run_id)
     run = await session.get(Run, run_id, with_for_update=True, populate_existing=True)
     if run is None or run.channel != "phone":
         raise HTTPException(422, "Select a telephone run")
@@ -255,6 +257,7 @@ async def claim(run_id: str, body: Claim, session: AsyncSession = Session) -> di
 
 @router.post("/runs/{run_id}/progress", dependencies=[Depends(require_runtime_service)])
 async def progress(run_id: str, body: Progress, session: AsyncSession = Session) -> dict:
+    await bind_run_organization(session, run_id)
     run = await session.get(Run, run_id, with_for_update=True, populate_existing=True)
     if run is None:
         raise HTTPException(404, "Run not found")

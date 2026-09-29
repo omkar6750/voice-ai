@@ -1,59 +1,56 @@
-"""Service for managing browser-based WebRTC voice sessions."""
+"""Service for managing browser-based voice sessions."""
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import secrets
+import time
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
-import httpx
-from fastapi import HTTPException
+from fastapi import HTTPException, WebSocket
 from loguru import logger
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
-from pipecat.transports.smallwebrtc.request_handler import (
-    IceCandidate,
-    SmallWebRTCPatchRequest,
-    SmallWebRTCRequest,
-    SmallWebRTCRequestHandler,
-)
-from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
+from pipecat.serializers.protobuf import ProtobufFrameSerializer
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams, FastAPIWebsocketTransport
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_runtime.diagnostics import text_error_diagnostic
 from voice_runtime.execution.delivery import stream_evidence
-from voice_runtime.execution.evidence_client import ApiEvidenceIngestor
 from voice_runtime.execution.exchange import ExchangeTracker
 from voice_runtime.execution.native import NativePipelineHost
 from voice_runtime.execution.spool import DurableSpool
 
 from voice_api.core.config import Settings
 from voice_api.db.session import SessionFactory
+from voice_api.db.tenant_scope import bind_organization
 from voice_api.models import Agent, AgentVersion, BrowserSession, Contact, Run
 from voice_api.models.common import new_id, now
-from voice_api.schemas.browser_session import WebRTCOfferRequest, WebRTCPatchRequest
 from voice_api.schemas.diagnostics import DiagnosticInput
 from voice_api.services.diagnostic_service import persist_diagnostic
+from voice_api.services.local_runtime_service import LocalEvidenceIngestor, register_local_artifacts
+from voice_api.services.provider_credentials import settings_for_organization
 from voice_api.services.resolution_service import fingerprint, resolve
 
 
 class BrowserSessionContext:
-    def __init__(self, session_id: str, run_id: str, snapshot: dict) -> None:
+    def __init__(self, session_id: str, run_id: str, snapshot: dict, org_id: str) -> None:
         self.session_id = session_id
         self.run_id = run_id
         self.snapshot = snapshot
-        self.request_handler = SmallWebRTCRequestHandler()
+        self.org_id = org_id
         self.host: NativePipelineHost | None = None
         self.pipeline_task: asyncio.Task | None = None
         self.is_active = True
         self.has_connected = False
         self.connection_id: str | None = None
-        self.connected_event = asyncio.Event()
+        self.ticket_hash: str | None = None
+        self.ticket_expires_at = 0.0
         self.cleanup_lock = asyncio.Lock()
         self.cleanup_complete = False
-        self.disconnect_task: asyncio.Task | None = None
+        self.disconnect_reason = "browser_disconnect"
 
     def mark_ended(self) -> None:
         self.is_active = False
@@ -85,8 +82,6 @@ class BrowserSessionContext:
     async def _close_resources(self) -> None:
         if self.host:
             await self.host.close()
-        if self.request_handler:
-            await self.request_handler.close()
 
 
 class BrowserSessionManager:
@@ -94,20 +89,49 @@ class BrowserSessionManager:
         self._sessions: dict[str, BrowserSessionContext] = {}
         self._lock = asyncio.Lock()
 
-    async def get_or_create_context(
-        self, session_id: str, run_id: str, snapshot: dict
-    ) -> BrowserSessionContext:
-        async with self._lock:
-            if session_id not in self._sessions:
-                self._sessions[session_id] = BrowserSessionContext(session_id, run_id, snapshot)
-            return self._sessions[session_id]
-
     def get_context(self, session_id: str) -> BrowserSessionContext | None:
         return self._sessions.get(session_id)
 
     async def remove_context(self, session_id: str) -> None:
         async with self._lock:
             self._sessions.pop(session_id, None)
+
+    async def issue_ticket(self, session_id: str, run_id: str, snapshot: dict, org_id: str) -> str:
+        async with self._lock:
+            now_mono = time.monotonic()
+            for other_id, other in list(self._sessions.items()):
+                if other_id == session_id:
+                    continue
+                if other.is_active and (other.has_connected or other.ticket_expires_at > now_mono):
+                    raise HTTPException(409, "Another browser call is active")
+                if not other.has_connected and other.ticket_expires_at <= now_mono:
+                    self._sessions.pop(other_id, None)
+            ctx = self._sessions.setdefault(
+                session_id, BrowserSessionContext(session_id, run_id, snapshot, org_id)
+            )
+            if ctx.has_connected or not ctx.is_active:
+                raise HTTPException(409, "Browser session is already connected")
+            ticket = secrets.token_urlsafe(32)
+            ctx.ticket_hash = hashlib.sha256(ticket.encode()).hexdigest()
+            ctx.ticket_expires_at = now_mono + 30
+            return ticket
+
+    async def consume_ticket(self, session_id: str, ticket: str) -> BrowserSessionContext | None:
+        async with self._lock:
+            ctx = self._sessions.get(session_id)
+            if not ctx or not ctx.ticket_hash or ctx.has_connected or not ctx.is_active:
+                return None
+            if time.monotonic() >= ctx.ticket_expires_at:
+                ctx.ticket_hash = None
+                return None
+            if not secrets.compare_digest(
+                ctx.ticket_hash, hashlib.sha256(ticket.encode()).hexdigest()
+            ):
+                return None
+            ctx.ticket_hash = None
+            ctx.ticket_expires_at = 0.0
+            ctx.has_connected = True
+            return ctx
 
 
 browser_session_manager = BrowserSessionManager()
@@ -161,9 +185,7 @@ async def create_browser_session(
             raise HTTPException(404, "Contact not found")
         resolved_contact_id = contact.id
         effective_phone = (
-            phone_number.strip()
-            if phone_number and phone_number.strip()
-            else contact.phone_number
+            phone_number.strip() if phone_number and phone_number.strip() else contact.phone_number
         )
         contact_snapshot = {
             "id": contact.id,
@@ -237,108 +259,81 @@ async def create_browser_session(
     return run, browser_session
 
 
-async def handle_browser_offer(
-    session_id: str,
-    body: WebRTCOfferRequest,
-    settings: Settings,
-    session: AsyncSession,
-) -> dict[str, Any]:
-    """Handle WebRTC offer from browser, setting up SmallWebRTC and NativePipelineHost."""
+async def issue_browser_ticket(session_id: str, session: AsyncSession) -> dict[str, Any]:
     browser_session = await session.get(BrowserSession, session_id)
     if not browser_session:
         raise HTTPException(404, "Browser session not found")
 
-    if browser_session.status in ("disconnected", "expired", "failed"):
+    if browser_session.status != "created" or (
+        browser_session.expires_at and browser_session.expires_at <= now()
+    ):
         raise HTTPException(410, "Browser session is no longer active")
 
     run = await session.get(Run, browser_session.run_id)
     if not run:
         raise HTTPException(404, "Run not found for browser session")
 
-    ctx = await browser_session_manager.get_or_create_context(
-        session_id=session_id,
-        run_id=run.id,
-        snapshot=run.resolved_config,
+    if not browser_session.org_id or run.org_id != browser_session.org_id:
+        raise HTTPException(404, "Browser session not found")
+    ticket = await browser_session_manager.issue_ticket(
+        session_id, run.id, run.resolved_config, browser_session.org_id
     )
+    return {"ticket": ticket}
 
-    if ctx.has_connected or browser_session.status == "connected":
-        raise HTTPException(409, "Browser session is already connected")
 
-    async def on_webrtc_connection(pipecat_connection: SmallWebRTCConnection) -> None:
-        if ctx.has_connected:
-            logger.warning("Duplicate connection attempted for browser session {}", session_id)
-            raise HTTPException(409, "Duplicate connection not allowed")
-
-        ctx.has_connected = True
-        ctx.connection_id = pipecat_connection.pc_id
-        ctx.connected_event.set()
-
+async def handle_browser_socket(session_id: str, websocket: WebSocket, settings: Settings) -> None:
+    origin = websocket.headers.get("origin")
+    allowed = [s.strip() for s in settings.clerk_authorized_parties.split(",") if s.strip()]
+    if not origin or origin not in allowed:
+        await websocket.close(code=1008)
+        return
+    ticket = websocket.query_params.get("ticket", "")
+    ctx = await browser_session_manager.consume_ticket(session_id, ticket)
+    if not ctx:
+        await websocket.close(code=1008)
+        return
+    try:
         async with SessionFactory() as db_session:
+            bind_organization(db_session.sync_session, ctx.org_id)
             bs = await db_session.get(BrowserSession, session_id)
-            if bs:
-                bs.status = "connected"
-                bs.connected_at = now()
-                bs.connection_id = pipecat_connection.pc_id
-            r = await db_session.get(Run, run.id)
-            if r:
-                r.status = "running"
-                r.started_at = now()
+            run = await db_session.get(Run, ctx.run_id)
+            if not bs or bs.status != "created" or not run or bs.run_id != run.id:
+                await websocket.close(code=1008)
+                return
+            ctx.connection_id = str(uuid4())
+            bs.status = "connected"
+            bs.connected_at = now()
+            bs.connection_id = ctx.connection_id
+            run.status = "running"
+            run.started_at = now()
             await db_session.commit()
-
-        transport = SmallWebRTCTransport(
-            webrtc_connection=pipecat_connection,
-            params=TransportParams(
+        await websocket.accept()
+        transport = FastAPIWebsocketTransport(
+            websocket=websocket,
+            params=FastAPIWebsocketParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
+                add_wav_header=False,
+                serializer=ProtobufFrameSerializer(),
+                session_timeout=300,
+                allowed_origins=allowed,
             ),
         )
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(_transport, _client):
-            logger.info("Browser WebRTC client disconnected for session {}", session_id)
             ctx.mark_ended()
-            ctx.disconnect_task = asyncio.create_task(
-                _finalize_browser_disconnect(session_id),
-                name=f"browser-disconnect-{session_id}",
-            )
+
+        @transport.event_handler("on_session_timeout")
+        async def on_session_timeout(_transport, _client):
+            ctx.disconnect_reason = "browser_timeout"
+            ctx.mark_ended()
 
         ctx.pipeline_task = asyncio.create_task(_run_browser_pipeline(ctx, transport, settings))
-
-    req = SmallWebRTCRequest(
-        sdp=body.sdp,
-        type=body.type,
-        pc_id=body.pc_id,
-        restart_pc=body.restart_pc,
-        request_data=body.request_data,
-    )
-
-    answer = await ctx.request_handler.handle_web_request(req, on_webrtc_connection)
-    if answer is None:
-        raise HTTPException(500, "Failed to generate WebRTC SDP answer")
-
-    return answer
-
-
-async def handle_browser_patch(
-    session_id: str,
-    body: WebRTCPatchRequest,
-) -> dict[str, str]:
-    """Apply ICE candidate patches for the session's WebRTC peer connection."""
-    ctx = browser_session_manager.get_context(session_id)
-    if not ctx:
-        raise HTTPException(404, "Active browser session not found")
-
-    candidates = [
-        IceCandidate(
-            candidate=c.candidate,
-            sdp_mid=c.sdp_mid,
-            sdp_mline_index=c.sdp_mline_index,
-        )
-        for c in body.candidates
-    ]
-    patch_req = SmallWebRTCPatchRequest(pc_id=body.pc_id, candidates=candidates)
-    await ctx.request_handler.handle_patch_request(patch_req)
-    return {"status": "ok"}
+        await ctx.pipeline_task
+    finally:
+        ctx.mark_ended()
+        await browser_session_manager.remove_context(session_id)
 
 
 async def end_browser_session(
@@ -351,6 +346,7 @@ async def end_browser_session(
 
     ctx = browser_session_manager.get_context(session_id)
     if ctx:
+        ctx.disconnect_reason = "operator_stop"
         await ctx.close_runtime()
         await browser_session_manager.remove_context(session_id)
 
@@ -369,7 +365,9 @@ async def end_browser_session(
                 severity="info" if reason == "operator_stop" else "warning",
                 category="call_termination",
                 source="transport",
-                code=("browser_operator_stop" if reason == "operator_stop" else "browser_disconnect"),
+                code=(
+                    "browser_operator_stop" if reason == "operator_stop" else "browser_disconnect"
+                ),
                 message=(
                     "Browser call ended by operator"
                     if reason == "operator_stop"
@@ -386,28 +384,13 @@ async def end_browser_session(
     return {"status": "disconnected"}
 
 
-async def _finalize_browser_disconnect(session_id: str) -> None:
-    """Finalize a transport-originated disconnect without relying on an HTTP request."""
-    async with SessionFactory() as session:
-        try:
-            await end_browser_session(session_id, session, reason="browser_disconnect")
-        except HTTPException as exc:
-            if exc.status_code != 404:
-                logger.warning(
-                    "Could not finalize browser disconnect session={} status={} detail={}",
-                    session_id,
-                    exc.status_code,
-                    exc.detail,
-                )
-        except Exception:
-            logger.exception("Could not finalize browser disconnect session={}", session_id)
-
-
 async def _run_browser_pipeline(
     ctx: BrowserSessionContext,
-    transport: SmallWebRTCTransport,
+    transport: FastAPIWebsocketTransport,
     settings: Settings,
 ) -> None:
+    async with SessionFactory() as credential_session:
+        settings = await settings_for_organization(credential_session, ctx.org_id, settings)
     run_id = ctx.run_id
     session_id = ctx.session_id
     snapshot = ctx.snapshot
@@ -433,74 +416,74 @@ async def _run_browser_pipeline(
         )
         if s
     )
-    tracker = ExchangeTracker(run_id, spool, secrets=(*secrets, settings.runtime_service_token or ""))
+    tracker = ExchangeTracker(run_id, spool, secrets=secrets)
+    ingestor = LocalEvidenceIngestor(run_id, org_id=ctx.org_id)
+    delivery_task = asyncio.create_task(stream_evidence(spool, ingestor))
 
-    from voice_api.main import app
+    try:
+        await host.prepare(snapshot, tracker, transport=transport, enable_rtvi=True)
+        await host.converse(ctx.is_still_active)
+    except Exception as exc:
+        logger.exception("Browser pipeline failed during run {}: {}", run_id, exc)
+        async with SessionFactory() as db_session:
+            bind_organization(db_session.sync_session, ctx.org_id)
+            r = await db_session.get(Run, run_id)
+            if r:
+                await persist_diagnostic(
+                    db_session,
+                    run_id,
+                    DiagnosticInput.model_validate(text_error_diagnostic(str(exc))),
+                )
+            if r and r.status not in ("completed", "canceled"):
+                r.status = "failed"
+                r.error = f"Pipeline execution failed: {exc}"
+                r.ended_at = now()
+            bs = await db_session.get(BrowserSession, session_id)
+            if bs:
+                bs.status = "failed"
+                bs.disconnected_at = now()
+            await db_session.commit()
+    finally:
+        ctx.mark_ended()
+        await ctx.close_runtime()
+        delivery_task.cancel()
+        await asyncio.gather(delivery_task, return_exceptions=True)
 
-    headers = {"X-Voice-Runtime-Token": settings.runtime_service_token or ""}
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://runtime.local"
-    ) as client:
-        ingestor = ApiEvidenceIngestor(client, run_id, settings.runtime_service_token or "")
-        delivery_task = asyncio.create_task(stream_evidence(spool, ingestor))
-
-        try:
-            await host.prepare(snapshot, tracker, transport=transport)
-            await host.converse(ctx.is_still_active)
-        except Exception as exc:
-            logger.exception("Browser pipeline failed during run {}: {}", run_id, exc)
-            async with SessionFactory() as db_session:
-                r = await db_session.get(Run, run_id)
-                if r:
-                    await persist_diagnostic(
-                        db_session,
-                        run_id,
-                        DiagnosticInput.model_validate(
-                            text_error_diagnostic(str(exc))
+        async with SessionFactory() as db_session:
+            bind_organization(db_session.sync_session, ctx.org_id)
+            r = await db_session.get(Run, run_id)
+            bs = await db_session.get(BrowserSession, session_id)
+            if (
+                r
+                and bs
+                and r.status in ("claimed", "running")
+                and bs.status in ("created", "connecting", "connected")
+                and ctx.disconnect_reason != "operator_stop"
+            ):
+                await persist_diagnostic(
+                    db_session,
+                    run_id,
+                    DiagnosticInput(
+                        diagnostic_id=str(
+                            uuid5(NAMESPACE_URL, f"{run_id}/browser/{ctx.disconnect_reason}")
                         ),
-                    )
-                if r and r.status not in ("completed", "canceled"):
-                    r.status = "failed"
-                    r.error = f"Pipeline execution failed: {exc}"
+                        occurred_at=now(),
+                        severity="warning",
+                        category="call_termination",
+                        source="transport",
+                        code=ctx.disconnect_reason,
+                        message="Browser voice connection ended",
+                        uncertain=True,
+                    ),
+                )
+            if r and r.status in ("claimed", "running"):
+                r.status = "completed"
+                if not r.ended_at:
                     r.ended_at = now()
-                bs = await db_session.get(BrowserSession, session_id)
-                if bs:
-                    bs.status = "failed"
+            if bs and bs.status in ("created", "connecting", "connected"):
+                bs.status = "disconnected"
+                if not bs.disconnected_at:
                     bs.disconnected_at = now()
-                await db_session.commit()
-        finally:
-            ctx.mark_ended()
-            await ctx.close_runtime()
-            delivery_task.cancel()
-            await asyncio.gather(delivery_task, return_exceptions=True)
+            await db_session.commit()
 
-            async with SessionFactory() as db_session:
-                r = await db_session.get(Run, run_id)
-                if r and r.status in ("claimed", "running"):
-                    r.status = "completed"
-                    if not r.ended_at:
-                        r.ended_at = now()
-                bs = await db_session.get(BrowserSession, session_id)
-                if bs and bs.status in ("created", "connecting", "connected"):
-                    bs.status = "disconnected"
-                    if not bs.disconnected_at:
-                        bs.disconnected_at = now()
-                await db_session.commit()
-
-            if host.directory.exists():
-                for kind in ("input", "output", "mixed", "pipeline_log"):
-                    filename = "pipeline.log" if kind == "pipeline_log" else f"{kind}.wav"
-                    if not (host.directory / filename).is_file():
-                        continue
-                    try:
-                        await client.post(
-                            f"/api/runs/{run_id}/artifacts",
-                            headers=headers,
-                            json={
-                                "id": str(uuid5(NAMESPACE_URL, f"{run_id}/{kind}")),
-                                "kind": kind,
-                                "path": f"{run_id}/{filename}",
-                            },
-                        )
-                    except Exception:
-                        pass
+        await register_local_artifacts(run_id, host.directory, org_id=ctx.org_id)

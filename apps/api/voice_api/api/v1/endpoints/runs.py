@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner
+from voice_api.core.security import allow_organization_member
 from voice_api.models import (
     AgentVersion,
     Call,
@@ -68,6 +69,7 @@ async def request_browser_run(
 
 
 @router.get("/runs")
+@allow_organization_member
 async def list_runs(session: AsyncSession = Session, _: None = Operator) -> dict:
     rows = (await session.scalars(select(Run).order_by(Run.created_at.desc()))).all()
     run_ids = [r.id for r in rows]
@@ -106,6 +108,7 @@ async def list_runs(session: AsyncSession = Session, _: None = Operator) -> dict
 
 
 @router.get("/runs/{run_id}")
+@allow_organization_member
 async def get_run(run_id: str, session: AsyncSession = Session, _: None = Operator) -> dict:
     run = await session.get(Run, run_id)
     if run is None:
@@ -132,7 +135,10 @@ async def get_run(run_id: str, session: AsyncSession = Session, _: None = Operat
 
 
 @router.get("/runs/{run_id}/timeline", response_model=TimelineResponse)
-async def timeline(run_id: str, session: AsyncSession = Session, _: None = Operator) -> TimelineResponse:
+@allow_organization_member
+async def timeline(
+    run_id: str, session: AsyncSession = Session, _: None = Operator
+) -> TimelineResponse:
     run = await session.get(Run, run_id)
     if run is None:
         raise HTTPException(404, "Run not found")

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import { AdminOnly } from "@/app/access";
 import { LoadState, StatusBadge } from "@/components/record-page";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -109,7 +110,7 @@ export function SourcesPanel({ baseId }: { baseId: string }) {
             search until replacement succeeds.
           </p>
         </div>
-        <div className="flex gap-2">
+        <AdminOnly><div className="flex gap-2">
           <label className="inline-flex cursor-pointer items-center rounded-md border px-3 py-2 text-sm hover:bg-accent">
             Upload PDF/TXT/Markdown
             <Input
@@ -169,7 +170,7 @@ export function SourcesPanel({ baseId }: { baseId: string }) {
               </form>
             </SheetContent>
           </Sheet>
-        </div>
+        </div></AdminOnly>
       </div>
       <LoadState
         loading={loading}
@@ -203,6 +204,7 @@ export function SourcesPanel({ baseId }: { baseId: string }) {
                   <StatusBadge value={source.status} />
                 </TableCell>
                 <TableCell className="text-right">
+                  <AdminOnly>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -217,6 +219,7 @@ export function SourcesPanel({ baseId }: { baseId: string }) {
                   >
                     Delete
                   </Button>
+                  </AdminOnly>
                 </TableCell>
               </TableRow>
             ))}

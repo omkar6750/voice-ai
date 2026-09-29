@@ -1,12 +1,16 @@
 ---
 id: PLAN-0030
 title: Clerk B2B onboarding, workspace tenancy, RBAC, BYO credentials, and production calls
-status: Proposed
+status: Superseded by PLAN-0033
 date: 2026-09-27
 related: [ADR-0020, RFC-0014, RFC-0003, RFC-0004, ADR-0006, ADR-0007]
 ---
 
 # Scope and recommendation
+
+> Historical plan only. PLAN-0033 is the sole implementation plan for the
+> current org-only product. The second tenant layer and its routes, grants,
+> invitations, and roles below must not be built.
 
 Launch as B2B: organization -> workspaces -> agents and runs. A solo user is an
 organization of one, which avoids maintaining a second personal-account model.
@@ -19,13 +23,16 @@ Implementation began in the `codex/clerk-integration` worktree. The new Clerk
 development application is linked, Organizations are enabled, and the React/Python
 identity foundation is wired: sign-in/sign-up, a verified `/api/v1/auth/me`
 endpoint, and a server-side legacy-owner gate. The dashboard no longer asks for
-or stores the operator token; it sends Clerk session tokens. Runtime writes use a
-separate service token on designated routes. The temporary owner mapping uses
+or stores the operator token; it sends Clerk session tokens. In-process browser,
+Twilio, and SIM7600 runtime operations call local persistence directly. Only
+external worker-facing routes use a separate service token. The temporary
+owner mapping uses
 `VOICE_CLERK_LEGACY_OWNER_EMAIL`, with a verified primary email lookup, until the
 account is created and `VOICE_CLERK_LEGACY_OWNER_USER_ID` can be pinned. Missing
-`VOICE_RUNTIME_SERVICE_TOKEN` intentionally disables runtime writes. No tenant migration,
-seed, or live call has
-been performed yet. This branch merged committed `main` through `0a7a446`; any
+`VOICE_RUNTIME_SERVICE_TOKEN` disables external worker writes but not local calls.
+Human callback slots require `VOICE_CALLBACK_SLOT_SIGNING_KEY` when scheduling
+is enabled. No tenant migration, seed, or live call has been performed yet.
+This branch merged committed `main` through `0a7a446`; any
 later changes must be merged, never rebased. Preserve the protected demo.
 The ignored root `.env.local` holds development Clerk credentials. Vite reads only
 its publishable key; it must never load the backend secret into the client bundle.
@@ -288,7 +295,7 @@ The existing Twilio Voice integration already supports account credential
 storage, verification, number sync, and server-initiated outbound calls. Scope
 it to workspace, verify ownership of the selected from-number, validate Twilio
 webhooks, and bind each call's connection ID and workspace in the immutable
-run record. Browser test uses the existing WebRTC/browser session API and the
+run record. Browser test uses the WebSocket/browser session API and the
 workspace's AI provider keys; it does not require Twilio. A browser softphone
 that calls phone numbers through the user's Twilio account is a *separate*
 feature requiring Twilio Voice JS SDK, per-workspace TwiML app and short-lived
@@ -328,7 +335,7 @@ Twilio Access Tokens. Do not conflate that with current browser agent testing.
    ownership FKs; migrate `Original org / omkar` in a staging DB. Tests: row
    counts, IDs, published versions, old runs, same-workspace FK rejection.
 3. **All API/worker authorization:** scope every route/query, evidence upload,
-   WebRTC offer, webhook, OAuth callback, file access, and internal claim.
+   browser WebSocket ticket, webhook, OAuth callback, file access, and internal claim.
    Tests: two unrelated orgs with same names/phone numbers; cross-tenant
    list/detail/write/search/download/WebSocket attempts all denied.
 4. **Onboarding/member flows:** one-org creation, workspace create/switch,

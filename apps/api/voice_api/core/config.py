@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _ENV_FILES = (
+    str(_REPO_ROOT / ".env.main-copy"),
     str(_REPO_ROOT / ".env"),
     str(_REPO_ROOT / ".env.local"),
     ".env",
@@ -23,14 +24,14 @@ class Settings(BaseSettings):
     recordings_dir: str = "data/recordings"
     integration_keys: str | None = None
     integration_active_key: str | None = None
-    clerk_legacy_owner_user_id: str | None = None
-    clerk_legacy_owner_email: str | None = None
+    callback_slot_signing_key: str | None = None
     runtime_service_token: str | None = None
     clerk_secret_key: str | None = Field(default=None, validation_alias="CLERK_SECRET_KEY")
     clerk_publishable_key: str | None = Field(
         default=None, validation_alias="CLERK_PUBLISHABLE_KEY"
     )
     clerk_authorized_parties: str = "http://localhost:5173,http://localhost:8000"
+    organization_creation_enabled: bool = False
     public_base_url: str | None = None
     gemini_api_key: str | None = None
     integration_media_dir: str = "data/integration-media"

@@ -4,11 +4,14 @@ import os
 
 import httpx
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 from voice_api.core.security import require_legacy_owner, require_runtime_service
 from voice_api.db.session import get_session
+from voice_api.db.tenant_scope import bind_organization
 from voice_api.main import app
+from voice_api.models import LegacyDataTenant
 
 
 @pytest.fixture
@@ -26,6 +29,12 @@ async def database():
                     expire_on_commit=False,
                     join_transaction_mode="create_savepoint",
                 ) as session:
+                    org_id = await session.scalar(select(LegacyDataTenant.organization_id))
+                    if org_id is None:
+                        pytest.fail(
+                            "Integration database must contain the isolated legacy organization"
+                        )
+                    bind_organization(session.sync_session, org_id)
                     yield session
             finally:
                 await outer.rollback()

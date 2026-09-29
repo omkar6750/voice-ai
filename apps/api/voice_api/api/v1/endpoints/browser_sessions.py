@@ -1,29 +1,28 @@
-"""Browser sessions API endpoints for testing voice agents via WebRTC."""
+"""Browser sessions API endpoints for testing voice agents via WebSocket."""
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, WebSocket
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner
-from voice_api.core.config import Settings, get_settings
+from voice_api.core.config import get_settings
+from voice_api.core.security import allow_organization_member
 from voice_api.schemas.browser_session import (
     BrowserSessionResponse,
     CreateBrowserSessionRequest,
-    WebRTCOfferRequest,
-    WebRTCPatchRequest,
 )
 from voice_api.services.browser_session_service import (
     create_browser_session,
     end_browser_session,
-    handle_browser_offer,
-    handle_browser_patch,
+    handle_browser_socket,
+    issue_browser_ticket,
 )
 
 router = APIRouter(prefix="/browser-sessions", tags=["browser-sessions"])
 Session = Depends(get_session)
 Operator = Depends(require_legacy_owner)
-Config = Depends(get_settings)
 
 
 @router.post("", status_code=201, response_model=BrowserSessionResponse)
+@allow_organization_member
 async def create_session(
     body: CreateBrowserSessionRequest | None = None,
     session: AsyncSession = Session,
@@ -46,36 +45,27 @@ async def create_session(
         contact_id=run.contact_id,
         created_at=browser_session.created_at,
         expires_at=browser_session.expires_at,
+        sample_rate=run.resolved_config.get("audio", {}).get("sample_rate", 16000),
     )
 
 
-@router.post("/{session_id}/offer")
-async def post_offer(
+@router.post("/{session_id}/ticket")
+@allow_organization_member
+async def post_ticket(
     session_id: str,
-    body: WebRTCOfferRequest,
     session: AsyncSession = Session,
-    settings: Settings = Config,
     _: None = Operator,
 ) -> dict:
-    return await handle_browser_offer(
-        session_id=session_id,
-        body=body,
-        settings=settings,
-        session=session,
-    )
+    return await issue_browser_ticket(session_id, session)
 
 
-@router.patch("/{session_id}/offer")
-async def patch_offer(
-    session_id: str,
-    body: WebRTCPatchRequest,
-    _: None = Operator,
-) -> Response:
-    await handle_browser_patch(session_id=session_id, body=body)
-    return Response(status_code=204)
+@router.websocket("/{session_id}/ws")
+async def browser_socket(session_id: str, websocket: WebSocket) -> None:
+    await handle_browser_socket(session_id, websocket, get_settings())
 
 
 @router.delete("/{session_id}")
+@allow_organization_member
 async def delete_session(
     session_id: str,
     session: AsyncSession = Session,

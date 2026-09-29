@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import { useOrganizationAccess } from "@/app/access";
 import type { components } from "@/generated/api";
 import {
   LoadState,
@@ -20,6 +21,7 @@ type HandlerCatalog = components["schemas"]["ToolHandlerCatalog"];
 export function ToolDetailPage() {
   const { toolId = "" } = useParams();
   const api = useApi();
+  const { canManage } = useOrganizationAccess();
   const { data, loading, error, reload } = useResource<{
     versions: ToolVersion[];
   }>(`/tools/${toolId}/versions`);
@@ -47,6 +49,11 @@ export function ToolDetailPage() {
         title={data?.versions[0]?.config.name ?? "Tool"}
         description="Exact tool versions and their implementation settings."
         action={
+          <Button asChild variant="outline">
+            <Link to="/tools">All tools</Link>
+          </Button>
+        }
+        readOnlyAction={
           <Button asChild variant="outline">
             <Link to="/tools">All tools</Link>
           </Button>
@@ -116,7 +123,7 @@ export function ToolDetailPage() {
                 }
               />
               <div className="flex gap-2">
-                {version.status === "draft" ? (
+                {canManage && version.status === "draft" ? (
                   <Button
                     size="sm"
                     variant={editingVersionId === version.id ? "secondary" : "default"}
@@ -125,7 +132,7 @@ export function ToolDetailPage() {
                   >
                     {editingVersionId === version.id ? "Close editor" : "Edit draft"}
                   </Button>
-                ) : (
+                ) : canManage ? (
                   <Button
                     size="sm"
                     variant="outline"
@@ -134,9 +141,9 @@ export function ToolDetailPage() {
                   >
                     Clone draft
                   </Button>
-                )}
+                ) : null}
               </div>
-              {version.status === "draft" && editingVersionId === version.id && (
+              {canManage && version.status === "draft" && editingVersionId === version.id && (
                 <ToolEditor
                   version={version}
                   handlers={handlers?.handlers ?? []}

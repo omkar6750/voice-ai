@@ -51,6 +51,17 @@ async def test_providers_and_config_schema_routes(monkeypatch) -> None:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         # Test backward-compatible /api prefix
+        monkeypatch.setattr(
+            "voice_api.api.v1.endpoints.providers.required_organization", lambda _: "org_a"
+        )
+        monkeypatch.setattr(
+            "voice_api.api.v1.endpoints.providers.settings_for_organization",
+            AsyncMock(side_effect=lambda _session, _org_id, settings: settings),
+        )
+        monkeypatch.setattr(
+            "voice_api.api.v1.endpoints.providers.get_provider_registry",
+            AsyncMock(return_value={"providers": []}),
+        )
         res1 = await client.get("/api/providers", headers=headers)
         assert res1.status_code == 200
         assert "providers" in res1.json()
@@ -79,6 +90,7 @@ async def test_providers_and_config_schema_routes(monkeypatch) -> None:
         assert "send_whatsapp_template" in handler_names
         assert "send_whatsapp_message" in handler_names
         assert "check_whatsapp_window" in handler_names
+        assert "classify_lead" in handler_names
         assert "classify_jev" in handler_names
         assert "classify_llm" in handler_names
         assert handlers_data["http_policy"]["follow_redirects"] is False

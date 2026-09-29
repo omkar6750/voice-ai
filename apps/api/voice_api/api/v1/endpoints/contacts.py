@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner
+from voice_api.core.security import allow_organization_member
+from voice_api.db.tenant_scope import required_organization
 from voice_api.models import Call, Callback, Contact, ContactFact, Run
 from voice_api.schemas.contact import (
     ContactBody,
@@ -83,12 +85,14 @@ def contact_summary(contact: Contact) -> dict:
 
 
 @router.get("/contacts")
+@allow_organization_member
 async def contacts(session: AsyncSession = Session, _: None = Operator) -> dict:
     rows = (await session.scalars(select(Contact).order_by(Contact.created_at.desc()))).all()
     return {"contacts": [contact_summary(x) for x in rows]}
 
 
 @router.get("/contacts/variables", response_model=ContactVariablesResponse)
+@allow_organization_member
 async def get_contact_variables(
     session: AsyncSession = Session, _: None = Operator
 ) -> ContactVariablesResponse:
@@ -107,14 +111,17 @@ async def get_contact_variables(
 
     # 2. Distinct keys stored in JSONB metadata
     metadata_keys: list[VariableDescriptor] = []
+    org_id = required_organization(session.sync_session)
     try:
         result = await session.execute(
             text(
                 "SELECT DISTINCT jsonb_object_keys(metadata_json) AS key "
                 "FROM contacts "
                 "WHERE metadata_json IS NOT NULL AND metadata_json != '{}'::jsonb "
+                "AND org_id = :org_id "
                 "ORDER BY key"
-            )
+            ),
+            {"org_id": org_id},
         )
         for row in result.fetchall():
             key = str(row[0])
@@ -151,6 +158,7 @@ async def create_contact(
 
 
 @router.get("/contacts/{contact_id}")
+@allow_organization_member
 async def get_contact(contact_id: str, session: AsyncSession = Session, _: None = Operator) -> dict:
     contact = await session.get(Contact, contact_id)
     if contact is None:

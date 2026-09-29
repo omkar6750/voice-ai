@@ -1,4 +1,5 @@
 import { Link, useParams, useSearchParams } from "react-router-dom";
+import { useOrganizationAccess } from "@/app/access";
 import { LoadState, PageBody, PageHeader } from "@/components/record-page";
 import { Button } from "@/components/ui/button";
 import { useResource } from "@/lib/resources";
@@ -12,19 +13,26 @@ const sections = ["Sources", "Chunks", "Search", "Ingestion"] as const;
 export function KnowledgeDetailPage() {
   const { baseId = "" } = useParams();
   const [params, setParams] = useSearchParams();
+  const { canManage } = useOrganizationAccess();
   const { data, loading, error, reload } = useResource<{
     knowledge_bases: KnowledgeBase[];
   }>("/knowledge-bases");
   const base = data?.knowledge_bases.find((item) => item.id === baseId);
-  const section =
+  const requestedSection =
     sections.find((item) => item.toLowerCase() === params.get("section")) ??
     "Sources";
+  const section = requestedSection === "Search" && !canManage ? "Sources" : requestedSection;
   return (
     <PageBody>
       <PageHeader
         title={base?.name ?? "Knowledge base"}
         description="Current mutable corpus and ingestion settings."
         action={
+          <Button asChild variant="outline">
+            <Link to="/knowledge">All bases</Link>
+          </Button>
+        }
+        readOnlyAction={
           <Button asChild variant="outline">
             <Link to="/knowledge">All bases</Link>
           </Button>
@@ -41,7 +49,7 @@ export function KnowledgeDetailPage() {
               aria-label="Knowledge sections"
               className="flex gap-1 border-b pb-2"
             >
-              {sections.map((item) => (
+              {sections.filter((item) => item !== "Search" || canManage).map((item) => (
                 <Button
                   type="button"
                   key={item}
@@ -62,7 +70,7 @@ export function KnowledgeDetailPage() {
                 saved={reload}
               />
             )}
-            {section === "Search" && <SearchPanel baseId={baseId} />}
+            {section === "Search" && canManage && <SearchPanel baseId={baseId} />}
           </>
         )}
       </LoadState>

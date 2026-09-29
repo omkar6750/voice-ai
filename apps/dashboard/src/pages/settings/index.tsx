@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import { useOrganizationAccess } from "@/app/access";
+import { ProviderCredentials } from "./ProviderCredentials";
 import { LoadState, PageBody, PageHeader } from "@/components/record-page";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +25,7 @@ type WorkspaceConfig = {
 type Workspace = { revision: number; config: WorkspaceConfig };
 export function SettingsPage() {
   const api = useApi();
+  const { canManage } = useOrganizationAccess();
   const { data, loading, error, reload } = useResource<Workspace>("/workspace");
   const [config, setConfig] = useState<WorkspaceConfig | null>(null);
   const [busy, setBusy] = useState(false);
@@ -38,7 +41,7 @@ export function SettingsPage() {
         method: "PATCH",
         body: JSON.stringify({ revision: data.revision, config }),
       });
-      toast.success("Workspace settings saved");
+      toast.success("Organization settings saved");
       await reload();
     } catch (cause) {
       toast.error(
@@ -52,11 +55,12 @@ export function SettingsPage() {
     <PageBody>
       <PageHeader
         title="Settings"
-        description="Single-workspace retention, logging and callback policy."
+        description="Organization retention, call logging, and provider credentials."
       />
       <LoadState loading={loading} error={error}>
         {config && (
           <form onSubmit={save} className="flex max-w-2xl flex-col gap-6">
+            <fieldset disabled={!canManage}>
             <FieldGroup>
               <Field>
                 <FieldLabel htmlFor="recording-days">
@@ -134,8 +138,8 @@ export function SettingsPage() {
                   <option value="true">Enabled</option>
                 </NativeSelect>
                 <FieldDescription>
-                  Turning this on changes policy. Automatic dispatch worker
-                  status needs separate verification.
+                  This changes organization policy. Automatic dispatch still
+                  requires its worker to be available.
                 </FieldDescription>
               </Field>
               <Field>
@@ -157,12 +161,14 @@ export function SettingsPage() {
                 />
               </Field>
             </FieldGroup>
-            <Button type="submit" disabled={busy} className="self-start">
+            </fieldset>
+            {canManage && <Button type="submit" disabled={busy} className="self-start">
               {busy ? "Saving…" : "Save settings"}
-            </Button>
+            </Button>}
           </form>
         )}
       </LoadState>
+      <ProviderCredentials />
     </PageBody>
   );
 }

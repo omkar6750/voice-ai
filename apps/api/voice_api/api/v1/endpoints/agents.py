@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner
+from voice_api.core.security import allow_organization_member
 from voice_api.models import (
     Agent,
     AgentVersion,
@@ -63,6 +64,7 @@ async def validate_agent_bindings(session: AsyncSession, version: AgentVersion) 
 
 
 @router.get("/agents")
+@allow_organization_member
 async def agents(session: AsyncSession = Session, _: None = Operator) -> dict:
     rows = (await session.scalars(select(Agent).order_by(Agent.name))).all()
     results = []
@@ -104,6 +106,7 @@ async def create_agent(
 
 
 @router.get("/agents/{agent_id}/versions")
+@allow_organization_member
 async def agent_versions(
     agent_id: str, session: AsyncSession = Session, _: None = Operator
 ) -> dict:
@@ -238,6 +241,7 @@ async def bind_tool(
 
 
 @router.get("/agents/{agent_id}/impact")
+@allow_organization_member
 async def agent_deletion_impact(
     agent_id: str, session: AsyncSession = Session, _: None = Operator
 ) -> dict:

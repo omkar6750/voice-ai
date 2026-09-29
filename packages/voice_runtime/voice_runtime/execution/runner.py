@@ -13,7 +13,7 @@ from voice_runtime.diagnostics import diagnostic_dict, exception_diagnostic
 from voice_runtime.execution.delivery import stream_evidence
 from voice_runtime.execution.evidence_client import ApiEvidenceIngestor
 from voice_runtime.execution.exchange import ExchangeTracker
-from voice_runtime.execution.spool import DurableSpool
+from voice_runtime.execution.spool import BatchIngestor, DurableSpool
 
 
 class CallDriver(Protocol):
@@ -23,7 +23,7 @@ class CallDriver(Protocol):
 
 
 async def execute_call(
-    client: httpx.AsyncClient,
+    client: httpx.AsyncClient | None,
     runtime_service_token: str,
     run_id: str,
     endpoint_id: str,
@@ -33,6 +33,8 @@ async def execute_call(
     heartbeat_seconds: float = 20,
     secrets: tuple[str, ...] = (),
     after_close: Callable[[], Awaitable[None]] | None = None,
+    local_post: Callable[[str, dict], Awaitable[dict]] | None = None,
+    local_ingestor: BatchIngestor | None = None,
 ) -> str:
     if not 0 < heartbeat_seconds <= 20:
         raise ValueError("Heartbeat interval must be within 20 seconds")
@@ -40,6 +42,10 @@ async def execute_call(
     headers = {"X-Voice-Runtime-Token": runtime_service_token}
 
     async def post(suffix: str, body: dict) -> dict:
+        if local_post is not None:
+            return await local_post(suffix, body)
+        if client is None:
+            raise ValueError("HTTP client or local control service is required")
         response = await client.post(
             f"/api/runs/{run_id}/{suffix}",
             json=body,
@@ -62,7 +68,12 @@ async def execute_call(
     released, incomplete = False, False
     call_task = heartbeat_task = delivery_task = None
     spool = None
-    ingestor = ApiEvidenceIngestor(client, run_id, runtime_service_token)
+    if local_ingestor is not None:
+        ingestor = local_ingestor
+    elif client is not None:
+        ingestor = ApiEvidenceIngestor(client, run_id, runtime_service_token)
+    else:
+        raise ValueError("HTTP client or local evidence ingestor is required")
 
     async def heartbeat():
         while True:
@@ -78,7 +89,8 @@ async def execute_call(
     try:
         heartbeat_task = asyncio.create_task(heartbeat())
         spool = DurableSpool(spool_path)
-        tracker = ExchangeTracker(run_id, spool, secrets=(*secrets, runtime_service_token))
+        redacted_secrets = (*secrets, runtime_service_token) if runtime_service_token else secrets
+        tracker = ExchangeTracker(run_id, spool, secrets=redacted_secrets)
         delivery_task = asyncio.create_task(stream_evidence(spool, ingestor))
         call_task = asyncio.create_task(work())
         done, _ = await asyncio.wait(
@@ -91,9 +103,11 @@ async def execute_call(
         final_state = await call_task
         outcome = "completed"
     except Exception as exc:
-        logger.exception("Call task raised exception during run {}: {}", run_id, exc)
-        error = f"Call execution failed: {exc}"
-        diagnostics.append(exception_diagnostic(exc, code="call_execution_failed", message="Call execution failed"))
+        logger.error("Call task failed for run {}", run_id)
+        error = "Call execution failed; inspect structured diagnostics"
+        diagnostics.append(
+            exception_diagnostic(exc, code="call_execution_failed", message="Call execution failed")
+        )
     except asyncio.CancelledError:
         error = "Call execution cancelled"
         raise

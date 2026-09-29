@@ -13,6 +13,8 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.core.config import get_settings
+from voice_api.core.security import allow_organization_member
+from voice_api.db.tenant_scope import bind_integration_organization, bind_organization
 from voice_api.models import (
     AgentVersion,
     AgentVersionTool,
@@ -143,6 +145,7 @@ async def whatsapp(session: AsyncSession, connection: IntegrationConnection) -> 
 
 
 @router.get("/integrations")
+@allow_organization_member
 async def list_connections(session: AsyncSession = Session, _: None = Operator) -> dict:
     connections = (
         await session.scalars(select(IntegrationConnection).order_by(IntegrationConnection.label))
@@ -271,6 +274,7 @@ async def delete_connection(
 
 
 @router.get("/integrations/{connection_id}")
+@allow_organization_member
 async def get_connection(
     connection_id: str,
     session: AsyncSession = Session,
@@ -429,6 +433,7 @@ async def rotate_secrets(
 
 
 @router.get("/integrations/{connection_id}/media", response_model=MediaListResponse)
+@allow_organization_member
 async def list_media(
     connection_id: str,
     session: AsyncSession = Session,
@@ -541,9 +546,7 @@ async def upload_media(
     return media_response(row)
 
 
-@router.patch(
-    "/integrations/{connection_id}/media/{media_id}", response_model=MediaResponse
-)
+@router.patch("/integrations/{connection_id}/media/{media_id}", response_model=MediaResponse)
 async def update_media(
     connection_id: str,
     media_id: str,
@@ -565,9 +568,7 @@ async def update_media(
     return media_response(row)
 
 
-@router.post(
-    "/integrations/{connection_id}/media/{media_id}/verify", response_model=MediaResponse
-)
+@router.post("/integrations/{connection_id}/media/{media_id}/verify", response_model=MediaResponse)
 async def verify_media(
     connection_id: str,
     media_id: str,
@@ -594,13 +595,16 @@ async def verify_media(
         row.media_type = media_type_for_mime(row.mime_type)
     if isinstance(provider.get("file_size"), int):
         row.size_bytes = provider["file_size"]
-    if isinstance(provider.get("sha256"), str) and re.fullmatch(r"[a-f0-9]{64}", provider["sha256"]):
+    if isinstance(provider.get("sha256"), str) and re.fullmatch(
+        r"[a-f0-9]{64}", provider["sha256"]
+    ):
         row.sha256 = provider["sha256"]
     await session.commit()
     return media_response(row)
 
 
 @router.get("/integrations/{connection_id}/templates")
+@allow_organization_member
 async def templates(
     connection_id: str,
     session: AsyncSession = Session,
@@ -691,21 +695,30 @@ async def generate_template_tool(
         )
         if media is None:
             raise HTTPException(422, "Selected header media is not available for this integration")
-        expected_type = {
-            "IMAGE": "image",
-            "VIDEO": "video",
-            "DOCUMENT": "document",
-        }.get(str(header_component.get("format", "")).upper()) if header_component else None
+        expected_type = (
+            {
+                "IMAGE": "image",
+                "VIDEO": "video",
+                "DOCUMENT": "document",
+            }.get(str(header_component.get("format", "")).upper())
+            if header_component
+            else None
+        )
         if expected_type and media.media_type != expected_type:
             raise HTTPException(
                 422,
                 f"Selected media is type '{media.media_type}', but this template requires '{expected_type}'",
             )
-    if header_component and str(header_component.get("format", "")).upper() in {
-        "IMAGE",
-        "VIDEO",
-        "DOCUMENT",
-    } and not header_media_id:
+    if (
+        header_component
+        and str(header_component.get("format", "")).upper()
+        in {
+            "IMAGE",
+            "VIDEO",
+            "DOCUMENT",
+        }
+        and not header_media_id
+    ):
         raise HTTPException(422, "This template requires a matching header media record")
     description = (
         body.description
@@ -714,7 +727,9 @@ async def generate_template_tool(
 
     parameter_mappings = dict(body.parameter_mappings)
     if not parameter_mappings:
-        template_indexes = re.findall(r"\{\{(\d+)\}\}", body_component.get("text", "")) if body_component else []
+        template_indexes = (
+            re.findall(r"\{\{(\d+)\}\}", body_component.get("text", "")) if body_component else []
+        )
         if len(template_indexes) == 1:
             parameter_mappings = {template_indexes[0]: "message"}
         else:
@@ -798,7 +813,11 @@ async def verify_webhook(
     request: Request,
     session: AsyncSession = Session,
 ) -> PlainTextResponse:
-    await connection_or_404(session, connection_id)
+    await bind_integration_organization(session, connection_id)
+    connection = await connection_or_404(session, connection_id)
+    if not connection.org_id:
+        raise HTTPException(404, "Integration connection not found")
+    bind_organization(session.sync_session, connection.org_id)
     verify = await secret_value(session, connection_id, "verify_token")
     if request.query_params.get("hub.mode") != "subscribe" or not compare_digest(
         request.query_params.get("hub.verify_token", "").encode(), verify.encode()
@@ -811,7 +830,11 @@ async def verify_webhook(
 async def receive_webhook(
     connection_id: str, request: Request, session: AsyncSession = Session
 ) -> None:
+    await bind_integration_organization(session, connection_id)
     connection = await connection_or_404(session, connection_id)
+    if not connection.org_id:
+        raise HTTPException(404, "Integration connection not found")
+    bind_organization(session.sync_session, connection.org_id)
     body = await request.body()
     signature = request.headers.get("X-Hub-Signature-256")
     app_secret = await secret_value(session, connection_id, "app_secret")

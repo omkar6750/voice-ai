@@ -2,18 +2,24 @@
 
 import asyncio
 from pathlib import Path
-from uuid import NAMESPACE_URL, uuid5
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.core.config import get_settings
+from voice_api.core.security import allow_organization_member
 from voice_api.models import Call, Run
 from voice_api.schemas.call import StartCallBody
 from voice_api.services.call_service import queue_call
+from voice_api.services.local_runtime_service import (
+    LocalEvidenceIngestor,
+    local_claim,
+    local_progress,
+    register_local_artifacts,
+)
+from voice_api.services.provider_credentials import settings_for_run
 from voice_runtime.execution.native import NativePipelineHost
 from voice_runtime.execution.runner import execute_call
 from voice_runtime.telephony.driver import Sim7600CallDriver
@@ -25,58 +31,45 @@ _background_call_tasks: set[asyncio.Task] = set()
 
 
 async def _run_live_call_background(run_id: str, endpoint_id: str) -> None:
-    from voice_api.main import app
-
-    settings = get_settings()
+    settings = await settings_for_run(run_id, get_settings())
     host = NativePipelineHost(run_id, Path(settings.recordings_dir), settings)
     driver = Sim7600CallDriver(host)
-    headers = {"X-Voice-Runtime-Token": settings.runtime_service_token or ""}
 
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://runtime.local"
-    ) as client:
+    async def post(suffix: str, body: dict) -> dict:
+        if suffix == "claim":
+            return await local_claim(run_id, body)
+        if suffix == "progress":
+            return await local_progress(run_id, body)
+        raise ValueError("Unsupported local control operation")
 
-        async def register_artifacts() -> None:
-            if not host.directory.exists():
-                return
-            for kind in ("input", "output", "mixed", "pipeline_log"):
-                filename = "pipeline.log" if kind == "pipeline_log" else f"{kind}.wav"
-                if not (host.directory / filename).is_file():
-                    continue
-                response = await client.post(
-                    f"/api/runs/{run_id}/artifacts",
-                    headers=headers,
-                    json={
-                        "id": str(uuid5(NAMESPACE_URL, f"{run_id}/{kind}")),
-                        "kind": kind,
-                        "path": f"{run_id}/{filename}",
-                    },
+    async def register_artifacts() -> None:
+        await register_local_artifacts(run_id, host.directory, strict=True)
+
+    try:
+        await execute_call(
+            None,
+            "",
+            run_id,
+            endpoint_id,
+            driver,
+            Path("data/evidence") / f"{run_id}.jsonl",
+            secrets=tuple(
+                secret
+                for secret in (
+                    settings.groq_api_key,
+                    settings.jev_api_key,
+                    settings.sarvam_api_key,
+                    settings.cartesia_api_key,
+                    settings.gemini_api_key,
                 )
-                response.raise_for_status()
-
-        try:
-            await execute_call(
-                client,
-                settings.runtime_service_token or "",
-                run_id,
-                endpoint_id,
-                driver,
-                Path("data/evidence") / f"{run_id}.jsonl",
-                secrets=tuple(
-                    secret
-                    for secret in (
-                        settings.groq_api_key,
-                        settings.jev_api_key,
-                        settings.sarvam_api_key,
-                        settings.cartesia_api_key,
-                        settings.gemini_api_key,
-                    )
-                    if secret
-                ),
-                after_close=register_artifacts,
-            )
-        except Exception:
-            logger.error("Live call {} stopped; inspect claim and evidence status", run_id)
+                if secret
+            ),
+            after_close=register_artifacts,
+            local_post=post,
+            local_ingestor=LocalEvidenceIngestor(run_id),
+        )
+    except Exception:
+        logger.error("Live call {} stopped; inspect claim and evidence status", run_id)
 
 
 def _spawn_call_task(run_id: str, endpoint_id: str) -> None:
@@ -96,8 +89,8 @@ async def start_call(
                 raise HTTPException(422, "Twilio dispatch requires VOICE_PUBLIC_BASE_URL")
         else:
             endpoint = body.telephony.endpoint_id if body.telephony else body.endpoint_id
-            if not endpoint or not get_settings().runtime_service_token:
-                raise HTTPException(422, "Dispatch needs an endpoint and runtime service token")
+            if not endpoint:
+                raise HTTPException(422, "Dispatch needs an endpoint")
 
     run, call = await queue_call(
         session,
@@ -162,6 +155,7 @@ async def start_call(
 
 
 @router.get("/calls")
+@allow_organization_member
 async def list_calls(session: AsyncSession = Session, _: None = Operator) -> dict:
     rows = (await session.scalars(select(Call).order_by(Call.created_at.desc()))).all()
     return {"calls": [_call_response(call) for call in rows]}
@@ -186,6 +180,7 @@ def _call_response(call: Call) -> dict:
 
 
 @router.get("/calls/{call_id}")
+@allow_organization_member
 async def get_call(call_id: str, session: AsyncSession = Session, _: None = Operator) -> dict:
     call = await session.get(Call, call_id)
     if call is None:
@@ -249,8 +244,8 @@ async def dispatch_queued_call(
             "target": call.target_snapshot,
         }
 
-    if not run.endpoint_id or not get_settings().runtime_service_token:
-        raise HTTPException(422, "Dispatch needs an endpoint and runtime service token")
+    if not run.endpoint_id:
+        raise HTTPException(422, "Dispatch needs an endpoint")
     _spawn_call_task(run.id, run.endpoint_id)
     return {
         "run_id": run.id,

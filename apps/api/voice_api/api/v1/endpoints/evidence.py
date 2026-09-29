@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_runtime_service
 from voice_api.core.security import safe_evidence
+from voice_api.db.tenant_scope import bind_run_organization
 from voice_api.models import (
     ClassifierContextDelivery,
     ClassifierResult,
@@ -579,6 +580,7 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
 async def ingest(
     run_id: str, body: EvidenceBatch, session: AsyncSession = Session, _: None = Operator
 ) -> dict:
+    await bind_run_organization(session, run_id)
     if any(record.run_id != run_id for record in body.records):
         raise HTTPException(422, "Batch contains evidence for another run")
     # Serialize batches per run; retries see committed records before making changes.
@@ -599,6 +601,7 @@ async def ingest(
 
 
 async def locked_run(session: AsyncSession, run_id: str) -> Run:
+    await bind_run_organization(session, run_id)
     run = await session.get(Run, run_id, with_for_update=True)
     if run is None:
         raise HTTPException(404, "Run not found")
@@ -699,6 +702,7 @@ async def record_result(
     session: AsyncSession = Session,
     _: None = Operator,
 ) -> dict:
+    await bind_run_organization(session, run_id)
     body.payload = safe_evidence(body.payload)
     tool = await session.get(ToolInvocation, invocation_id, with_for_update=True)
     if tool is None or tool.run_id != run_id:
@@ -746,6 +750,7 @@ async def consume_result(
     session: AsyncSession = Session,
     _: None = Operator,
 ) -> dict:
+    await bind_run_organization(session, run_id)
     result = await session.get(ToolInvocationResult, result_id, with_for_update=True)
     exchange = await session.get(Exchange, body.exchange_id)
     if result is None or result.run_id != run_id:

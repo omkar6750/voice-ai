@@ -67,7 +67,14 @@ async def test_intermediate_and_null_final_result_replay(client, database, run_i
     for body in (first, first, final, final):
         response = await client.post(path, json=body)
         assert response.status_code == 201, response.text
-    assert await database.scalar(select(func.count()).select_from(ToolInvocationResult)) == 2
+    assert (
+        await database.scalar(
+            select(func.count())
+            .select_from(ToolInvocationResult)
+            .where(ToolInvocationResult.run_id == run_id)
+        )
+        == 2
+    )
     assert (await client.post(path, json={**final, "payload": "changed"})).status_code == 409
     assert (
         await client.post(path, json={**first, "id": new_id(), "sequence": 3})

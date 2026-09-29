@@ -1,4 +1,4 @@
-"""Unit tests for WebRTC browser test sessions and Dashboard transport provider."""
+"""Unit tests for WebSocket browser test sessions and Dashboard transport provider."""
 
 from __future__ import annotations
 
@@ -9,19 +9,15 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner
-from voice_api.core.config import get_settings
 from voice_api.main import app
 from voice_api.models import Agent, AgentVersion, BrowserSession, Contact, Run
 from voice_api.models.common import new_id
-from voice_api.schemas.browser_session import (
-    WebRTCOfferRequest,
-)
 from voice_api.services.browser_session_service import (
     BrowserSessionContext,
     BrowserSessionManager,
     create_browser_session,
     end_browser_session,
-    handle_browser_offer,
+    issue_browser_ticket,
 )
 
 
@@ -277,21 +273,23 @@ async def test_browser_session_api_create_and_delete():
 
 
 @pytest.mark.asyncio
-async def test_webrtc_offer_and_duplicate_rejection():
+async def test_websocket_ticket_and_duplicate_rejection():
     session_id = new_id()
     run_id = new_id()
     browser_session = BrowserSession(
         id=session_id,
         run_id=run_id,
         status="created",
+        org_id="org-test",
     )
     run = Run(
         id=run_id,
+        org_id="org-test",
         channel="browser",
         transport_provider="dashboard",
         agent_version_id="av1",
         status="claimed",
-        resolved_config={"flow": {"nodes": []}},
+        resolved_config={"flow": {"nodes": []}, "audio": {"sample_rate": 16000}},
     )
 
     session_mock = AsyncMock(spec=AsyncSession)
@@ -305,56 +303,26 @@ async def test_webrtc_offer_and_duplicate_rejection():
 
     session_mock.get.side_effect = mock_get
 
-    settings = get_settings()
-
     manager = BrowserSessionManager()
     with patch(
         "voice_api.services.browser_session_service.browser_session_manager",
         manager,
     ):
-        fake_conn = MagicMock()
-        fake_conn.pc_id = "pc-12345"
+        response = await issue_browser_ticket(session_id, session_mock)
+        assert response["ticket"]
+        assert await manager.consume_ticket(session_id, "wrong") is None
+        ctx = await manager.consume_ticket(session_id, response["ticket"])
+        assert ctx is not None
+        assert ctx.org_id == "org-test"
+        assert await manager.consume_ticket(session_id, response["ticket"]) is None
+        with pytest.raises(HTTPException) as exc_info:
+            await issue_browser_ticket(session_id, session_mock)
+        assert exc_info.value.status_code == 409
 
-        with (
-            patch(
-                "voice_api.services.browser_session_service.SmallWebRTCRequestHandler.handle_web_request",
-                new_callable=AsyncMock,
-            ) as mock_handle,
-            patch(
-                "voice_api.services.browser_session_service._run_browser_pipeline",
-                new_callable=AsyncMock,
-            ),
-        ):
-
-            async def fake_handle_request(req, callback):
-                # Trigger callback as SmallWebRTCRequestHandler would
-                await callback(fake_conn)
-                return {"sdp": "answer_sdp", "type": "answer", "pc_id": "pc-12345"}
-
-            mock_handle.side_effect = fake_handle_request
-
-            offer = WebRTCOfferRequest(sdp="offer_sdp", type="offer")
-            answer = await handle_browser_offer(
-                session_id=session_id,
-                body=offer,
-                settings=settings,
-                session=session_mock,
-            )
-
-            assert answer["sdp"] == "answer_sdp"
-            assert answer["type"] == "answer"
-            assert answer["pc_id"] == "pc-12345"
-
-            # Duplicate connection attempt on the same session must be rejected with 409
-            with pytest.raises(HTTPException) as exc_info:
-                await handle_browser_offer(
-                    session_id=session_id,
-                    body=offer,
-                    settings=settings,
-                    session=session_mock,
-                )
-            assert exc_info.value.status_code == 409
-            assert "already connected" in exc_info.value.detail.lower()
+        run.org_id = "org-other"
+        with pytest.raises(HTTPException) as mismatched:
+            await issue_browser_ticket(session_id, session_mock)
+        assert mismatched.value.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -385,12 +353,10 @@ async def test_end_browser_session_cleans_up():
 
     session_mock.get.side_effect = mock_get
 
-    ctx = BrowserSessionContext(session_id, run_id, {})
+    ctx = BrowserSessionContext(session_id, run_id, {}, "org-test")
     ctx.host = AsyncMock()
-    ctx.request_handler = AsyncMock()
 
     manager = BrowserSessionManager()
-    await manager.get_or_create_context(session_id, run_id, {})
     manager._sessions[session_id] = ctx
 
     with patch(
@@ -401,14 +367,12 @@ async def test_end_browser_session_cleans_up():
         assert res["status"] == "disconnected"
         assert not ctx.is_active
         ctx.host.close.assert_awaited_once()
-        ctx.request_handler.close.assert_awaited_once()
         assert browser_session.status == "disconnected"
         assert run.status == "completed"
 
         # Repeated cleanup is safe and does not close resources a second time.
         await end_browser_session(session_id, session_mock)
         ctx.host.close.assert_awaited_once()
-        ctx.request_handler.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import pytest
@@ -24,6 +24,7 @@ from voice_runtime.telephony.twilio import TwilioCredentials
 @pytest.mark.asyncio
 async def test_queue_call_twilio():
     session = AsyncMock()
+    session.add = Mock()
     contact_id = new_id()
     version_id = new_id()
     conn_id = new_id()
@@ -187,9 +188,11 @@ async def test_call_status_endpoint(monkeypatch):
     from voice_runtime.telephony.twilio import TwilioCredentials
 
     session_mock = AsyncMock()
+    session_mock.sync_session = SimpleNamespace(info={}, identity_map={})
     corr_id = new_id()
     call = Call(
         id=new_id(),
+        org_id="org-test",
         provider="twilio",
         correlation_id=corr_id,
         telephony_connection_id="conn-1",
@@ -218,14 +221,18 @@ async def test_call_status_endpoint(monkeypatch):
             ),
             patch(
                 "voice_api.api.v1.endpoints.telephony.get_settings",
-                return_value=SimpleNamespace(public_base_url=None),
+                return_value=SimpleNamespace(public_base_url="https://voice.example.com"),
             ),
         ):
+            data = {"CallSid": "CA12345", "CallStatus": "in-progress"}
+            url = f"https://voice.example.com/api/v1/telephony/twilio/call-status/{corr_id}"
+            signature = RequestValidator("token").compute_signature(url, data)
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
                 res = await client.post(
                     f"/api/v1/telephony/twilio/call-status/{corr_id}",
-                    data={"CallSid": "CA12345", "CallStatus": "in-progress"},
+                    data=data,
+                    headers={"X-Twilio-Signature": signature},
                 )
                 assert res.status_code == 204
                 assert call.status == "active"
@@ -237,9 +244,11 @@ async def test_call_status_endpoint(monkeypatch):
 @pytest.mark.asyncio
 async def test_stream_status_endpoint(monkeypatch):
     session_mock = AsyncMock()
+    session_mock.sync_session = SimpleNamespace(info={}, identity_map={})
     corr_id = new_id()
     call = Call(
         id=new_id(),
+        org_id="org-test",
         provider="twilio",
         correlation_id=corr_id,
         telephony_connection_id="conn-1",
@@ -268,17 +277,18 @@ async def test_stream_status_endpoint(monkeypatch):
             ),
             patch(
                 "voice_api.api.v1.endpoints.telephony.get_settings",
-                return_value=SimpleNamespace(public_base_url=None),
+                return_value=SimpleNamespace(public_base_url="https://voice.example.com"),
             ),
         ):
+            data = {"StreamSid": "MZ999", "StatusCallbackEvent": "stream-started"}
+            url = f"https://voice.example.com/api/v1/telephony/twilio/stream-status/{corr_id}"
+            signature = RequestValidator("token").compute_signature(url, data)
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
                 res = await client.post(
                     f"/api/v1/telephony/twilio/stream-status/{corr_id}",
-                    data={
-                        "StreamSid": "MZ999",
-                        "StatusCallbackEvent": "stream-started",
-                    },
+                    data=data,
+                    headers={"X-Twilio-Signature": signature},
                 )
                 assert res.status_code == 204
                 assert call.provider_metadata["stream_sid"] == "MZ999"
@@ -291,8 +301,10 @@ async def test_stream_status_endpoint(monkeypatch):
 async def test_signature_required_when_public_base_url_set():
     corr_id = "corr-sig-test"
     session_mock = AsyncMock(spec=AsyncSession)
+    session_mock.sync_session = SimpleNamespace(info={}, identity_map={})
     call = Call(
         id="c1",
+        org_id="org-test",
         run_id="r1",
         correlation_id=corr_id,
         contact_id="cnt1",
@@ -340,11 +352,61 @@ async def test_signature_required_when_public_base_url_set():
 
 
 @pytest.mark.asyncio
+async def test_twilio_callback_fails_closed_without_public_url():
+    corr_id = "corr-no-public-url"
+    session_mock = AsyncMock(spec=AsyncSession)
+    session_mock.sync_session = SimpleNamespace(info={}, identity_map={})
+    call = Call(
+        id="c1",
+        org_id="org-test",
+        run_id="r1",
+        correlation_id=corr_id,
+        provider="twilio",
+        telephony_connection_id="conn1",
+        status="active",
+        provider_metadata={},
+    )
+
+    async def mock_get_session():
+        yield session_mock
+
+    app.dependency_overrides[get_session] = mock_get_session
+    try:
+        with (
+            patch(
+                "voice_api.api.v1.endpoints.telephony.get_by_correlation_id",
+                return_value=call,
+            ),
+            patch(
+                "voice_api.api.v1.endpoints.telephony.resolve_twilio_credentials",
+                return_value=(None, TwilioCredentials(account_sid="AC123", auth_token="token")),
+            ),
+            patch(
+                "voice_api.api.v1.endpoints.telephony.get_settings",
+                return_value=SimpleNamespace(public_base_url=None),
+            ),
+        ):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.post(
+                    f"/api/v1/telephony/twilio/call-status/{corr_id}",
+                    data={"CallStatus": "completed"},
+                )
+            assert response.status_code == 503
+            assert call.status == "active"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
 async def test_signature_accepted_when_valid():
     corr_id = "corr-sig-valid"
     session_mock = AsyncMock(spec=AsyncSession)
+    session_mock.sync_session = SimpleNamespace(info={}, identity_map={})
     call = Call(
         id="c1",
+        org_id="org-test",
         run_id="r1",
         correlation_id=corr_id,
         contact_id="cnt1",

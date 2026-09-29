@@ -4,7 +4,9 @@ import json
 from types import SimpleNamespace
 
 from cryptography.fernet import Fernet
-from voice_api.integrations import vault
+from sqlalchemy.ext.asyncio import AsyncSession
+from voice_api.db.session import get_session
+from voice_api.main import app
 from voice_api.models import (
     Agent,
     AgentVersion,
@@ -14,18 +16,20 @@ from voice_api.models import (
     ToolInvocation,
 )
 from voice_api.models.common import new_id
+from voice_api.services import vault_service
+from voice_api.services.vault_service import CredentialVault
 
 
 async def test_receipts_are_account_scoped_and_deduplicated(client, database, monkeypatch):
     key = Fernet.generate_key().decode()
     monkeypatch.setattr(
-        vault,
+        vault_service,
         "get_settings",
         lambda: SimpleNamespace(
             integration_keys=json.dumps({"test": key}), integration_active_key="test"
         ),
     )
-    encryption = vault.CredentialVault({"test": key}, "test")
+    encryption = CredentialVault({"test": key}, "test")
     secret = encryption.encrypt("test-app-secret")
     connection_ids = [new_id(), new_id()]
     for connection_id in connection_ids:
@@ -90,20 +94,39 @@ async def test_receipts_are_account_scoped_and_deduplicated(client, database, mo
         }
         body = json.dumps(payload).encode()
         signature = hmac.new(b"test-app-secret", body, hashlib.sha256).hexdigest()
-        return await client.post(
-            f"/api/integrations/whatsapp/{account}/webhook",
-            content=body,
-            headers={
-                "X-Hub-Signature-256": f"sha256={signature}",
-                "Content-Type": "application/json",
-            },
-        )
+        previous = app.dependency_overrides[get_session]
 
-    assert (await receipt(connection_ids[0], "delivered")).status_code == 204
+        async def unscoped_session():
+            connection = await database.connection()
+            async with AsyncSession(
+                bind=connection,
+                expire_on_commit=False,
+                join_transaction_mode="create_savepoint",
+            ) as session:
+                yield session
+
+        app.dependency_overrides[get_session] = unscoped_session
+        try:
+            return await client.post(
+                f"/api/integrations/whatsapp/{account}/webhook",
+                content=body,
+                headers={
+                    "X-Hub-Signature-256": f"sha256={signature}",
+                    "Content-Type": "application/json",
+                },
+            )
+        finally:
+            app.dependency_overrides[get_session] = previous
+
+    first_receipt = await receipt(connection_ids[0], "delivered")
+    assert first_receipt.status_code == 204, first_receipt.text
     assert (await receipt(connection_ids[0], "delivered")).status_code == 204
     assert (await receipt(connection_ids[0], "read", phone_id="wrong-account")).status_code == 204
+    await database.refresh(tools[0])
+    await database.refresh(tools[1])
     assert len(tools[0].receipts) == 1 and tools[1].receipts == []
     assert (await receipt(connection_ids[1], "sent")).status_code == 204
+    await database.refresh(tools[1])
     assert tools[1].receipts[0]["status"] == "sent"
 
 

@@ -10,13 +10,16 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.core.config import get_settings
+from voice_api.core.security import allow_organization_member
 from voice_api.db.session import SessionFactory
+from voice_api.db.tenant_scope import required_organization
 from voice_api.knowledge.embeddings import GeminiEmbedder
 from voice_api.knowledge.ingestion import MAX_UPLOAD_BYTES, extract_upload
 from voice_api.models import KnowledgeBase, KnowledgeChunk, KnowledgeSource, Tool, ToolVersion
 from voice_api.models.common import new_id, now
 from voice_api.schemas.knowledge import BaseCreate, SearchRequest, SourceCreate, ingestion_config
 from voice_api.services.knowledge_service import build_source, search
+from voice_api.services.provider_credentials import settings_for_organization
 from voice_runtime.contracts.knowledge import KnowledgeConfig
 
 router = APIRouter(tags=["knowledge"])
@@ -29,8 +32,13 @@ class BaseUpdate(BaseModel):
     config: KnowledgeConfig
 
 
-def embedding_key() -> str:
-    key = get_settings().gemini_api_key
+async def embedding_key(session: AsyncSession) -> str:
+    scoped = await settings_for_organization(
+        session,
+        required_organization(session.sync_session),
+        get_settings(),
+    )
+    key = scoped.gemini_api_key
     if not key:
         raise HTTPException(503, "Gemini embedding is not configured")
     return key
@@ -49,6 +57,7 @@ async def base_or_404(session: AsyncSession, base_id: str) -> KnowledgeBase:
 
 
 @router.get("/knowledge-bases")
+@allow_organization_member
 async def list_bases(session: AsyncSession = Session, _: None = Operator) -> dict:
     rows = (await session.scalars(select(KnowledgeBase).order_by(KnowledgeBase.name))).all()
     return {
@@ -134,6 +143,7 @@ async def update_base(
 
 
 @router.get("/knowledge-bases/{base_id}/sources")
+@allow_organization_member
 async def list_sources(
     base_id: str,
     session: AsyncSession = Session,
@@ -162,6 +172,7 @@ async def list_sources(
 
 
 @router.get("/knowledge-bases/{base_id}/chunks")
+@allow_organization_member
 async def list_chunks(
     base_id: str,
     source_id: str | None = None,
@@ -211,7 +222,7 @@ async def create_source(
     ):
         raise HTTPException(422, "Source exceeds this knowledge base's ingestion settings")
     ingestion_token = new_id()
-    key = embedding_key()
+    key = await embedding_key(session)
     row = KnowledgeSource(
         id=new_id(),
         knowledge_base_id=base_id,
@@ -254,7 +265,9 @@ async def search_base(
             base_id,
             body.query,
             body.retrieval,
-            GeminiEmbedder(embedding_key(), client) if body.retrieval.vector_weight else None,
+            GeminiEmbedder(await embedding_key(session), client)
+            if body.retrieval.vector_weight
+            else None,
         )
     return {"hits": [hit.model_dump() for hit in hits]}
 
@@ -267,7 +280,7 @@ async def rebuild_source(
     session: AsyncSession = Session,
     _: None = Operator,
 ) -> dict:
-    key = embedding_key()
+    key = await embedding_key(session)
     source = await session.get(KnowledgeSource, source_id, with_for_update=True)
     if source is None or source.knowledge_base_id != base_id:
         raise HTTPException(404, "Source not found")

@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner, require_runtime_service
+from voice_api.db.tenant_scope import bind_calendar_oauth_organization
 from voice_api.models import (
     AgentVersion,
     CalendarIntegration,
@@ -142,9 +143,11 @@ async def oauth_callback(
         raise HTTPException(400, "Google authorization was denied")
     if not code or not state:
         raise HTTPException(400, "Missing OAuth callback parameters")
+    state_hash = hashlib.sha256(state.encode()).hexdigest()
+    await bind_calendar_oauth_organization(session, state_hash)
     state_row = await session.scalar(
         select(CalendarOAuthState)
-        .where(CalendarOAuthState.state_hash == hashlib.sha256(state.encode()).hexdigest())
+        .where(CalendarOAuthState.state_hash == state_hash)
         .with_for_update()
     )
     if state_row is None or state_row.used_at is not None or state_row.expires_at <= now():

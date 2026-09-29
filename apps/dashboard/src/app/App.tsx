@@ -1,45 +1,112 @@
 import { SignIn, SignUp, useAuth, UserButton } from "@clerk/react";
 import { useCallback, useEffect, useState } from "react";
-import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { ApiContext, request } from "./api";
 import { AppShell } from "./AppShell";
+import { OrgExplorer } from "./OrgExplorer";
+import { CreateOrganizationPage } from "@/pages/organizations/create";
+import { OrganizationArea } from "@/pages/organizations/area";
+import { PlatformOrganizationsPage } from "@/pages/organizations/platform";
+import type { OrganizationView } from "./organizations";
+import type { AccountView } from "./organizations";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 export function App() {
-  const { getToken, isLoaded, isSignedIn, userId } = useAuth();
+  const { getToken, isLoaded, isSignedIn, userId, orgId } = useAuth();
   const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const [organizations, setOrganizations] = useState<OrganizationView[]>([]);
+  const [account, setAccount] = useState<AccountView | null>(null);
+  const [orgsStatus, setOrgsStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [orgsError, setOrgsError] = useState<string | null>(null);
   const [accessStatus, setAccessStatus] = useState<"checking" | "allowed" | "denied">("checking");
-  const [authorizedUserId, setAuthorizedUserId] = useState<string | null>(null);
+  const [supportToken, setSupportToken] = useState<string | null>(null);
+  const [supportOrganization, setSupportOrganization] = useState<{ id: string; name: string } | null>(null);
   useEffect(() => {
     if (!isSignedIn) return;
     let cancelled = false;
+    setOrgsStatus("loading");
+    const loadOrganizations = async () => {
+      try {
+        const token = await getToken();
+        if (!token) throw new Error("No Clerk session token");
+        const joined = await request<OrganizationView[]>(token, "/orgs");
+        const accountView = await request<AccountView>(token, "/me");
+        if (!cancelled) {
+          setOrganizations(joined);
+          setAccount(accountView);
+          setOrgsError(null);
+          setOrgsStatus("ready");
+        }
+      } catch (cause) {
+        if (!cancelled) {
+          setOrgsError(cause instanceof Error ? cause.message : "Could not load organizations");
+          setOrgsStatus("error");
+        }
+      }
+    };
+    void loadOrganizations();
+    window.addEventListener("focus", loadOrganizations);
+    return () => { cancelled = true; window.removeEventListener("focus", loadOrganizations); };
+  }, [getToken, isSignedIn, userId, orgId]);
+  useEffect(() => {
+    if (!isSignedIn || !orgId || orgsStatus !== "ready" || !organizations.some((org) => org.id === orgId && org.registered)) {
+      setAccessStatus("denied");
+      return;
+    }
+    let cancelled = false;
     setAccessStatus("checking");
-    setAuthorizedUserId(null);
     void (async () => {
       try {
         const sessionToken = await getToken();
         if (!sessionToken) throw new Error("No Clerk session token");
-        await request(sessionToken, "/auth/legacy-access");
-        if (!cancelled) {
-          setAuthorizedUserId(userId);
-          setAccessStatus("allowed");
-        }
+        await request(sessionToken, "/auth/organization-access");
+        if (!cancelled) setAccessStatus("allowed");
       } catch {
         if (!cancelled) setAccessStatus("denied");
       }
     })();
     return () => { cancelled = true; };
-  }, [getToken, isSignedIn, userId]);
+  }, [getToken, isSignedIn, orgId, orgsStatus, organizations]);
   const api = useCallback(
     async <T,>(path: string, init?: RequestInit) => {
       const sessionToken = await getToken();
       if (!sessionToken) throw new Error("Sign in required");
-      return request<T>(sessionToken, path, init);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && !supportToken) {
+        const activeRole = organizations.find((organization) => organization.id === orgId)?.role;
+        const isBrowserTestLifecycle = path === "/browser-sessions" || path.startsWith("/browser-sessions/");
+        if (activeRole !== "org:admin" && !isBrowserTestLifecycle) {
+          throw new Error("Organization admin access is required for this action");
+        }
+      }
+      return request<T>(sessionToken, path, init, supportToken);
     },
-    [getToken],
+    [getToken, supportToken, organizations, orgId],
   );
+  const enterSupport = useCallback(async (id: string, name: string) => {
+    const sessionToken = await getToken();
+    if (!sessionToken) throw new Error("Sign in required");
+    const result = await request<{ token: string }>(
+      sessionToken,
+      `/platform/orgs/${id}/support-session`,
+      { method: "POST" },
+    );
+    setSupportToken(result.token);
+    setSupportOrganization({ id, name });
+    navigate("/platform/support");
+  }, [getToken, navigate]);
+  const exitSupport = useCallback(async () => {
+    const sessionToken = await getToken();
+    if (sessionToken && supportToken) {
+      await request(sessionToken, "/platform/support-session", { method: "DELETE" }, supportToken);
+    }
+    setSupportToken(null);
+    setSupportOrganization(null);
+    navigate("/platform/orgs");
+  }, [getToken, navigate, supportToken]);
   if (!isLoaded) return <main className="grid min-h-svh place-items-center">Loading…</main>;
   if (!isSignedIn) {
     return (
@@ -50,7 +117,7 @@ export function App() {
           <main className="mx-auto flex min-h-svh max-w-3xl flex-col justify-center gap-6 px-6">
             <p className="text-sm font-medium text-muted-foreground">Voice AI</p>
             <h1 className="text-4xl font-semibold tracking-tight">Build and test voice agents with your team.</h1>
-            <p className="max-w-xl text-muted-foreground">Create an organization, invite teammates, and manage agents across workspaces. Customer onboarding is being connected to the existing runtime.</p>
+            <p className="max-w-xl text-muted-foreground">Sign in with your email, create or join an organization, invite teammates, and securely manage voice agents together.</p>
             <div className="flex gap-3">
               <Button asChild><Link to="/sign-up">Sign up</Link></Button>
               <Button variant="outline" asChild><Link to="/sign-in">Log in</Link></Button>
@@ -64,16 +131,20 @@ export function App() {
   return (
     <TooltipProvider>
       <ApiContext.Provider value={api}>
-        {accessStatus === "allowed" && authorizedUserId === userId ? <AppShell /> : (
-          <main className="grid min-h-svh place-items-center px-4">
-            <div className="space-y-4 text-center">
-              <div className="mx-auto w-fit"><UserButton /></div>
-              <p role="status" className="text-sm text-muted-foreground">
-                {accessStatus === "checking" ? "Checking workspace access…" : "This account is not assigned to the existing workspace. Sign in with its verified owner email."}
-              </p>
-            </div>
-          </main>
-        )}
+        {pathname.startsWith("/platform/support") && supportToken && supportOrganization && account?.platform_admin
+          ? <AppShell organizations={organizations} platformAdmin supportOrganization={supportOrganization} onExitSupport={() => void exitSupport()} />
+          : pathname === "/platform/orgs" && account?.platform_admin
+          ? <PlatformOrganizationsPage onEnterSupport={enterSupport} />
+          : accessStatus === "denied" && /^\/orgs\/[^/]+(?:\/members|\/settings)?$/.test(pathname)
+          ? <OrganizationArea />
+          : pathname === "/orgs" || pathname.startsWith("/onboarding/") || !orgId || !organizations.some((org) => org.id === orgId && org.registered) || accessStatus === "denied"
+          ? <Routes>
+              <Route path="/onboarding/create-org" element={<CreateOrganizationPage account={account} />} />
+              <Route path="*" element={<OrgExplorer organizations={organizations} loading={orgsStatus === "loading"} error={orgsError} canCreate={Boolean(account?.can_create_org && account.organization_creation_enabled)} availableOrgIds={account?.organizations.filter((org) => org.capabilities.includes("browser_test")).map((org) => org.id) ?? []} platformAdmin={account?.platform_admin ?? false} />} />
+            </Routes>
+          : accessStatus === "allowed"
+            ? <AppShell organizations={organizations} platformAdmin={account?.platform_admin ?? false} />
+            : <main className="grid min-h-svh place-items-center px-4"><div className="flex items-center gap-3"><UserButton /><p role="status">Checking organization access…</p></div></main>}
       </ApiContext.Provider>
       <Toaster position="bottom-right" />
     </TooltipProvider>

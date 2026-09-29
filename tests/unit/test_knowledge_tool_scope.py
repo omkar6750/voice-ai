@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from voice_api.db import tenant_scope
 from voice_api.services import knowledge_service
 from voice_runtime.contracts.tools import ToolConfig
 from voice_runtime.execution.native import NativePipelineHost
@@ -65,6 +66,9 @@ async def test_single_base_tool_queries_only_its_bound_base(monkeypatch):
     }
     search = AsyncMock(return_value=[])
     monkeypatch.setattr(knowledge_service, "search", search)
+    monkeypatch.setattr(
+        tenant_scope, "bind_run_organization", AsyncMock(return_value="org-test")
+    )
 
     result = await host._handler("product_facts")({"query": "price"}, None)
 

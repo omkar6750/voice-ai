@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import { AdminOnly } from "@/app/access";
 import type { components } from "@/generated/api";
 import { LoadState, StatusBadge } from "@/components/record-page";
 import { Button } from "@/components/ui/button";
@@ -119,7 +120,7 @@ export function MediaPanel({ connectionId }: { connectionId: string }) {
             retained separately from call audio.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <AdminOnly><div className="flex flex-wrap gap-2">
           <Input
             className="max-w-56"
             value={uploadName}
@@ -143,7 +144,7 @@ export function MediaPanel({ connectionId }: { connectionId: string }) {
           <Button type="button" variant="outline" onClick={() => setImportOpen(true)}>
             Add existing Meta ID
           </Button>
-        </div>
+        </div></AdminOnly>
       </div>
       <LoadState
         loading={loading}
@@ -178,17 +179,17 @@ export function MediaPanel({ connectionId }: { connectionId: string }) {
                   <StatusBadge value={item.status} />
                 </TableCell>
                 <TableCell className="text-right">
-                  <div className="flex justify-end gap-1">
+                  <AdminOnly><div className="flex justify-end gap-1">
                     <Button type="button" size="sm" variant="ghost" onClick={() => void verify(item)} disabled={item.status === "available" && item.last_verified_at !== null}>Verify</Button>
                     <Button type="button" size="sm" variant="ghost" onClick={() => { setEditTarget(item); setEditName(item.display_name); }}>Edit</Button>
-                  </div>
+                  </div></AdminOnly>
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </LoadState>
-      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+      <AdminOnly><Dialog open={importOpen} onOpenChange={setImportOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add existing Meta media</DialogTitle>
@@ -204,14 +205,14 @@ export function MediaPanel({ connectionId }: { connectionId: string }) {
           </FieldGroup>
           <DialogFooter><Button type="button" variant="outline" onClick={() => setImportOpen(false)}>Cancel</Button><Button type="button" disabled={importBusy || !providerId.trim() || !importName.trim()} onClick={() => void importMedia()}>{importBusy ? "Adding…" : "Add media"}</Button></DialogFooter>
         </DialogContent>
-      </Dialog>
-      <Dialog open={Boolean(editTarget)} onOpenChange={(open) => { if (!open) setEditTarget(null); }}>
+      </Dialog></AdminOnly>
+      <AdminOnly><Dialog open={Boolean(editTarget)} onOpenChange={(open) => { if (!open) setEditTarget(null); }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Edit media metadata</DialogTitle><DialogDescription>Only the local display name changes; the Meta media ID remains immutable.</DialogDescription></DialogHeader>
           <Field><FieldLabel htmlFor="edit-media-name">Display name</FieldLabel><Input id="edit-media-name" value={editName} onChange={(event) => setEditName(event.target.value)} /></Field>
           <DialogFooter><Button type="button" variant="outline" onClick={() => setEditTarget(null)}>Cancel</Button><Button type="button" disabled={!editName.trim()} onClick={() => void saveName()}>Save</Button></DialogFooter>
         </DialogContent>
-      </Dialog>
+      </Dialog></AdminOnly>
     </section>
   );
 }

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import { useOrganizationAccess } from "@/app/access";
 import {
   LoadState,
   PageBody,
@@ -50,6 +51,7 @@ type AgentImpact = {
 export function AgentDetailPage() {
   const { agentId = "" } = useParams();
   const api = useApi();
+  const { canManage } = useOrganizationAccess();
   const navigate = useNavigate();
   const agents = useResource<{ agents: Agent[] }>("/agents");
   const versions = useResource<{ versions: Version[] }>(
@@ -155,6 +157,11 @@ export function AgentDetailPage() {
             </Button>
           </div>
         }
+        readOnlyAction={
+          <Button asChild variant="outline" size="sm">
+            <Link to="/agents">All agents</Link>
+          </Button>
+        }
       />
       <LoadState
         loading={agents.loading || versions.loading}
@@ -199,10 +206,10 @@ export function AgentDetailPage() {
                 <TableCell className="flex justify-end gap-1">
                   <Button size="sm" variant="ghost" asChild>
                     <Link to={`/agents/${agentId}/versions/${version.id}`}>
-                      {version.status === "draft" ? "Edit" : "View"}
+                      {canManage && version.status === "draft" ? "Edit" : "View"}
                     </Link>
                   </Button>
-                  {version.status === "draft" && (
+                  {canManage && version.status === "draft" && (
                     <Button
                       size="sm"
                       variant="outline"
@@ -212,7 +219,7 @@ export function AgentDetailPage() {
                       Publish
                     </Button>
                   )}
-                  {version.status === "published" && (
+                  {canManage && version.status === "published" && (
                     <Button
                       size="sm"
                       variant="outline"
@@ -222,7 +229,7 @@ export function AgentDetailPage() {
                       Clone draft
                     </Button>
                   )}
-                  {version.status === "published" &&
+                  {canManage && version.status === "published" &&
                     agent?.active_version_id !== version.id && (
                       <Button
                         size="sm"

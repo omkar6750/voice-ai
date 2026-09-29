@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner
-from voice_api.core.security import safe_evidence
+from voice_api.core.security import allow_organization_member, safe_evidence
 from voice_api.models import (
     Classification,
     ContactFact,
@@ -21,7 +21,7 @@ from voice_runtime.contracts.base import ConfigModel
 
 router = APIRouter(
     tags=["analysis"],
-dependencies=[Depends(require_legacy_owner)],
+    dependencies=[Depends(require_legacy_owner)],
 )
 Session = Depends(get_session)
 Id = Annotated[str, Field(min_length=1, max_length=36)]
@@ -135,6 +135,7 @@ async def append(run_id: str, body: AnalysisBody, session: AsyncSession = Sessio
 
 
 @router.get("/runs/{run_id}/analysis")
+@allow_organization_member
 async def history(run_id: str, session: AsyncSession = Session) -> dict:
     if await session.get(Run, run_id) is None:
         raise HTTPException(404, "Run not found")
