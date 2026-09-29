@@ -52,6 +52,7 @@ from voice_runtime.diagnostics import (
     provider_error_diagnostic,
     text_error_diagnostic,
 )
+from voice_runtime.execution.callback_http import CallbackHTTPError, post_callback_json
 from voice_runtime.execution.classifier import (
     model_visible_result,
     normalize_classifier_result,
@@ -1232,12 +1233,15 @@ class NativePipelineHost:
                 )
                 try:
                     async with httpx.AsyncClient(timeout=20) as client:
-                        response = await client.post(
-                            endpoint, json=payload, headers={"Authorization": f"Bearer {token}"}
-                        )
-                    return response.json()
+                        return await post_callback_json(client, endpoint, payload, token)
+                except CallbackHTTPError as exc:
+                    logger.warning("human callback tool received HTTP {}", exc.status_code)
+                    return {
+                        "status": "error",
+                        "error": f"Callback scheduling service returned HTTP {exc.status_code}",
+                    }
                 except Exception as exc:
-                    logger.error("human callback tool failed: {}", exc)
+                    logger.error("human callback tool failed ({})", type(exc).__name__)
                     return {"status": "error", "error": "Callback scheduling service unavailable"}
             if name == "schedule_callback":
                 raw_time = (
