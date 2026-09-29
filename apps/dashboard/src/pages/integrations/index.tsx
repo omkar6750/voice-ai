@@ -1,7 +1,9 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { useAuth } from "@clerk/react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import type { components } from "@/generated/api";
 import {
   LoadState,
   PageBody,
@@ -18,6 +20,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import {
   Sheet,
   SheetContent,
@@ -50,10 +53,12 @@ export type Connection = {
   created_at?: string;
   webhook_url?: string | null;
   deleted_at?: string | null;
+  credential_id?: string | null;
 };
 
 export function IntegrationsPage() {
   const api = useApi();
+  const { orgId } = useAuth();
   const navigate = useNavigate();
   const { data, loading, error, reload } = useResource<{
     connections: Connection[];
@@ -70,8 +75,22 @@ export function IntegrationsPage() {
   const [wabaId, setWabaId] = useState("");
   const [apiVersion, setApiVersion] = useState("");
   const [accountSid, setAccountSid] = useState("");
-  const [authToken, setAuthToken] = useState("");
+  const [twilioCredentials, setTwilioCredentials] = useState<components["schemas"]["CredentialStatus"][]>([]);
+  const [twilioCredentialId, setTwilioCredentialId] = useState("");
+  const [whatsappCredentialId, setWhatsappCredentialId] = useState("");
+  const [whatsappCredentials, setWhatsappCredentials] = useState<components["schemas"]["CredentialStatus"][]>([]);
   const [calendarLabel, setCalendarLabel] = useState("My Google Calendar");
+  useEffect(() => {
+    let active = true;
+    if (!orgId) { setTwilioCredentials([]); setWhatsappCredentials([]); return () => { active = false; }; }
+    void api<components["schemas"]["CredentialStatus"][]>(`/orgs/${orgId}/credentials`)
+      .then((rows) => { if (active) {
+        setTwilioCredentials(rows.filter((row) => row.provider === "twilio" && row.status === "stored"));
+        setWhatsappCredentials(rows.filter((row) => row.provider === "whatsapp" && row.status === "stored"));
+      } })
+      .catch(() => { if (active) { setTwilioCredentials([]); setWhatsappCredentials([]); } });
+    return () => { active = false; };
+  }, [api, orgId]);
   async function connectCalendar() {
     try {
       const result = await api<{ authorization_url: string }>("/calendar-integrations/google/connect", { method: "POST", body: JSON.stringify({ display_name: calendarLabel.trim() || "My Google Calendar", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" }) });
@@ -108,6 +127,7 @@ export function IntegrationsPage() {
               label: label.trim(),
               provider: "twilio_voice",
               enabled: false,
+              credential_id: twilioCredentialId,
               config: {
                 account_sid: accountSid.trim(),
                 phone_numbers: [],
@@ -117,6 +137,7 @@ export function IntegrationsPage() {
               label: label.trim(),
               provider: "whatsapp",
               enabled: false,
+              credential_id: whatsappCredentialId,
               config: {
                 phone_number_id: phoneId.trim(),
                 waba_id: wabaId.trim(),
@@ -129,12 +150,7 @@ export function IntegrationsPage() {
         body: JSON.stringify(payload),
       });
 
-      if (newType === "twilio_voice" && authToken.trim()) {
-        await api(`/integrations/${result.id}/secrets/auth_token`, {
-          method: "PUT",
-          body: JSON.stringify({ value: authToken.trim() }),
-        });
-
+      if (newType === "twilio_voice" && twilioCredentialId) {
         try {
           const testRes = await api<{
             valid: boolean;
@@ -173,7 +189,8 @@ export function IntegrationsPage() {
       setOpen(false);
       setLabel("");
       setAccountSid("");
-      setAuthToken("");
+      setTwilioCredentialId("");
+      setWhatsappCredentialId("");
       setPhoneId("");
       setWabaId("");
       await reload();
@@ -190,7 +207,7 @@ export function IntegrationsPage() {
     <PageBody>
       <PageHeader
         title="Integrations"
-        description="Action-provider accounts. Model-provider keys stay in server environment."
+        description="Connect organization-owned provider credentials to the integrations that use them."
         action={
           <div className="flex items-center gap-2">
             <Sheet open={open} onOpenChange={setOpen}>
@@ -247,6 +264,14 @@ export function IntegrationsPage() {
                     {newType === "twilio_voice" ? (
                       <>
                         <Field>
+                          <FieldLabel htmlFor="whatsapp-credential">Named WhatsApp credential</FieldLabel>
+                          <NativeSelect id="whatsapp-credential" value={whatsappCredentialId} required onChange={(event) => setWhatsappCredentialId(event.target.value)}>
+                            <option value="">Select an organization credential</option>
+                            {whatsappCredentials.map((item) => <option key={item.id} value={item.id}>{item.name} · v{item.version}</option>)}
+                          </NativeSelect>
+                          <FieldDescription>{whatsappCredentials.length ? "Add the Meta access token in Organization settings first." : "No active WhatsApp credential is available. Add one in Organization settings."}</FieldDescription>
+                        </Field>
+                        <Field>
                           <FieldLabel htmlFor="twilio-sid">Account SID</FieldLabel>
                           <Input
                             id="twilio-sid"
@@ -262,17 +287,13 @@ export function IntegrationsPage() {
                         </Field>
 
                         <Field>
-                          <FieldLabel htmlFor="twilio-auth-token">Auth Token</FieldLabel>
-                          <Input
-                            id="twilio-auth-token"
-                            type="password"
-                            placeholder="••••••••••••••••••••••••••••••••"
-                            value={authToken}
-                            onChange={(event) => setAuthToken(event.target.value)}
-                            required
-                          />
+                          <FieldLabel htmlFor="twilio-credential">Named Twilio credential</FieldLabel>
+                          <NativeSelect id="twilio-credential" value={twilioCredentialId} required onChange={(event) => setTwilioCredentialId(event.target.value)}>
+                            <option value="">Select an organization credential</option>
+                            {twilioCredentials.map((item) => <option key={item.id} value={item.id}>{item.name} · v{item.version}</option>)}
+                          </NativeSelect>
                           <FieldDescription>
-                            Twilio Auth Token. Encrypted securely on the server with Fernet.
+                            Create the Account SID, REST API key and webhook Auth Token bundle in Organization settings first. {twilioCredentials.length === 0 ? "No active Twilio credential is available." : "The selection is stored by its application credential ID."}
                           </FieldDescription>
                         </Field>
                       </>

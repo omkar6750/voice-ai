@@ -77,13 +77,13 @@ def make_rows(*, status="queued", run_status="queued", metadata=None, sid=None):
 
 
 def settings(**overrides):
-    values = {"public_base_url": "https://voice.example.test", "runtime_service_token": "runtime-token"}
+    values = {"public_base_url": "https://voice.example.test", "runtime_service_token": "runtime-token", "env": "dev"}
     values.update(overrides)
     return SimpleNamespace(**values)
 
 
 def install_fakes(monkeypatch, dial):
-    async def resolve(_session, _connection_id):
+    async def resolve(_session, _connection_id, **_kwargs):
         return None, SimpleNamespace(account_sid="AC" + "c" * 32, auth_token="secret")
 
     class FakeController:
@@ -94,6 +94,7 @@ def install_fakes(monkeypatch, dial):
             return await dial(**kwargs)
 
     monkeypatch.setattr(dispatch, "resolve_twilio_credentials", resolve)
+    monkeypatch.setattr(dispatch, "acquire", AsyncMock())
     monkeypatch.setattr(dispatch, "TwilioCallController", FakeController)
 
 
@@ -266,7 +267,7 @@ async def test_invalid_public_url_or_missing_operator_token_prevents_credential_
 async def test_controller_construction_failure_keeps_queued_rows_and_attempt_eligible(monkeypatch):
     call, run = make_rows()
 
-    async def resolve(_session, _connection_id):
+    async def resolve(_session, _connection_id, **_kwargs):
         return None, SimpleNamespace(account_sid="AC" + "c" * 32, auth_token="secret")
 
     class BrokenController:
@@ -274,6 +275,7 @@ async def test_controller_construction_failure_keeps_queued_rows_and_attempt_eli
             raise OSError("private local setup details")
 
     monkeypatch.setattr(dispatch, "resolve_twilio_credentials", resolve)
+    monkeypatch.setattr(dispatch, "acquire", AsyncMock())
     monkeypatch.setattr(dispatch, "TwilioCallController", BrokenController)
     session = FakeSession(call, run)
     with pytest.raises(HTTPException) as error:

@@ -9,9 +9,14 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from voice_runtime.safe_logs import configure_safe_logging
 
-from voice_api.api.v1.api import api_router
-from voice_api.core.config import get_settings
+# Install before importing routes, Pipecat or SDKs: wire logs and exception
+# renderers must never acquire caller/provider data, even during startup.
+configure_safe_logging()
+
+from voice_api.api.v1.api import api_router  # noqa: E402
+from voice_api.core.config import get_settings  # noqa: E402
 
 app = FastAPI(title="Voice AI API", version="0.2.0")
 app.add_middleware(
@@ -51,10 +56,9 @@ async def validation_error(_request, error):
     return JSONResponse(
         status_code=422,
         content={
-            "detail": [
-                {"loc": list(item["loc"]), "type": item["type"], "msg": item["msg"]}
-                for item in error.errors()
-            ]
+            # Custom validator messages and arbitrary mapping keys in `loc`
+            # can contain submitted secrets. Do not serialize either.
+            "detail": [{"type": "validation_error", "msg": "Request validation failed"}]
         },
     )
 

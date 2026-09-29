@@ -3,6 +3,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NumberField } from "./ConfigFields";
+import { CredentialBindingSelect, bindCredential } from "./CredentialBindingSelect";
 import type { AgentConfig, ProviderCatalog } from "./types";
 
 export function ModelsPanel({
@@ -76,8 +77,9 @@ export function ModelsPanel({
                 );
               })}
             </NativeSelect>
-            <FieldDescription>Provider credentials are configured by the developer, not in this dashboard.</FieldDescription>
+            <FieldDescription>Select the organization-owned credential used by this stage.</FieldDescription>
           </Field>
+          <CredentialBindingSelect stage="llm" provider={config.llm.provider} value={config.credential_refs.llm} disabled={disabled} change={(id) => change(bindCredential(config, "llm", id))} />
           <Field>
             <FieldLabel htmlFor="llm-model">Model</FieldLabel>
             <NativeSelect id="llm-model" className="w-full" value={config.llm.model} disabled={disabled || !catalog || llmModels.length === 0} onChange={(event) => change({ ...config, llm: { ...config.llm, model: event.target.value } })}>
@@ -122,8 +124,9 @@ export function ModelsPanel({
                   </option>
                 ))}
               </NativeSelect>
-              <FieldDescription>Runtime-supported STT providers and credentials are controlled by the server.</FieldDescription>
+              <FieldDescription>Choose an organization credential for speech recognition.</FieldDescription>
             </Field>
+            <CredentialBindingSelect stage="stt" provider={config.stt.provider} value={config.credential_refs.stt} disabled={disabled} change={(id) => change(bindCredential(config, "stt", id))} />
             <Field>
               <FieldLabel htmlFor="stt-model">STT Model</FieldLabel>
               <NativeSelect
@@ -177,6 +180,7 @@ export function ModelsPanel({
               </NativeSelect>
               <FieldDescription>Runtime status: {selectedTts?.runtime_status ?? "unavailable"}; credentials: {selectedTts?.status ?? "unavailable"}.</FieldDescription>
             </Field>
+            <CredentialBindingSelect stage="tts" provider={config.tts.provider} value={config.credential_refs.tts} disabled={disabled} change={(id) => change(bindCredential(config, "tts", id))} />
 
             <Field>
               <FieldLabel htmlFor="tts-model">TTS Model</FieldLabel>

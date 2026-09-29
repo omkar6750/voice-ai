@@ -21,28 +21,32 @@ from voice_runtime.diagnostics import diagnostic_dict, text_error_diagnostic
 from voice_runtime.execution.delivery import finalize_evidence, stream_evidence, supervise_execution
 from voice_runtime.execution.evidence_client import EvidenceDeliveryError
 from voice_runtime.execution.exchange import ExchangeTracker
-from voice_runtime.execution.native import NativePipelineHost
 from voice_runtime.execution.spool import DurableSpool
 from voice_runtime.execution.termination import CallTermination, TerminationCause
 
+from voice_api.core.clerk_organizations import get_clerk_organization_directory
 from voice_api.core.config import Settings
+from voice_api.core.hosting import require_hosted_call_admission
 from voice_api.db.session import SessionFactory
 from voice_api.db.tenant_scope import bind_organization
-from voice_api.models import Agent, AgentVersion, BrowserSession, Contact, Run
+from voice_api.models import Agent, AgentVersion, BrowserSession, Contact, Organization, Run, User
 from voice_api.models.common import new_id, now
 from voice_api.schemas.diagnostics import DiagnosticInput
+from voice_api.services.credential_lease_service import acquire, release
+from voice_api.services.credential_runtime_host import CredentialRuntimeHost as NativePipelineHost
 from voice_api.services.diagnostic_service import persist_diagnostic
 from voice_api.services.local_runtime_service import LocalEvidenceIngestor, register_local_artifacts
-from voice_api.services.provider_credentials import settings_for_organization
+from voice_api.services.provider_credentials import settings_for_snapshot
 from voice_api.services.resolution_service import fingerprint, resolve
 
 
 class BrowserSessionContext:
-    def __init__(self, session_id: str, run_id: str, snapshot: dict, org_id: str) -> None:
+    def __init__(self, session_id: str, run_id: str, snapshot: dict, org_id: str, actor_user_id: str | None = None) -> None:
         self.session_id = session_id
         self.run_id = run_id
         self.snapshot = snapshot
         self.org_id = org_id
+        self.actor_user_id = actor_user_id
         self.host: NativePipelineHost | None = None
         self.pipeline_task: asyncio.Task | None = None
         self.is_active = True
@@ -116,7 +120,7 @@ class BrowserSessionManager:
         async with self._lock:
             self._sessions.pop(session_id, None)
 
-    async def issue_ticket(self, session_id: str, run_id: str, snapshot: dict, org_id: str) -> str:
+    async def issue_ticket(self, session_id: str, run_id: str, snapshot: dict, org_id: str, actor_user_id: str | None = None) -> str:
         async with self._lock:
             now_mono = time.monotonic()
             for other_id, other in list(self._sessions.items()):
@@ -127,10 +131,12 @@ class BrowserSessionManager:
                 if not other.has_connected and other.ticket_expires_at <= now_mono:
                     self._sessions.pop(other_id, None)
             ctx = self._sessions.setdefault(
-                session_id, BrowserSessionContext(session_id, run_id, snapshot, org_id)
+                session_id, BrowserSessionContext(session_id, run_id, snapshot, org_id, actor_user_id)
             )
             if ctx.has_connected or not ctx.is_active:
                 raise HTTPException(409, "Browser session is already connected")
+            if ctx.actor_user_id != actor_user_id:
+                raise HTTPException(403, "Browser ticket belongs to another actor")
             ticket = secrets.token_urlsafe(32)
             ctx.ticket_hash = hashlib.sha256(ticket.encode()).hexdigest()
             ctx.ticket_expires_at = now_mono + 30
@@ -167,6 +173,7 @@ async def create_browser_session(
     logging_override: bool | None = None,
 ) -> tuple[Run, BrowserSession]:
     """Create a Run and associated BrowserSession for in-browser testing."""
+    require_hosted_call_admission("browser")
     if agent_version_id:
         version = await session.get(AgentVersion, agent_version_id)
         if version is None:
@@ -279,7 +286,10 @@ async def create_browser_session(
     return run, browser_session
 
 
-async def issue_browser_ticket(session_id: str, session: AsyncSession) -> dict[str, Any]:
+async def issue_browser_ticket(session_id: str, session: AsyncSession, *, actor_user_id: str | None = None) -> dict[str, Any]:
+    require_hosted_call_admission("browser")
+    if not actor_user_id:
+        raise HTTPException(403, "Browser ticket requires an authenticated actor")
     browser_session = await session.get(BrowserSession, session_id)
     if not browser_session:
         raise HTTPException(404, "Browser session not found")
@@ -296,12 +306,29 @@ async def issue_browser_ticket(session_id: str, session: AsyncSession) -> dict[s
     if not browser_session.org_id or run.org_id != browser_session.org_id:
         raise HTTPException(404, "Browser session not found")
     ticket = await browser_session_manager.issue_ticket(
-        session_id, run.id, run.resolved_config, browser_session.org_id
+        session_id, run.id, run.resolved_config, browser_session.org_id, actor_user_id
     )
     return {"ticket": ticket}
 
 
+async def verify_ticket_actor(session: AsyncSession, ctx: BrowserSessionContext) -> None:
+    if not ctx.actor_user_id:
+        raise HTTPException(403, "Browser ticket has no authenticated actor")
+    user = await session.scalar(select(User).where(User.clerk_user_id == ctx.actor_user_id))
+    organization = await session.get(Organization, ctx.org_id)
+    if user is None or user.disabled_at is not None or organization is None:
+        raise HTTPException(403, "Browser actor access is unavailable")
+    member = await get_clerk_organization_directory().membership(organization.clerk_org_id, ctx.actor_user_id)
+    if member is None or member.role not in {"org:admin", "org:member"}:
+        raise HTTPException(403, "Browser actor is no longer an organization member")
+
+
 async def handle_browser_socket(session_id: str, websocket: WebSocket, settings: Settings) -> None:
+    try:
+        require_hosted_call_admission("browser", settings)
+    except HTTPException:
+        await websocket.close(code=1008)
+        return
     origin = websocket.headers.get("origin")
     allowed = [s.strip() for s in settings.clerk_authorized_parties.split(",") if s.strip()]
     if not origin or origin not in allowed:
@@ -315,6 +342,12 @@ async def handle_browser_socket(session_id: str, websocket: WebSocket, settings:
     try:
         async with SessionFactory() as db_session:
             bind_organization(db_session.sync_session, ctx.org_id)
+            try:
+                await verify_ticket_actor(db_session, ctx)
+                await acquire(db_session, ctx.run_id)
+            except HTTPException:
+                await websocket.close(code=1008)
+                return
             bs = await db_session.get(BrowserSession, session_id)
             run = await db_session.get(Run, ctx.run_id)
             if not bs or bs.status != "created" or not run or bs.run_id != run.id:
@@ -423,8 +456,26 @@ async def _run_browser_pipeline(
     transport: FastAPIWebsocketTransport,
     settings: Settings,
 ) -> None:
-    async with SessionFactory() as credential_session:
-        settings = await settings_for_organization(credential_session, ctx.org_id, settings)
+    try:
+        async with SessionFactory() as credential_session:
+            settings = await settings_for_snapshot(credential_session, ctx.org_id, ctx.snapshot, settings, run_id=ctx.run_id)
+        await _execute_browser_pipeline(ctx, transport, settings)
+    except Exception:
+        ctx.termination.request("pipeline_failure")
+        async with SessionFactory() as session:
+            bind_organization(session.sync_session, ctx.org_id)
+            run = await session.get(Run, ctx.run_id)
+            browser = await session.get(BrowserSession, ctx.session_id)
+            if run and run.status in {"claimed", "running"}:
+                run.status, run.error, run.ended_at = "failed", "Browser runtime credentials or startup unavailable", now()
+            if browser and browser.status in {"created", "connected"}:
+                browser.status, browser.disconnected_at = "failed", now()
+            await session.commit()
+    finally:
+        await release(ctx.run_id)
+
+
+async def _execute_browser_pipeline(ctx: BrowserSessionContext, transport: FastAPIWebsocketTransport, settings: Settings) -> None:
     run_id = ctx.run_id
     session_id = ctx.session_id
     snapshot = ctx.snapshot

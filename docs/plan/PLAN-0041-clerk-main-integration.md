@@ -1,6 +1,6 @@
 # PLAN-0041 · Clerk and main integration
 
-Status: Integration branch implemented; production acceptance remains open.
+Status: Integration verified locally; user authorized merge; production acceptance open.
 
 ## Scope and merge policy
 
@@ -56,23 +56,24 @@ warnings during test-session teardown; these are not counted as test failures.
 
 ## Remaining acceptance and rollout
 
-- Review the complete customer-route/raw-SQL/non-FK/background-job RBAC matrix
-  from PLAN-0040. Passing tests do not prove every production access path.
+- Code-level customer-route/raw-SQL/non-FK/background-job audit is recorded in
+  `docs/security/tenant-authorization-audit.md`. Hosted follow-through is tracked
+  in PLAN-0042; passing tests do not prove every production access path.
 - Perform signed-in two-user/two-org invitation acceptance, switching, and
   cross-org negative probes, plus an actual provider/hardware voice call.
   Browser automation remains prohibited by the working agreement.
-- Rehearse a production-like main-head database upgrade, with its verified
-  original organization/platform administrator provisioned before tenant
-  backfill. Take a backup and inspect classifier rewrites before any live upgrade.
+- Main-head upgrade/backfill rehearsal passed on a fresh disposable clone;
+  Alembic parity and605 tests passed. Reverify live identities, take a backup and
+  inspect classifier rewrites before any live upgrade.
 - Organization creation is implemented and enabled by the application default
   and example configuration. Production must explicitly decide the flag after
   the above gates; live Clerk instance settings are a separate external check.
-- Deploy the dashboard to Netlify, API to Render, and assets/recordings to
-  Supabase Storage in a subsequent deployment slice. PostgreSQL remains undecided
-  between Supabase and Neon. No cloud resources are provisioned by this merge.
+- PLAN-0042 chooses Netlify dashboard, Render API/Pipecat, Neon PostgreSQL,
+  authenticated Cloudinary recordings and private Supabase documents/diagnostics.
+  No cloud resources are provisioned by the foundation merge.
 - Resolve the existing dashboard large-bundle warning before optimizing launch
   performance; it does not prevent the production build.
 
-Do not merge this integration branch into main or deploy it until the remaining
-acceptance gates have been reviewed. This document is not a production-ready
-claim or authorization to mutate live data.
+The user authorized the foundation merge after local verification. Live deployment
+remains gated by the checks above; this is not a production-ready claim or
+authorization to mutate live data.

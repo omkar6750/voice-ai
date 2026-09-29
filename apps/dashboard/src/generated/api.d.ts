@@ -192,14 +192,34 @@ export interface paths {
         /** Provider Credential Status */
         get: operations["provider_credential_status_api_v1_orgs__org_id__credentials_get"];
         put?: never;
-        post?: never;
+        /** Create Provider Credential */
+        post: operations["create_provider_credential_api_v1_orgs__org_id__credentials_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/orgs/{org_id}/credentials/{provider}": {
+    "/api/v1/orgs/{org_id}/credentials/{credential_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Provider Credential */
+        get: operations["get_provider_credential_api_v1_orgs__org_id__credentials__credential_id__get"];
+        /** Replace Provider Credential */
+        put: operations["replace_provider_credential_api_v1_orgs__org_id__credentials__credential_id__put"];
+        post?: never;
+        /** Delete Provider Credential */
+        delete: operations["delete_provider_credential_api_v1_orgs__org_id__credentials__credential_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{org_id}/credentials/{credential_id}/name": {
         parameters: {
             query?: never;
             header?: never;
@@ -207,14 +227,13 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Replace Provider Credential */
-        put: operations["replace_provider_credential_api_v1_orgs__org_id__credentials__provider__put"];
+        put?: never;
         post?: never;
-        /** Delete Provider Credential */
-        delete: operations["delete_provider_credential_api_v1_orgs__org_id__credentials__provider__delete"];
+        delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** Rename Provider Credential */
+        patch: operations["rename_provider_credential_api_v1_orgs__org_id__credentials__credential_id__name_patch"];
         trace?: never;
     };
     "/api/v1/orgs/{org_id}/invitations/{invitation_id}": {
@@ -1182,6 +1201,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/recordings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Recordings */
+        get: operations["list_recordings_api_v1_recordings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recording-deletions/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview */
+        post: operations["preview_api_v1_recording_deletions_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recording-deletions/{operation_id}/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Execute */
+        post: operations["execute_api_v1_recording_deletions__operation_id__execute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recording-deletions/{operation_id}/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Continue Operation */
+        post: operations["continue_operation_api_v1_recording_deletions__operation_id__continue_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recording-deletions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Operations */
+        get: operations["list_operations_api_v1_recording_deletions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recording-deletions/{operation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Operation */
+        get: operations["get_operation_api_v1_recording_deletions__operation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/callbacks": {
         parameters: {
             query?: never;
@@ -1366,6 +1487,23 @@ export interface paths {
         put?: never;
         /** Upload Source */
         post: operations["upload_source_api_v1_knowledge_bases__base_id__uploads_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge-bases/{base_id}/sources/{source_id}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download Document */
+        get: operations["download_document_api_v1_knowledge_bases__base_id__sources__source_id__file_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2025,14 +2163,34 @@ export interface paths {
         /** Provider Credential Status */
         get: operations["provider_credential_status_api_orgs__org_id__credentials_get"];
         put?: never;
-        post?: never;
+        /** Create Provider Credential */
+        post: operations["create_provider_credential_api_orgs__org_id__credentials_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/orgs/{org_id}/credentials/{provider}": {
+    "/api/orgs/{org_id}/credentials/{credential_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Provider Credential */
+        get: operations["get_provider_credential_api_orgs__org_id__credentials__credential_id__get"];
+        /** Replace Provider Credential */
+        put: operations["replace_provider_credential_api_orgs__org_id__credentials__credential_id__put"];
+        post?: never;
+        /** Delete Provider Credential */
+        delete: operations["delete_provider_credential_api_orgs__org_id__credentials__credential_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{org_id}/credentials/{credential_id}/name": {
         parameters: {
             query?: never;
             header?: never;
@@ -2040,14 +2198,13 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Replace Provider Credential */
-        put: operations["replace_provider_credential_api_orgs__org_id__credentials__provider__put"];
+        put?: never;
         post?: never;
-        /** Delete Provider Credential */
-        delete: operations["delete_provider_credential_api_orgs__org_id__credentials__provider__delete"];
+        delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** Rename Provider Credential */
+        patch: operations["rename_provider_credential_api_orgs__org_id__credentials__credential_id__name_patch"];
         trace?: never;
     };
     "/api/orgs/{org_id}/invitations/{invitation_id}": {
@@ -3015,6 +3172,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/recordings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Recordings */
+        get: operations["list_recordings_api_recordings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recording-deletions/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview */
+        post: operations["preview_api_recording_deletions_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recording-deletions/{operation_id}/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Execute */
+        post: operations["execute_api_recording_deletions__operation_id__execute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recording-deletions/{operation_id}/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Continue Operation */
+        post: operations["continue_operation_api_recording_deletions__operation_id__continue_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recording-deletions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Operations */
+        get: operations["list_operations_api_recording_deletions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recording-deletions/{operation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Operation */
+        get: operations["get_operation_api_recording_deletions__operation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/callbacks": {
         parameters: {
             query?: never;
@@ -3199,6 +3458,23 @@ export interface paths {
         put?: never;
         /** Upload Source */
         post: operations["upload_source_api_knowledge_bases__base_id__uploads_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/knowledge-bases/{base_id}/sources/{source_id}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download Document */
+        get: operations["download_document_api_knowledge_bases__base_id__sources__source_id__file_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3754,6 +4030,10 @@ export interface components {
             knowledge_base_ids?: string[];
             retrieval?: components["schemas"]["RetrievalConfig"];
             stt?: components["schemas"]["STTConfig"];
+            /** Credential Refs */
+            credential_refs?: {
+                [key: string]: string;
+            };
             llm?: components["schemas"]["LLMConfig"];
             tts?: components["schemas"]["TTSConfig"];
             audio?: components["schemas"]["AudioConfig"];
@@ -4360,6 +4640,8 @@ export interface components {
              * @default false
              */
             enabled: boolean;
+            /** Credential Id */
+            credential_id?: string | null;
         };
         /** ConsumptionBody */
         ConsumptionBody: {
@@ -4461,6 +4743,93 @@ export interface components {
         CreateOrganizationBody: {
             /** Name */
             name: string;
+        };
+        /** CredentialCreate */
+        CredentialCreate: {
+            /** Name */
+            name: string;
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "groq" | "gemini" | "sarvam" | "cartesia" | "jev" | "twilio" | "whatsapp";
+            /** Api Key */
+            api_key?: string | null;
+            /** Account Sid */
+            account_sid?: string | null;
+            /** Api Key Sid */
+            api_key_sid?: string | null;
+            /** Api Key Secret */
+            api_key_secret?: string | null;
+            /** Auth Token */
+            auth_token?: string | null;
+        };
+        /** CredentialDelete */
+        CredentialDelete: {
+            /** Expected Version */
+            expected_version: number;
+        };
+        /** CredentialRename */
+        CredentialRename: {
+            /** Name */
+            name: string;
+            /** Expected Version */
+            expected_version: number;
+        };
+        /** CredentialReplace */
+        CredentialReplace: {
+            /** Name */
+            name: string;
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "groq" | "gemini" | "sarvam" | "cartesia" | "jev" | "twilio" | "whatsapp";
+            /** Api Key */
+            api_key?: string | null;
+            /** Account Sid */
+            account_sid?: string | null;
+            /** Api Key Sid */
+            api_key_sid?: string | null;
+            /** Api Key Secret */
+            api_key_secret?: string | null;
+            /** Auth Token */
+            auth_token?: string | null;
+            /** Expected Version */
+            expected_version: number;
+        };
+        /** CredentialStatus */
+        CredentialStatus: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "groq" | "gemini" | "sarvam" | "cartesia" | "jev" | "twilio" | "whatsapp";
+            /** Purpose */
+            purpose: string;
+            /** Version */
+            version: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "stored" | "deleted" | "unavailable";
+            /** Configured */
+            configured: boolean;
+            /**
+             * Source
+             * @default organization
+             * @constant
+             */
+            source: "organization";
+            /** Updated At */
+            updated_at: string | null;
+            /** Deleted At */
+            deleted_at: string | null;
         };
         /** DiagnosticInput */
         DiagnosticInput: {
@@ -5563,25 +5932,6 @@ export interface components {
             /** Providers */
             providers: components["schemas"]["ProviderEntryResponse"][];
         };
-        /** ProviderCredentialBody */
-        ProviderCredentialBody: {
-            /**
-             * Api Key
-             * Format: password
-             */
-            api_key: string;
-        };
-        /** ProviderCredentialStatus */
-        ProviderCredentialStatus: {
-            /** Provider */
-            provider: string;
-            /** Configured */
-            configured: boolean;
-            /** Source */
-            source?: string | null;
-            /** Updated At */
-            updated_at?: string | null;
-        };
         /** ProviderEntryResponse */
         ProviderEntryResponse: {
             /** Provider */
@@ -5653,6 +6003,122 @@ export interface components {
             worker_stopped_verified: true;
             /** Note */
             note: string;
+        };
+        /** RecordingDeletionExecute */
+        RecordingDeletionExecute: {
+            /** Confirmation Token */
+            confirmation_token: string;
+            /** Confirmation Text */
+            confirmation_text: string;
+        };
+        /** RecordingDeletionItemResponse */
+        RecordingDeletionItemResponse: {
+            /** Artifact Id */
+            artifact_id: string;
+            /** Status */
+            status: string;
+            /** Error */
+            error: string | null;
+        };
+        /** RecordingDeletionListResponse */
+        RecordingDeletionListResponse: {
+            /** Operations */
+            operations: components["schemas"]["RecordingDeletionResponse"][];
+        };
+        /** RecordingDeletionPreviewResponse */
+        RecordingDeletionPreviewResponse: {
+            /** Operation Id */
+            operation_id: string;
+            /** Confirmation Token */
+            confirmation_token: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Artifact Ids */
+            artifact_ids: string[];
+            /** Size Bytes */
+            size_bytes: number;
+            /** Excluded */
+            excluded: number;
+            /** Confirmation Text */
+            confirmation_text: string;
+        };
+        /** RecordingDeletionResponse */
+        RecordingDeletionResponse: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
+            /** Total */
+            total: number;
+            /** Deleted */
+            deleted: number;
+            /** Failed */
+            failed: number;
+            /** Pending */
+            pending: number;
+            /** Items */
+            items: components["schemas"]["RecordingDeletionItemResponse"][];
+        };
+        /** RecordingDeletionSelection */
+        RecordingDeletionSelection: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "artifacts" | "runs" | "calls" | "utc_range" | "all_current_org";
+            /** Ids */
+            ids?: string[];
+            /** Start */
+            start?: string | null;
+            /** End */
+            end?: string | null;
+        };
+        /** RecordingListResponse */
+        RecordingListResponse: {
+            /** Artifacts */
+            artifacts: components["schemas"]["RecordingResponse"][];
+            /** Total */
+            total: number;
+        };
+        /** RecordingResponse */
+        RecordingResponse: {
+            /** Id */
+            id: string;
+            /** Run Id */
+            run_id: string;
+            /** Kind */
+            kind: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Size Bytes */
+            size_bytes: number | null;
+            /** Sha256 */
+            sha256: string | null;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** Expires At */
+            expires_at: string | null;
+            /** Deleted At */
+            deleted_at: string | null;
+            /** Deletion Requested At */
+            deletion_requested_at: string | null;
+            /**
+             * Storage Backend
+             * @enum {string}
+             */
+            storage_backend: "local" | "cloudinary" | "supabase";
+            /** Storage Status */
+            storage_status: string;
+            /** Storage Error */
+            storage_error: string | null;
+            /** Deletion Error */
+            deletion_error: string | null;
         };
         /**
          * RegisteredHandlerSpec
@@ -6654,6 +7120,8 @@ export interface components {
             enabled?: boolean | null;
             /** Expected Updated At */
             expected_updated_at?: string | null;
+            /** Credential Id */
+            credential_id?: string | null;
         };
         /** UpdatedAgentVersionResponse */
         UpdatedAgentVersionResponse: {
@@ -7173,7 +7641,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProviderCredentialStatus"][];
+                    "application/json": components["schemas"]["CredentialStatus"][];
                 };
             };
             /** @description Validation Error */
@@ -7187,19 +7655,86 @@ export interface operations {
             };
         };
     };
-    replace_provider_credential_api_v1_orgs__org_id__credentials__provider__put: {
+    create_provider_credential_api_v1_orgs__org_id__credentials_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 org_id: string;
-                provider: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ProviderCredentialBody"];
+                "application/json": components["schemas"]["CredentialCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_provider_credential_api_v1_orgs__org_id__credentials__credential_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+                credential_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replace_provider_credential_api_v1_orgs__org_id__credentials__credential_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+                credential_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CredentialReplace"];
             };
         };
         responses: {
@@ -7209,7 +7744,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProviderCredentialStatus"];
+                    "application/json": components["schemas"]["CredentialStatus"];
                 };
             };
             /** @description Validation Error */
@@ -7223,17 +7758,21 @@ export interface operations {
             };
         };
     };
-    delete_provider_credential_api_v1_orgs__org_id__credentials__provider__delete: {
+    delete_provider_credential_api_v1_orgs__org_id__credentials__credential_id__delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 org_id: string;
-                provider: string;
+                credential_id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CredentialDelete"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             204: {
@@ -7241,6 +7780,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_provider_credential_api_v1_orgs__org_id__credentials__credential_id__name_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+                credential_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CredentialRename"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialStatus"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -9251,9 +9826,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RecordingListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9355,6 +9928,188 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    list_recordings_api_v1_recordings_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_api_v1_recording_deletions_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordingDeletionSelection"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingDeletionPreviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execute_api_v1_recording_deletions__operation_id__execute_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordingDeletionExecute"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingDeletionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    continue_operation_api_v1_recording_deletions__operation_id__continue_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingDeletionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_operations_api_v1_recording_deletions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingDeletionListResponse"];
+                };
+            };
+        };
+    };
+    get_operation_api_v1_recording_deletions__operation_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingDeletionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -9833,6 +10588,38 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_document_api_v1_knowledge_bases__base_id__sources__source_id__file_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                base_id: string;
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -11259,7 +12046,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProviderCredentialStatus"][];
+                    "application/json": components["schemas"]["CredentialStatus"][];
                 };
             };
             /** @description Validation Error */
@@ -11273,19 +12060,86 @@ export interface operations {
             };
         };
     };
-    replace_provider_credential_api_orgs__org_id__credentials__provider__put: {
+    create_provider_credential_api_orgs__org_id__credentials_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 org_id: string;
-                provider: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ProviderCredentialBody"];
+                "application/json": components["schemas"]["CredentialCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_provider_credential_api_orgs__org_id__credentials__credential_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+                credential_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replace_provider_credential_api_orgs__org_id__credentials__credential_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+                credential_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CredentialReplace"];
             };
         };
         responses: {
@@ -11295,7 +12149,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProviderCredentialStatus"];
+                    "application/json": components["schemas"]["CredentialStatus"];
                 };
             };
             /** @description Validation Error */
@@ -11309,17 +12163,21 @@ export interface operations {
             };
         };
     };
-    delete_provider_credential_api_orgs__org_id__credentials__provider__delete: {
+    delete_provider_credential_api_orgs__org_id__credentials__credential_id__delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 org_id: string;
-                provider: string;
+                credential_id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CredentialDelete"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             204: {
@@ -11327,6 +12185,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_provider_credential_api_orgs__org_id__credentials__credential_id__name_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+                credential_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CredentialRename"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialStatus"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -13337,9 +14231,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RecordingListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13441,6 +14333,188 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    list_recordings_api_recordings_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_api_recording_deletions_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordingDeletionSelection"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingDeletionPreviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execute_api_recording_deletions__operation_id__execute_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordingDeletionExecute"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingDeletionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    continue_operation_api_recording_deletions__operation_id__continue_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingDeletionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_operations_api_recording_deletions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingDeletionListResponse"];
+                };
+            };
+        };
+    };
+    get_operation_api_recording_deletions__operation_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingDeletionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -13919,6 +14993,38 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_document_api_knowledge_bases__base_id__sources__source_id__file_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                base_id: string;
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

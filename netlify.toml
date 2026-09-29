@@ -1,0 +1,28 @@
+[build]
+  base = "apps/dashboard"
+  publish = "dist"
+  command = "node ../../scripts/deploy/netlify-build.mjs"
+
+[build.environment]
+  NODE_VERSION = "24"
+  # Netlify's preliminary install must not rewrite the reviewed lock or run scripts.
+  # The guarded command performs the authoritative npm ci and build afterwards.
+  NPM_FLAGS = "--package-lock=false --ignore-scripts"
+  # Only VITE_CLERK_PUBLISHABLE_KEY and VITE_API_ORIGIN may enter Vite.
+  # Set their nonempty public values in Netlify; never put backend secrets there.
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+  force = false
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "no-store"
+    Netlify-CDN-Cache-Control = "no-store"
+    Referrer-Policy = "no-referrer"
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Permissions-Policy = "microphone=(self), camera=(), geolocation=()"

@@ -38,6 +38,7 @@ from voice_runtime.diagnostics import (
     provider_exception_diagnostic,
 )
 from voice_runtime.execution.exchange import ExchangeTracker
+from voice_runtime.safe_logs import opaque_id, safe_event_payload
 
 
 class EvidenceObserver(BaseObserver):
@@ -81,7 +82,12 @@ class EvidenceObserver(BaseObserver):
 
     def _mark(self, event: str, **details) -> None:
         if self._log is not None:
-            self._log.write(json.dumps({"event": event, **details}, ensure_ascii=False) + "\n")
+            self._log.write(
+                json.dumps(
+                    safe_event_payload(event, run_id=opaque_id(self.tracker.run_id), **details)
+                )
+                + "\n"
+            )
             self._log.flush()
 
     async def on_process_frame(self, data: FrameProcessed) -> None:
@@ -156,7 +162,7 @@ class EvidenceObserver(BaseObserver):
                     exception, provider=provider, operation=operation_name
                 )
             else:
-                diagnostic = provider_error_diagnostic(provider=provider, body=str(frame.error))
+                diagnostic = provider_error_diagnostic(provider=provider, body=frame.error)
                 diagnostic["metadata"]["operation"] = operation_name
             self.tracker.diagnostic(**diagnostic)
             active = getattr(self, f"{operation_name}_operation", None)

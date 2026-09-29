@@ -19,7 +19,6 @@ from voice_api.core.config import get_settings
 from voice_api.db.session import get_session
 from voice_api.db.tenant_scope import bind_organization
 from voice_api.models import (
-    LegacyDataTenant,
     Organization,
     OrganizationAudit,
     OrganizationCreationClaim,
@@ -27,9 +26,15 @@ from voice_api.models import (
     User,
 )
 from voice_api.models.common import new_id
+from voice_api.schemas.credentials import (
+    CredentialCreate,
+    CredentialDelete,
+    CredentialRename,
+    CredentialReplace,
+    CredentialStatus,
+)
+from voice_api.services import credential_service
 from voice_api.services.organization_seed import seed_organization
-from voice_api.services.provider_credentials import PROVIDER_FIELDS, encrypt_provider_key
-from voice_api.services.vault_service import VaultError
 
 router = APIRouter(prefix="/orgs", tags=["organizations"])
 Principal = Depends(require_clerk_user)
@@ -397,105 +402,70 @@ async def organization_invitations(
     return [InvitationView.model_validate(item) for item in await directory.invitations(org_id)]
 
 
-@router.get("/{org_id}/credentials", response_model=list[ProviderCredentialStatus])
+@router.get("/{org_id}/credentials", response_model=list[CredentialStatus])
 async def provider_credential_status(
-    org_id: str,
-    principal: ClerkPrincipal = Principal,
-    session: AsyncSession = Session,
+    org_id: str, principal: ClerkPrincipal = Principal, session: AsyncSession = Session,
     directory: ClerkOrganizationDirectory = Directory,
-) -> list[ProviderCredentialStatus]:
+) -> list[CredentialStatus]:
     organization, _ = await _registered_org(org_id, session, directory, principal)
     bind_organization(session.sync_session, organization.id)
-    rows = (await session.scalars(select(ProviderCredential))).all()
-    existing = {row.provider: row for row in rows}
-    legacy = (
-        await session.scalar(
-            select(LegacyDataTenant.organization_id).where(
-                LegacyDataTenant.organization_id == organization.id
-            )
-        )
-        is not None
-    )
-    settings = get_settings()
-    return [
-        ProviderCredentialStatus(
-            provider=provider,
-            configured=(provider in existing) or (legacy and bool(getattr(settings, field))),
-            source=(
-                "organization"
-                if provider in existing
-                else "deployment"
-                if legacy and getattr(settings, field)
-                else None
-            ),
-            updated_at=existing[provider].updated_at.isoformat()
-            if provider in existing and existing[provider].updated_at
-            else None,
-        )
-        for provider, field in PROVIDER_FIELDS.items()
-    ]
+    rows = (await session.scalars(select(ProviderCredential).order_by(ProviderCredential.name))).all()
+    return [credential_service.status(row) for row in rows]
 
 
-@router.put("/{org_id}/credentials/{provider}", response_model=ProviderCredentialStatus)
-async def replace_provider_credential(
-    org_id: str,
-    provider: str,
-    body: ProviderCredentialBody,
-    principal: ClerkPrincipal = Principal,
-    session: AsyncSession = Session,
-    directory: ClerkOrganizationDirectory = Directory,
-) -> ProviderCredentialStatus:
+@router.post("/{org_id}/credentials", response_model=CredentialStatus, status_code=201)
+async def create_provider_credential(
+    org_id: str, body: CredentialCreate, principal: ClerkPrincipal = Principal,
+    session: AsyncSession = Session, directory: ClerkOrganizationDirectory = Directory,
+) -> CredentialStatus:
     organization = await _require_admin(org_id, session, directory, principal)
-    if provider not in PROVIDER_FIELDS:
-        raise HTTPException(404, "Provider is not supported")
     bind_organization(session.sync_session, organization.id)
-    row = await session.scalar(
-        select(ProviderCredential).where(ProviderCredential.provider == provider)
-    )
-    try:
-        ciphertext, key_id = encrypt_provider_key(provider, body.api_key.get_secret_value())
-    except VaultError as error:
-        raise HTTPException(503, "Credential encryption is unavailable") from error
-    if row is None:
-        row = ProviderCredential(
-            org_id=organization.id,
-            provider=provider,
-            ciphertext=ciphertext,
-            key_id=key_id,
-            updated_by_clerk_user_id=principal.user_id,
-        )
-        session.add(row)
-    else:
-        row.ciphertext = ciphertext
-        row.key_id = key_id
-        row.updated_by_clerk_user_id = principal.user_id
-    await session.commit()
-    return ProviderCredentialStatus(
-        provider=provider,
-        configured=True,
-        source="organization",
-        updated_at=row.updated_at.isoformat() if row.updated_at else None,
-    )
+    return credential_service.status(await credential_service.store(session, body, principal.user_id))
 
 
-@router.delete("/{org_id}/credentials/{provider}", status_code=204)
+@router.get("/{org_id}/credentials/{credential_id}", response_model=CredentialStatus)
+async def get_provider_credential(
+    org_id: str, credential_id: str, principal: ClerkPrincipal = Principal,
+    session: AsyncSession = Session, directory: ClerkOrganizationDirectory = Directory,
+) -> CredentialStatus:
+    organization, _ = await _registered_org(org_id, session, directory, principal)
+    bind_organization(session.sync_session, organization.id)
+    return credential_service.status(await credential_service.lookup(session, credential_id))
+
+
+@router.put("/{org_id}/credentials/{credential_id}", response_model=CredentialStatus)
+async def replace_provider_credential(
+    org_id: str, credential_id: str, body: CredentialReplace,
+    principal: ClerkPrincipal = Principal, session: AsyncSession = Session,
+    directory: ClerkOrganizationDirectory = Directory,
+) -> CredentialStatus:
+    organization = await _require_admin(org_id, session, directory, principal)
+    bind_organization(session.sync_session, organization.id)
+    return credential_service.status(await credential_service.store(
+        session, body, principal.user_id, credential_id=credential_id
+    ))
+
+
+@router.patch("/{org_id}/credentials/{credential_id}/name", response_model=CredentialStatus)
+async def rename_provider_credential(
+    org_id: str, credential_id: str, body: CredentialRename,
+    principal: ClerkPrincipal = Principal, session: AsyncSession = Session,
+    directory: ClerkOrganizationDirectory = Directory,
+) -> CredentialStatus:
+    organization = await _require_admin(org_id, session, directory, principal)
+    bind_organization(session.sync_session, organization.id)
+    return credential_service.status(await credential_service.rename(session, credential_id, body))
+
+
+@router.delete("/{org_id}/credentials/{credential_id}", status_code=204)
 async def delete_provider_credential(
-    org_id: str,
-    provider: str,
-    principal: ClerkPrincipal = Principal,
-    session: AsyncSession = Session,
+    org_id: str, credential_id: str, body: CredentialDelete,
+    principal: ClerkPrincipal = Principal, session: AsyncSession = Session,
     directory: ClerkOrganizationDirectory = Directory,
 ) -> None:
     organization = await _require_admin(org_id, session, directory, principal)
-    if provider not in PROVIDER_FIELDS:
-        raise HTTPException(404, "Provider is not supported")
     bind_organization(session.sync_session, organization.id)
-    row = await session.scalar(
-        select(ProviderCredential).where(ProviderCredential.provider == provider)
-    )
-    if row is not None:
-        await session.delete(row)
-        await session.commit()
+    await credential_service.remove(session, credential_id, body.expected_version)
 
 
 @router.post("/{org_id}/invitations", status_code=201, response_model=InvitationView)

@@ -1,10 +1,12 @@
 """Mutable knowledge base control plane. Build work happens outside request transactions."""
 
 import asyncio
+import hashlib
 import re
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +21,7 @@ from voice_api.models import KnowledgeBase, KnowledgeChunk, KnowledgeSource, Too
 from voice_api.models.common import new_id, now
 from voice_api.schemas.knowledge import BaseCreate, SearchRequest, SourceCreate, ingestion_config
 from voice_api.services.knowledge_service import build_source, search
+from voice_api.services.private_storage import check_identity, get_private_storage, object_identity
 from voice_api.services.provider_credentials import settings_for_organization
 from voice_runtime.contracts.knowledge import KnowledgeConfig
 
@@ -209,6 +212,17 @@ async def create_source(
     session: AsyncSession = Session,
     _: None = Operator,
 ) -> dict:
+    return await _persist_source(base_id, body, tasks, session)
+
+
+async def _persist_source(
+    base_id: str,
+    body: SourceCreate,
+    tasks: BackgroundTasks,
+    session: AsyncSession,
+    *,
+    document: bytes | None = None,
+) -> dict:
     base = await base_or_404(session, base_id)
     config = ingestion_config(base.config)
     source_kind = {"paste": "text", "md": "markdown"}.get(body.kind, body.kind)
@@ -227,7 +241,30 @@ async def create_source(
         **body.model_dump(),
     )
     session.add(row)
-    await session.commit()
+    settings = get_settings()
+    storage = None
+    if settings.env != "dev" or settings.supabase_url:
+        await session.flush()
+        raw = document if document is not None else body.content.encode("utf-8")
+        object_key = object_identity(
+            row.org_id, row.id, "documents", hashlib.sha256(raw).hexdigest()
+        )
+        try:
+            storage = get_private_storage()
+            await storage.upload(object_key, raw)
+        except Exception:
+            raise HTTPException(503, "Private document upload unavailable; retry") from None
+        row.source_path = "supabase:" + object_key
+    try:
+        await session.commit()
+    except Exception:
+        if storage is not None:
+            try:
+                await storage.delete(object_key)
+            except Exception:
+                # Object remains private; do not leak exception/URL/key on rollback.
+                pass
+        raise
     tasks.add_task(build_with_client, row.id, ingestion_token, key)
     return {"id": row.id, "status": row.status}
 
@@ -242,6 +279,13 @@ async def delete_source(
     source = await session.get(KnowledgeSource, source_id, with_for_update=True)
     if source is None or source.knowledge_base_id != base_id:
         raise HTTPException(404, "Knowledge source not found")
+    if source.source_path and source.source_path.startswith("supabase:"):
+        key = source.source_path.removeprefix("supabase:")
+        try:
+            check_identity(key, source.org_id, source.id, "documents")
+            await get_private_storage().delete(key)
+        except Exception:
+            raise HTTPException(503, "Private document deletion unconfirmed; retry") from None
     await session.execute(delete(KnowledgeChunk).where(KnowledgeChunk.source_id == source_id))
     await session.delete(source)
     await session.commit()
@@ -302,4 +346,31 @@ async def upload_source(
         raise HTTPException(
             422, "Unreadable source, unsupported format or upload too large"
         ) from None
-    return await create_source(base_id, body, tasks, session, _)
+    return await _persist_source(base_id, body, tasks, session, document=raw)
+
+
+@router.get("/knowledge-bases/{base_id}/sources/{source_id}/file")
+@allow_organization_member
+async def download_document(
+    base_id: str, source_id: str, session: AsyncSession = Session, _: None = Operator
+):
+    source = await session.get(KnowledgeSource, source_id)
+    if source is None or source.knowledge_base_id != base_id:
+        raise HTTPException(404, "Knowledge source not found")
+    if not source.source_path or not source.source_path.startswith("supabase:"):
+        raise HTTPException(404, "Original document is not stored")
+    key = source.source_path.removeprefix("supabase:")
+    try:
+        check_identity(key, source.org_id, source.id, "documents")
+        data = await get_private_storage().read(key)
+    except Exception:
+        raise HTTPException(503, "Private document unavailable") from None
+    return Response(
+        data,
+        media_type="application/octet-stream",
+        headers={
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": 'attachment; filename="document"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )

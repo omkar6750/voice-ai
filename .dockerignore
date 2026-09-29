@@ -1,0 +1,31 @@
+# Default deny: only Python build inputs enter the context.
+**
+!Dockerfile
+!.dockerignore
+!pyproject.toml
+!uv.lock
+!.python-version
+!apps/
+!apps/api/
+!apps/api/**
+!packages/
+!packages/voice_runtime/
+!packages/voice_runtime/**
+# Re-exclude secrets and local outputs underneath the allowed source trees.
+**/.env
+**/.env.*
+**/.git
+**/.venv
+**/node_modules
+**/__pycache__
+**/*.pyc
+**/*.log
+**/*.wav
+**/*.mp3
+**/*.pcm
+**/*.pem
+**/*.key
+**/credentials*.json
+**/data
+**/dist
+**/build

@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 
 import serial
-from loguru import logger
 from pipecat.frames.frames import InputAudioRawFrame, OutputAudioRawFrame, StartFrame
 from pipecat.processors.frame_processor import FrameProcessor, FrameProcessorSetup
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pydantic import Field
+
+from voice_runtime.safe_logs import RuntimeEvent, error_category, operational_event
 
 
 class Sim7600UsbAudioParams(TransportParams):
@@ -37,7 +38,7 @@ class _SerialPcmOwner:
                     timeout=0.25,
                     write_timeout=2,
                 )
-                logger.info("PCM port opened: {}", self.params.audio_port)
+                operational_event(RuntimeEvent.PCM_OPENED)
 
     async def close(self) -> None:
         async with self._open_lock:
@@ -113,8 +114,10 @@ class _Sim7600AudioInput(BaseInputTransport):
         except asyncio.CancelledError:
             pass
         except Exception as exc:
-            logger.error("PCM read failed: {}", exc)
-            await self.push_error(f"PCM read failed: {exc}", fatal=True)
+            operational_event(
+                RuntimeEvent.PCM_READ_FAILED, level="ERROR", error_category=error_category(exc)
+            )
+            await self.push_error("PCM read failed", fatal=True)
 
 
 class _Sim7600AudioOutput(BaseOutputTransport):
@@ -154,7 +157,10 @@ class _Sim7600AudioOutput(BaseOutputTransport):
             try:
                 await self._owner.write(chunk)
             except Exception as exc:
-                await self.push_error(f"PCM write failed: {exc}", fatal=True)
+                operational_event(
+                    RuntimeEvent.PCM_WRITE_FAILED, level="ERROR", error_category=error_category(exc)
+                )
+                await self.push_error("PCM write failed", fatal=True)
                 return False
             elapsed = asyncio.get_running_loop().time() - started
             await asyncio.sleep(max(0, len(chunk) / (self.sample_rate * 2) - elapsed))

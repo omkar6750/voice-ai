@@ -80,7 +80,7 @@ class TwilioRestCall:
                     method,
                     self._url,
                     auth=httpx.BasicAuth(
-                        self._credentials.account_sid, self._credentials.auth_token
+                        *self._credentials.rest_auth
                     ),
                     data=data,
                     follow_redirects=False,

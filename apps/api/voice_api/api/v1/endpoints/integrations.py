@@ -12,6 +12,7 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.core.config import get_settings
+from voice_api.core.development import require_development_cleanup
 from voice_api.core.security import allow_organization_member
 from voice_api.db.tenant_scope import bind_integration_organization, bind_organization
 from voice_api.models import (
@@ -39,7 +40,7 @@ from voice_api.schemas.integrations import (
     SecretBody,
     UpdateConnectionBody,
 )
-from voice_api.services.vault_service import CredentialVault, VaultError
+from voice_api.services.vault_service import CredentialVault, SecretScope, VaultError
 from voice_api.services.whatsapp_service import WhatsAppAdapter, _inbound_window, verify_signature
 
 router = APIRouter(tags=["integrations"])
@@ -68,6 +69,7 @@ def summary(connection: IntegrationConnection, *, secret_names: list[str]) -> di
         "updated_at": connection.updated_at.isoformat() if connection.updated_at else None,
         "created_at": connection.created_at.isoformat() if connection.created_at else None,
         "deleted_at": connection.deleted_at.isoformat() if connection.deleted_at else None,
+        "credential_id": connection.credential_id,
         "webhook_url": webhook_url(connection.id),
     }
 
@@ -118,6 +120,19 @@ async def connection_or_404(session: AsyncSession, connection_id: str) -> Integr
 
 
 async def secret_value(session: AsyncSession, connection_id: str, name: str) -> str:
+    connection = await connection_or_404(session, connection_id)
+    if connection.credential_id and connection.provider == "whatsapp" and name == "access_token":
+        from voice_api.services.credential_service import credential_scope, lookup
+
+        credential = await lookup(session, connection.credential_id)
+        if credential.provider != "whatsapp" or credential.purpose != "whatsapp_cloud" or credential.status != "stored":
+            raise HTTPException(422, "Select an active WhatsApp credential for this integration")
+        try:
+            return CredentialVault.from_env().decrypt(
+                credential.ciphertext, credential.key_id, scope=credential_scope(credential)
+            )
+        except VaultError as error:
+            raise HTTPException(503, "Integration credential is unavailable") from error
     secret = await session.scalar(
         select(IntegrationSecret).where(
             IntegrationSecret.connection_id == connection_id,
@@ -127,7 +142,9 @@ async def secret_value(session: AsyncSession, connection_id: str, name: str) -> 
     if secret is None:
         raise HTTPException(422, f"Connection is missing {name}")
     try:
-        return CredentialVault.from_env().decrypt(secret.ciphertext, secret.key_id)
+        connection = await connection_or_404(session, connection_id)
+        return CredentialVault.from_env().decrypt(secret.ciphertext, secret.key_id,
+            scope=SecretScope(secret.org_id, secret.id, connection.provider, secret.name, secret.version))
     except VaultError as error:
         raise HTTPException(503, "Integration credential is unavailable") from error
 
@@ -178,6 +195,8 @@ async def create_connection(
         if existing_active:
             raise HTTPException(409, "Only one active WhatsApp integration connection is permitted")
     row = IntegrationConnection(id=new_id(), **body.model_dump())
+    if row.credential_id:
+        await validate_credential_binding(session, row)
     session.add(row)
     await session.commit()
     return summary(row, secret_names=[])
@@ -211,6 +230,7 @@ async def delete_connection(
     session: AsyncSession = Session,
     _: None = Operator,
 ) -> dict:
+    require_development_cleanup()
     connection = await connection_or_404(session, connection_id)
     await session.execute(text("SET LOCAL session_replication_role = 'replica';"))
 
@@ -292,6 +312,18 @@ async def get_connection(
     return summary(connection, secret_names=[s.name for s in secret_rows])
 
 
+async def validate_credential_binding(session: AsyncSession, connection: IntegrationConnection) -> None:
+    from voice_api.services.credential_service import lookup
+
+    row = await lookup(session, connection.credential_id)
+    expected = {
+        "twilio_voice": ("twilio", "twilio_voice"),
+        "whatsapp": ("whatsapp", "whatsapp_cloud"),
+    }.get(connection.provider)
+    if expected is None or (row.provider, row.purpose) != expected or row.status != "stored":
+        raise HTTPException(422, "Select a stored credential compatible with this integration")
+
+
 @router.patch("/integrations/{connection_id}")
 async def update_connection(
     connection_id: str,
@@ -317,6 +349,10 @@ async def update_connection(
         connection.label = body.label
     if body.config is not None:
         connection.config = body.config.model_dump(mode="json")
+    if "credential_id" in body.model_fields_set:
+        connection.credential_id = body.credential_id
+        if connection.credential_id:
+            await validate_credential_binding(session, connection)
     if body.enabled is not None:
         if body.enabled:
             secret_rows = (
@@ -332,6 +368,14 @@ async def update_connection(
             else:
                 required = {"access_token"}
             missing = required - secret_names
+            if connection.credential_id:
+                if connection.provider == "twilio_voice":
+                    from voice_api.services.twilio_service import resolve_twilio_credentials
+
+                    await resolve_twilio_credentials(session, connection_id, require_enabled=False)
+                else:
+                    await secret_value(session, connection_id, "access_token")
+                missing = set()
             if missing:
                 raise HTTPException(
                     422, f"Cannot enable connection without secrets: {', '.join(sorted(missing))}"
@@ -356,25 +400,25 @@ async def put_secret(
     session: AsyncSession = Session,
     _: None = Operator,
 ) -> None:
-    await connection_or_404(session, connection_id)
-    if name not in {"access_token", "app_secret", "verify_token", "auth_token"}:
+    connection = await connection_or_404(session, connection_id)
+    if name not in {"access_token", "app_secret", "verify_token", "auth_token", "api_key_sid", "api_key_secret"}:
         raise HTTPException(422, "Unsupported integration secret name")
-    try:
-        encrypted = CredentialVault.from_env().encrypt(body.value)
-    except VaultError as error:
-        raise HTTPException(503, "Integration encryption is not configured") from error
     row = await session.scalar(
         select(IntegrationSecret).where(
             IntegrationSecret.connection_id == connection_id, IntegrationSecret.name == name
         )
     )
     if row is None:
-        row = IntegrationSecret(
-            id=new_id(), connection_id=connection_id, name=name, **encrypted.__dict__
-        )
+        row = IntegrationSecret(id=new_id(), org_id=connection.org_id, connection_id=connection_id, name=name, version=1)
         session.add(row)
     else:
-        row.ciphertext, row.key_id = encrypted.ciphertext, encrypted.key_id
+        row.version += 1
+    try:
+        encrypted = CredentialVault.from_env().encrypt(body.value, scope=SecretScope(
+            row.org_id, row.id, connection.provider, name, row.version))
+    except VaultError as error:
+        raise HTTPException(503, "Integration encryption is not configured") from error
+    row.ciphertext, row.key_id = encrypted.ciphertext, encrypted.key_id
     await session.commit()
 
 
@@ -419,7 +463,7 @@ async def rotate_secrets(
     session: AsyncSession = Session,
     _: None = Operator,
 ) -> None:
-    await connection_or_404(session, connection_id)
+    connection = await connection_or_404(session, connection_id)
     try:
         vault = CredentialVault.from_env()
         rows = (
@@ -428,7 +472,10 @@ async def rotate_secrets(
             )
         ).all()
         for row in rows:
-            rotated = vault.rotate(row.ciphertext, row.key_id)
+            scope = SecretScope(row.org_id, row.id, connection.provider, row.name, row.version)
+            plaintext = vault.decrypt(row.ciphertext, row.key_id, scope=scope)
+            row.version += 1
+            rotated = vault.encrypt(plaintext, scope=SecretScope(row.org_id, row.id, connection.provider, row.name, row.version))
             row.ciphertext, row.key_id = rotated.ciphertext, rotated.key_id
     except VaultError as error:
         raise HTTPException(503, "Integration credential rotation failed") from error

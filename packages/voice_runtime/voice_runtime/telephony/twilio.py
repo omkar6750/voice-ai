@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 
 from twilio.http.http_client import TwilioHttpClient
 from twilio.rest import Client
@@ -13,7 +14,15 @@ from twilio.twiml.voice_response import VoiceResponse
 @dataclass(frozen=True)
 class TwilioCredentials:
     account_sid: str
-    auth_token: str
+    auth_token: str = dataclass_field(repr=False)
+    api_key_sid: str | None = None
+    api_key_secret: str | None = dataclass_field(default=None, repr=False)
+
+    @property
+    def rest_auth(self) -> tuple[str, str]:
+        if not self.api_key_sid or not self.api_key_secret:
+            raise ValueError("Twilio REST requires an API key SID and secret")
+        return self.api_key_sid, self.api_key_secret
 
 
 class TwilioCallLifecycle:
@@ -74,8 +83,8 @@ class TwilioCallController:
     def __init__(self, credentials: TwilioCredentials) -> None:
         self.credentials = credentials
         self.client = Client(
-            credentials.account_sid,
-            credentials.auth_token,
+            *credentials.rest_auth,
+            account_sid=credentials.account_sid,
             http_client=TwilioHttpClient(timeout=10, max_retries=0),
         )
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { Activity, ArrowLeft, FileAudio, RefreshCw } from "lucide-react";
+import { Activity, ArrowLeft, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { requestBlob, useApi, useSupportSession } from "@/app/api";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,7 @@ import { StatusBadge } from "./status";
 import { Waterfall } from "./waterfall";
 import { Transcript } from "./transcript";
 import { Inspector } from "./inspector";
+import { RecordingPlayback as AudioTrack } from "@/pages/recordings/playback";
 import type {
   Artifact,
   RunDetail,
@@ -34,65 +35,6 @@ import type {
   Selection,
   Timeline,
 } from "./types";
-
-function AudioTrack({ artifact }: { artifact: Artifact }) {
-  const { getToken } = useAuth();
-  const supportSession = useSupportSession();
-  const [url, setUrl] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  useEffect(
-    () => () => {
-      if (url) URL.revokeObjectURL(url);
-    },
-    [url],
-  );
-  async function load() {
-    setBusy(true);
-    try {
-      const sessionToken = await getToken();
-      if (!sessionToken) throw new Error("Sign in required");
-      const blob = await requestBlob(sessionToken, "/artifacts/" + artifact.id + "/file", supportSession);
-      setUrl(URL.createObjectURL(blob));
-    } catch (cause) {
-      toast.error(
-        cause instanceof Error ? cause.message : "Could not load audio",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className="flex flex-col gap-1 py-2">
-      <div className="flex items-center justify-between gap-2 text-sm">
-        <span className="capitalize">
-          {artifact.kind === "input"
-            ? "Caller"
-            : artifact.kind === "output"
-              ? "Agent"
-              : "Mixed"}{" "}
-          audio
-        </span>
-        <span className="text-xs text-muted-foreground">
-          {Math.round(artifact.size_bytes / 1024)} KB
-        </span>
-      </div>
-      {artifact.deleted_at ? (
-        <p className="text-xs text-muted-foreground">Recording expired.</p>
-      ) : url ? (
-        <audio controls preload="metadata" src={url} className="w-full" />
-      ) : (
-        <Button variant="outline" size="sm" disabled={busy} onClick={load}>
-          {busy ? (
-            <Spinner data-icon="inline-start" />
-          ) : (
-            <FileAudio data-icon="inline-start" />
-          )}{" "}
-          {busy ? "Loading…" : "Load recording"}
-        </Button>
-      )}
-    </div>
-  );
-}
 
 function PipelineDebugLog({ artifact }: { artifact: Artifact }) {
   const { getToken } = useAuth();
@@ -148,6 +90,7 @@ function PipelineDebugLog({ artifact }: { artifact: Artifact }) {
 export function RunDetailPage() {
   const { runId } = useParams();
   const api = useApi();
+  const supportSession = useSupportSession();
   const [searchParams, setSearchParams] = useSearchParams();
   const lens =
     searchParams.get("lens") === "transcript" ? "transcript" : "waterfall";
@@ -172,7 +115,7 @@ export function RunDetailPage() {
           api<RunDetail>("/runs/" + runId),
           api<Timeline>("/runs/" + runId + "/timeline"),
           api<{ runs: RunSummary[] }>("/runs"),
-          api<{ artifacts: Artifact[] }>("/runs/" + runId + "/artifacts"),
+          supportSession ? Promise.resolve({ artifacts: [] as Artifact[] }) : api<{ artifacts: Artifact[] }>("/runs/" + runId + "/artifacts"),
         ]);
         if (currentRun.current !== runId) return;
         setRun(detail);
@@ -193,7 +136,7 @@ export function RunDetailPage() {
         if (currentRun.current === runId) setLoading(false);
       }
     },
-    [api, runId],
+    [api, runId, supportSession],
   );
   useEffect(() => {
     setSelection({ kind: "run" });

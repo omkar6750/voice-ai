@@ -100,11 +100,15 @@ async def resolve(
         if config.pipeline_logs == "inherit"
         else config.pipeline_logs == "enabled"
     )
+    from voice_api.services.provider_credentials import resolve_references
+
+    credential_refs = await resolve_references(session, config.model_dump(mode="json"), strict=False)
     snapshot = safe_evidence(
         {
             **config.model_dump(mode="json", exclude_none=True),
             "_resolved": {
                 "schema_version": 1,
+                "credentials": credential_refs,
                 "agent_version_id": version.id,
                 "tools": tools,
                 "knowledge": knowledge,

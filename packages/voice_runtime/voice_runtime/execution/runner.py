@@ -8,7 +8,6 @@ from typing import Protocol
 from uuid import uuid4
 
 import httpx
-from loguru import logger
 
 from voice_runtime.diagnostics import diagnostic_dict, exception_diagnostic
 from voice_runtime.execution.delivery import finalize_evidence, stream_evidence
@@ -16,6 +15,7 @@ from voice_runtime.execution.evidence_client import ApiEvidenceIngestor
 from voice_runtime.execution.exchange import ExchangeTracker
 from voice_runtime.execution.spool import BatchIngestor, DurableSpool
 from voice_runtime.execution.termination import TerminationSummary
+from voice_runtime.safe_logs import RuntimeEvent, error_category, opaque_id, operational_event
 
 
 def runtime_token_for_run(secret: str, run_id: str) -> str:
@@ -131,14 +131,19 @@ async def execute_call(
                 )
     except Exception as exc:
         outcome = "failed"
-        logger.error("Call task failed for run {} ({})", run_id, type(exc).__name__)
+        operational_event(
+            RuntimeEvent.CALL_FAILED,
+            level="ERROR",
+            error_category=error_category(exc),
+            run_id=opaque_id(run_id),
+        )
         error = "Call execution failed; inspect structured diagnostics"
         diagnostics.append(
             {
                 **exception_diagnostic(
                     exc, code="call_execution_failed", message="Call execution failed"
                 ),
-                "detail": type(exc).__name__,
+                "detail": error_category(exc),
             }
         )
     except asyncio.CancelledError:

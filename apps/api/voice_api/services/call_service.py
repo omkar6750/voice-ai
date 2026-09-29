@@ -8,6 +8,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
+from voice_api.core.hosting import require_hosted_call_admission
 from voice_api.models import (
     AgentVersion,
     Call,
@@ -42,6 +43,9 @@ async def queue_call(
     logging_override: bool | None = None,
     telephony: TelephonySelection | None = None,
 ) -> tuple[Run, Call]:
+    require_hosted_call_admission(
+        "twilio" if telephony and telephony.provider == "twilio" else "sim7600"
+    )
     contact = await session.get(Contact, contact_id)
     version = await session.get(AgentVersion, agent_version_id)
     if contact is None or version is None or version.status != "published":
@@ -86,6 +90,18 @@ async def queue_call(
             raise HTTPException(422, "Runtime endpoint not found")
 
     config, digest = await resolve(session, version, logging_override)
+    if provider == "twilio" and connection.credential_id:
+        from voice_api.services.credential_service import lookup
+        from voice_api.services.resolution_service import fingerprint
+
+        credential = await lookup(session, connection.credential_id)
+        if credential.provider != "twilio" or credential.status != "stored":
+            raise HTTPException(422, "Twilio credential is unavailable")
+        config["_resolved"]["telephony_credential"] = {
+            "credential_id": credential.id,
+            "version": credential.version,
+        }
+        digest = fingerprint(config)
     run = Run(
         id=new_id(),
         channel="phone",
@@ -270,9 +286,7 @@ async def apply_twilio_call_status(
 
     # Callback delivery order is independent of Twilio's event order. Refresh the
     # identity map after acquiring the row lock so concurrent callbacks serialize.
-    locked_call = await session.get(
-        Call, call.id, with_for_update=True, populate_existing=True
-    )
+    locked_call = await session.get(Call, call.id, with_for_update=True, populate_existing=True)
     if locked_call is None:
         return
     current_meta = dict(locked_call.provider_metadata or {})

@@ -1,6 +1,15 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .common import JSONB, Base, Created, Identity, OrganizationOwned, Updated, now
@@ -16,17 +25,54 @@ class IntegrationConnection(Identity, Updated, OrganizationOwned, Base):
     config: Mapped[dict] = mapped_column(JSONB, default=dict)
     enabled: Mapped[bool] = mapped_column(default=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    credential_id: Mapped[str | None] = mapped_column(ForeignKey("provider_credentials.id"), index=True)
 
 
 class ProviderCredential(Identity, Updated, OrganizationOwned, Base):
     """Encrypted AI-provider credential owned by exactly one organization."""
 
     __tablename__ = "provider_credentials"
-    __table_args__ = (UniqueConstraint("org_id", "provider", name="uq_provider_credentials_org"),)
+    __table_args__ = (
+        Index("uq_provider_credentials_org_name", "org_id", "name", unique=True,
+              postgresql_where=text("deleted_at IS NULL")),
+        CheckConstraint("version > 0", name="ck_provider_credentials_version"),
+        CheckConstraint("status IN ('stored', 'deleted')", name="ck_provider_credentials_status"),
+    )
     provider: Mapped[str] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(120))
+    legacy_default: Mapped[bool] = mapped_column(default=False, server_default="false")
+    purpose: Mapped[str] = mapped_column(String(40), default="api_key", server_default="api_key")
+    version: Mapped[int] = mapped_column(default=1, server_default="1")
+    status: Mapped[str] = mapped_column(String(20), default="stored", server_default="stored")
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ciphertext: Mapped[str] = mapped_column(Text)
     key_id: Mapped[str] = mapped_column(String(80))
     updated_by_clerk_user_id: Mapped[str] = mapped_column(String(128))
+
+
+class CredentialLease(Identity, Created, OrganizationOwned, Base):
+    """Server-only run grant. No plaintext, ciphertext or browser bearer token."""
+
+    __tablename__ = "credential_leases"
+    __table_args__ = (
+        CheckConstraint("credential_version > 0", name="ck_credential_leases_version"),
+        UniqueConstraint("run_id", "credential_id", "credential_version", name="uq_credential_leases_run_version"),
+    )
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"), index=True)
+    credential_id: Mapped[str] = mapped_column(ForeignKey("provider_credentials.id"), index=True)
+    credential_version: Mapped[int]
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CallAdmission(Base):
+    """One process-independent global runtime slot; internal control only."""
+
+    __tablename__ = "call_admission"
+    __table_args__ = (CheckConstraint("id = 1", name="ck_call_admission_singleton"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.id", ondelete="SET NULL"))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class InboundWebhookMessage(Identity, Created, OrganizationOwned, Base):
@@ -48,6 +94,7 @@ class IntegrationSecret(Identity, OrganizationOwned, Base):
     name: Mapped[str] = mapped_column(String(80))
     ciphertext: Mapped[str] = mapped_column(Text)
     key_id: Mapped[str] = mapped_column(String(80))
+    version: Mapped[int] = mapped_column(default=1, server_default="1")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
 
@@ -92,6 +139,7 @@ class CalendarIntegrationSecret(Identity, OrganizationOwned, Base):
     name: Mapped[str] = mapped_column(String(80))
     ciphertext: Mapped[str] = mapped_column(Text)
     key_id: Mapped[str] = mapped_column(String(80))
+    version: Mapped[int] = mapped_column(default=1, server_default="1")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
 

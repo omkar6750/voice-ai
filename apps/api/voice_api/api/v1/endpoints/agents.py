@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner
+from voice_api.core.development import require_development_cleanup
 from voice_api.core.security import allow_organization_member
 from voice_api.models import (
     Agent,
@@ -302,6 +303,7 @@ async def delete_agent(
     session: AsyncSession = Session,
     _: None = Operator,
 ) -> dict:
+    require_development_cleanup()
     agent = await session.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(404, "Agent not found")

@@ -32,7 +32,8 @@ def browser_runtime(monkeypatch, tmp_path):
     monkeypatch.setattr(service, "persist_diagnostic", AsyncMock())
     monkeypatch.setattr(service, "DurableSpool", MagicMock())
     monkeypatch.setattr(service, "ExchangeTracker", MagicMock())
-    monkeypatch.setattr(service, "settings_for_organization", AsyncMock(side_effect=lambda _session, _org, base: base))
+    monkeypatch.setattr(service, "settings_for_snapshot", AsyncMock(side_effect=lambda _session, _org, _snapshot, base, **_kwargs: base))
+    monkeypatch.setattr(service, "release", AsyncMock())
     monkeypatch.setattr(service, "register_local_artifacts", AsyncMock(return_value=[]))
     manager = service.BrowserSessionManager()
     manager._sessions[ctx.session_id] = ctx

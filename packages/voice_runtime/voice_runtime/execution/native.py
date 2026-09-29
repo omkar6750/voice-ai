@@ -17,7 +17,6 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
-from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.flows import ContextStrategy, ContextStrategyConfig, FlowManager, NodeConfig
@@ -55,12 +54,14 @@ from voice_runtime.execution.classifier import (
     run_selected_classifier,
 )
 from voice_runtime.execution.contact_context import sanitize_contact_variables
+from voice_runtime.execution.credential_keys import stage_api_key
 from voice_runtime.execution.exchange import ExchangeTracker, bind_transcripts
 from voice_runtime.execution.flow_manager import TracedFlowManager as TracedFlowManager
 from voice_runtime.execution.observer import EvidenceObserver
 from voice_runtime.execution.speech import build_speech_services as build_speech_services
 from voice_runtime.execution.temporal import resolve_local_time_context
 from voice_runtime.execution.termination import CallTermination
+from voice_runtime.safe_logs import RuntimeEvent, error_category, opaque_id, operational_event
 from voice_runtime.telephony.base import CallState
 
 
@@ -271,7 +272,7 @@ async def run_jev_classification(
         "questions": questions,
     }
     if not api_key:
-        logger.warning("JEV API key not configured on runtime")
+        operational_event(RuntimeEvent.CREDENTIALS_MISSING, level="WARNING", provider="jev")
         return {
             "status": "error",
             "error": "JEV API key is not configured",
@@ -301,7 +302,12 @@ async def run_jev_classification(
                     else:
                         normalized[key] = {"choice": str(val), "confidence": 0.5}
                 return normalized
-            logger.error("JEV System One HTTP {}", resp.status_code)
+            operational_event(
+                RuntimeEvent.PROVIDER_FAILED,
+                level="ERROR",
+                provider="jev",
+                http_status=resp.status_code,
+            )
             try:
                 body = resp.json()
             except Exception:
@@ -318,7 +324,12 @@ async def run_jev_classification(
                 ),
             }
     except Exception as exc:
-        logger.error("JEV System One API error: {}", exc)
+        operational_event(
+            RuntimeEvent.PROVIDER_FAILED,
+            level="ERROR",
+            provider="jev",
+            error_category=error_category(exc),
+        )
         return {
             "status": "error",
             "error": "JEV provider request failed",
@@ -582,7 +593,7 @@ class NativePipelineHost:
                     questions = {
                         key: value.model_dump() for key, value in default_jev_questions().items()
                     }
-                jev_key = getattr(self.settings, "jev_api_key", None) or ""
+                jev_key = stage_api_key(self.settings, "classifier", "jev") or ""
                 return await run_jev_classification(
                     api_key=jev_key,
                     transcript=kwargs["transcript"],
@@ -607,8 +618,10 @@ class NativePipelineHost:
                 self.tracker.diagnostic(**raw_diagnostic)
             if result.get("status") == "error":
                 error = str(result.get("error", "Classifier failed"))
-        except Exception:
-            logger.exception("{} classifier failed for node {}", phase, node_key)
+        except Exception as exc:
+            operational_event(
+                RuntimeEvent.CLASSIFIER_FAILED, level="ERROR", error_category=error_category(exc)
+            )
             result = {"status": "error", "error": "Classifier execution failed"}
             error = str(result["error"])
 
@@ -646,8 +659,8 @@ class NativePipelineHost:
         connection_id: str | None = None,
     ) -> tuple[str, str, str | None, str]:
         """Resolve a pinned integration; template media IDs are already provider IDs."""
-        access_token = getattr(self.settings, "whatsapp_access_token", None) or ""
-        phone_number_id = getattr(self.settings, "whatsapp_phone_number_id", None) or ""
+        access_token = ""
+        phone_number_id = ""
         if connection_id:
             # An explicitly pinned tool must fail closed instead of falling back
             # to unrelated process-wide WhatsApp credentials.
@@ -658,8 +671,12 @@ class NativePipelineHost:
             from sqlalchemy import select
             from voice_api.db.session import SessionFactory
             from voice_api.db.tenant_scope import bind_run_organization
-            from voice_api.models import IntegrationConnection, IntegrationSecret
-            from voice_api.services.vault_service import CredentialVault
+            from voice_api.models import (
+                IntegrationConnection,
+                IntegrationSecret,
+                ProviderCredential,
+            )
+            from voice_api.services.vault_service import CredentialVault, SecretScope
 
             async with SessionFactory() as session:
                 await bind_run_organization(session, self.run_id)
@@ -684,18 +701,44 @@ class NativePipelineHost:
                     api_version = str(row.config.get("api_version") or api_version)
                     # A pinned template tool must use the secret belonging to that exact
                     # connection, never a process-wide token for another WhatsApp account.
-                    secret = await session.scalar(
-                        select(IntegrationSecret).where(
-                            IntegrationSecret.connection_id == row.id,
-                            IntegrationSecret.name == "access_token",
+                    if row.credential_id:
+                        from voice_api.services.credential_service import credential_scope
+
+                        credential = await session.scalar(
+                            select(ProviderCredential).where(
+                                ProviderCredential.id == row.credential_id,
+                                ProviderCredential.org_id == row.org_id,
+                            )
                         )
-                    )
-                    if secret is not None:
+                        if (
+                            credential is None
+                            or credential.provider != "whatsapp"
+                            or credential.purpose != "whatsapp_cloud"
+                            or credential.status != "stored"
+                        ):
+                            raise RuntimeError("WhatsApp credential unavailable")
                         access_token = CredentialVault.from_env().decrypt(
-                            secret.ciphertext, secret.key_id
+                            credential.ciphertext,
+                            credential.key_id,
+                            scope=credential_scope(credential),
                         )
+                    else:
+                        secret = await session.scalar(
+                            select(IntegrationSecret).where(
+                                IntegrationSecret.connection_id == row.id,
+                                IntegrationSecret.name == "access_token",
+                            )
+                        )
+                        if secret is not None:
+                            access_token = CredentialVault.from_env().decrypt(
+                                secret.ciphertext,
+                                secret.key_id,
+                                scope=SecretScope(
+                                    secret.org_id, secret.id, row.provider, secret.name, secret.version
+                                ),
+                            )
         except Exception:
-            logger.warning("Could not resolve configured WhatsApp integration")
+            operational_event(RuntimeEvent.INTEGRATION_FAILED, level="WARNING", provider="whatsapp")
         return (
             access_token,
             phone_number_id,
@@ -761,7 +804,11 @@ class NativePipelineHost:
                         if inbound_row is not None:
                             has_inbound = True
                 except Exception as exc:
-                    logger.warning("Failed checking inbound WhatsApp messages in DB: {}", exc)
+                    operational_event(
+                        RuntimeEvent.INBOUND_CHECK_FAILED,
+                        level="WARNING",
+                        error_category=error_category(exc),
+                    )
 
                 return {
                     "status": "ok",
@@ -809,7 +856,11 @@ class NativePipelineHost:
                         if inbound_row is not None:
                             has_inbound = True
                 except Exception as exc:
-                    logger.warning("Failed checking inbound WhatsApp messages in DB: {}", exc)
+                    operational_event(
+                        RuntimeEvent.INBOUND_CHECK_FAILED,
+                        level="WARNING",
+                        error_category=error_category(exc),
+                    )
 
                 if not has_inbound:
                     return {
@@ -828,8 +879,8 @@ class NativePipelineHost:
                     api_version,
                 ) = await self._whatsapp_runtime_config()
                 if not access_token or not phone_number_id:
-                    logger.warning(
-                        "WhatsApp credentials not configured on runtime; failing tool cleanly"
+                    operational_event(
+                        RuntimeEvent.CREDENTIALS_MISSING, level="WARNING", provider="whatsapp"
                     )
                     return {
                         "status": "error",
@@ -849,7 +900,9 @@ class NativePipelineHost:
                     "text": {"body": text, "preview_url": False},
                 }
                 try:
-                    logger.info("WHATSAPP sending direct message to {}", recipient)
+                    operational_event(
+                        RuntimeEvent.MESSAGE_STARTED, provider="whatsapp", status="started"
+                    )
                     async with httpx.AsyncClient(timeout=10) as client:
                         resp = await client.post(
                             f"https://graph.facebook.com/{api_version}/{phone_number_id}/messages",
@@ -857,8 +910,11 @@ class NativePipelineHost:
                             headers={"Authorization": f"Bearer {access_token}"},
                         )
                         if resp.status_code >= 400:
-                            logger.error(
-                                "WhatsApp API error: {} {}", resp.status_code, resp.text[:300]
+                            operational_event(
+                                RuntimeEvent.MESSAGE_FAILED,
+                                level="ERROR",
+                                provider="whatsapp",
+                                http_status=resp.status_code,
                             )
                             return {
                                 "status": "error",
@@ -876,7 +932,9 @@ class NativePipelineHost:
                             }
                         data = resp.json()
                         msg_id = (data.get("messages") or [{}])[0].get("id", "unknown")
-                        logger.info("WhatsApp direct message sent successfully: msg_id={}", msg_id)
+                        operational_event(
+                            RuntimeEvent.MESSAGE_ACCEPTED, provider="whatsapp", status="accepted"
+                        )
                         return {
                             "status": "ok",
                             "message_id": msg_id,
@@ -884,7 +942,12 @@ class NativePipelineHost:
                             "_provider_message_id": msg_id,
                         }
                 except Exception as exc:
-                    logger.error("WhatsApp direct message exception: {}", exc)
+                    operational_event(
+                        RuntimeEvent.MESSAGE_FAILED,
+                        level="ERROR",
+                        provider="whatsapp",
+                        error_category=error_category(exc),
+                    )
                     return {
                         "status": "error",
                         "error": "WhatsApp request failed",
@@ -928,8 +991,8 @@ class NativePipelineHost:
                     connection_id=whatsapp_config.get("connection_id"),
                 )
                 if not access_token or not phone_number_id:
-                    logger.warning(
-                        "WhatsApp credentials not configured on runtime; failing tool cleanly"
+                    operational_event(
+                        RuntimeEvent.CREDENTIALS_MISSING, level="WARNING", provider="whatsapp"
                     )
                     return {
                         "status": "error",
@@ -953,7 +1016,7 @@ class NativePipelineHost:
                 )
                 recipient = re.sub(r"[^\d]", "", raw_phone)
                 if not recipient:
-                    logger.warning("No recipient phone number available for WhatsApp dispatch")
+                    operational_event(RuntimeEvent.RECIPIENT_MISSING, level="WARNING")
                     return {"status": "error", "error": "No valid phone number for contact"}
 
                 caller_name = (args.get("caller_name") or contact.get("name") or "there").strip()
@@ -997,7 +1060,9 @@ class NativePipelineHost:
                     }
 
                 try:
-                    logger.info("WHATSAPP sending template '{}' to {}", template_name, recipient)
+                    operational_event(
+                        RuntimeEvent.MESSAGE_STARTED, provider="whatsapp", status="started"
+                    )
                     async with httpx.AsyncClient(timeout=10) as client:
                         resp = await client.post(
                             f"https://graph.facebook.com/{api_version}/{phone_number_id}/messages",
@@ -1005,8 +1070,11 @@ class NativePipelineHost:
                             headers={"Authorization": f"Bearer {access_token}"},
                         )
                         if resp.status_code >= 400:
-                            logger.error(
-                                "WhatsApp API error: {} {}", resp.status_code, resp.text[:300]
+                            operational_event(
+                                RuntimeEvent.MESSAGE_FAILED,
+                                level="ERROR",
+                                provider="whatsapp",
+                                http_status=resp.status_code,
                             )
                             return {
                                 "status": "error",
@@ -1024,7 +1092,9 @@ class NativePipelineHost:
                             }
                         data = resp.json()
                         msg_id = (data.get("messages") or [{}])[0].get("id", "unknown")
-                        logger.info("WhatsApp template sent successfully: msg_id={}", msg_id)
+                        operational_event(
+                            RuntimeEvent.MESSAGE_ACCEPTED, provider="whatsapp", status="accepted"
+                        )
                         result = {
                             "status": "ok",
                             "message_id": msg_id,
@@ -1035,7 +1105,12 @@ class NativePipelineHost:
                             result["media_id"] = header["media_id"]
                         return result
                 except Exception as exc:
-                    logger.error("WhatsApp dispatch exception: {}", exc)
+                    operational_event(
+                        RuntimeEvent.MESSAGE_FAILED,
+                        level="ERROR",
+                        provider="whatsapp",
+                        error_category=error_category(exc),
+                    )
                     return {
                         "status": "error",
                         "error": "WhatsApp request failed",
@@ -1060,7 +1135,7 @@ class NativePipelineHost:
                         from voice_runtime.contracts.cadence import default_jev_questions
 
                         questions = {k: v.model_dump() for k, v in default_jev_questions().items()}
-                    jev_key = getattr(self.settings, "jev_api_key", None) or ""
+                    jev_key = stage_api_key(self.settings, "classifier", "jev") or ""
                     return await run_jev_classification(
                         api_key=jev_key,
                         transcript=kwargs["transcript"],
@@ -1112,7 +1187,11 @@ class NativePipelineHost:
 
                     return await local_callback(name, self.run_id, payload)
                 except Exception as exc:
-                    logger.error("human callback tool failed ({})", type(exc).__name__)
+                    operational_event(
+                        RuntimeEvent.CALLBACK_FAILED,
+                        level="ERROR",
+                        error_category=error_category(exc),
+                    )
                     return {"status": "error", "error": "Callback scheduling service unavailable"}
             if name == "schedule_callback":
                 raw_time = (
@@ -1131,7 +1210,7 @@ class NativePipelineHost:
                     self._snapshot.get("_resolved", {}).get("agent_version") or {}
                 ).get("id")
                 if not contact_id or not agent_version_id:
-                    logger.warning("schedule_callback missing contact_id or agent_version_id")
+                    operational_event(RuntimeEvent.CALLBACK_INVALID, level="WARNING")
                     return {
                         "status": "error",
                         "error": "Contact ID or Agent Version ID not found in session",
@@ -1158,8 +1237,8 @@ class NativePipelineHost:
 
                     try:
                         due_at = resolve_timeframe(raw_time, timezone).start
-                    except SchedulingError as exc:
-                        return {"status": "error", "error": str(exc)}
+                    except SchedulingError:
+                        return {"status": "error", "error": "Callback time could not be resolved"}
                     formatted_time = format_local_callback_time(due_at, timezone)
                     request_key = f"{self.run_id}_{uuid4().hex[:8]}"
                     async with SessionFactory() as session:
@@ -1176,8 +1255,11 @@ class NativePipelineHost:
                         )
                         session.add(cb)
                         await session.commit()
-                        logger.info(
-                            "SCHEDULE_CALLBACK created callback id={} due_at={}", cb.id, due_at
+                        operational_event(
+                            RuntimeEvent.CALLBACK_CREATED,
+                            status="completed",
+                            run_id=opaque_id(self.run_id),
+                            callback_id=opaque_id(cb.id),
                         )
                         return {
                             "status": "ok",
@@ -1186,8 +1268,12 @@ class NativePipelineHost:
                             "message": f"Callback request recorded for {formatted_time}.",
                         }
                 except Exception as exc:
-                    logger.error("schedule_callback failed to persist: {}", exc)
-                    return {"status": "error", "error": f"Failed to persist callback: {exc}"}
+                    operational_event(
+                        RuntimeEvent.CALLBACK_FAILED,
+                        level="ERROR",
+                        error_category=error_category(exc),
+                    )
+                    return {"status": "error", "error": "Failed to persist callback"}
 
             definition = (
                 self._snapshot.get("_resolved", {})
@@ -1227,7 +1313,7 @@ class NativePipelineHost:
 
                     from voice_runtime.contracts.knowledge import RetrievalConfig
 
-                    gemini_key = getattr(self.settings, "gemini_api_key", None) or ""
+                    gemini_key = stage_api_key(self.settings, "embedding", "gemini") or ""
                     retrieval_cfg = RetrievalConfig.model_validate(
                         self._snapshot.get("retrieval", {})
                     )
@@ -1238,8 +1324,12 @@ class NativePipelineHost:
                         hits = await search(db_session, kb_id, query_text, retrieval_cfg, embedder)
                         all_hits.extend(hits)
                 except Exception as exc:
-                    logger.error("RAG search failed for query '{}': {}", query_text, exc)
-                    return {"status": "error", "error": f"Knowledge search failed: {exc}"}
+                    operational_event(
+                        RuntimeEvent.RETRIEVAL_FAILED,
+                        level="ERROR",
+                        error_category=error_category(exc),
+                    )
+                    return {"status": "error", "error": "Knowledge search failed"}
 
                 all_hits.sort(key=lambda h: h.score, reverse=True)
                 top_hits = all_hits[:5]
@@ -1331,7 +1421,9 @@ class NativePipelineHost:
             )
             raise
         except Exception as exc:
-            logger.exception("Background tool {} failed", name)
+            operational_event(
+                RuntimeEvent.TOOL_FAILED, level="ERROR", error_category=error_category(exc)
+            )
             result = {
                 "status": "error",
                 "error": "The operation failed; details are in run diagnostics.",
@@ -1344,8 +1436,8 @@ class NativePipelineHost:
                 category="async_tool_failure",
                 source="runtime",
                 code="async_tool_failed",
-                message=f"Asynchronous tool {name} failed",
-                detail=str(exc)[:500],
+                message="Asynchronous tool execution failed",
+                detail=error_category(exc),
             )
             connection_id = provider_message_id = None
         else:
@@ -1377,13 +1469,13 @@ class NativePipelineHost:
                 provider_message_id=provider_message_id,
             )
         except Exception:
-            logger.exception("Could not persist context outcome for tool {}", name)
+            operational_event(RuntimeEvent.EVIDENCE_FAILED, level="ERROR")
             self.tracker.diagnostic(
                 severity="error",
                 category="context_event_persistence",
                 source="evidence",
                 code="async_result_not_persisted",
-                message=f"Result for asynchronous tool {name} could not be queued for context",
+                message="Asynchronous tool result could not be queued for context",
                 uncertain=False,
             )
 
@@ -1624,7 +1716,7 @@ class NativePipelineHost:
             llm_settings["top_p"] = llm_config["top_p"]
         if llm_config["provider"] == "groq":
             llm = GroqLLMService(
-                api_key=self.settings.groq_api_key,
+                api_key=stage_api_key(self.settings, "llm", "groq"),
                 settings=GroqLLMService.Settings(**llm_settings),
             )
         elif llm_config["provider"] == "gemini":
@@ -1632,7 +1724,7 @@ class NativePipelineHost:
                 raise ValueError("Gemini API key is not configured")
             # Preserve provider-default thinking. No universal disable setting exists.
             llm = GoogleLLMService(
-                api_key=self.settings.gemini_api_key,
+                api_key=stage_api_key(self.settings, "llm", "gemini"),
                 settings=GoogleLLMService.Settings(llm_settings),
             )
         else:
@@ -1654,7 +1746,7 @@ class NativePipelineHost:
                 summary_settings["top_p"] = summary_model["top_p"]
             if summary_provider == "groq":
                 summary_llm = GroqLLMService(
-                    api_key=self.settings.groq_api_key,
+                    api_key=stage_api_key(self.settings, "summarizer", "groq"),
                     settings=GroqLLMService.Settings(
                         **summary_settings,
                         reasoning_effort="none",
@@ -1662,7 +1754,7 @@ class NativePipelineHost:
                 )
             elif summary_provider == "gemini":
                 summary_llm = GoogleLLMService(
-                    api_key=self.settings.gemini_api_key,
+                    api_key=stage_api_key(self.settings, "summarizer", "gemini"),
                     settings=GoogleLLMService.Settings(**summary_settings),
                 )
             else:
@@ -1882,8 +1974,8 @@ class NativePipelineHost:
                 category="tool_failure",
                 source="runtime",
                 code="node_action_failed",
-                message=f"Configured {phase} action failed for node '{node_key}'",
-                metadata={"binding_key": binding_key, "error_type": type(exc).__name__},
+                message="Configured node action failed",
+                metadata={"error_category": error_category(exc)},
             )
             raise
         return False
@@ -1892,10 +1984,15 @@ class NativePipelineHost:
         """A shutdown request does not make a subsequent pipeline failure successful."""
         self.termination.request("pipeline_failure")
         err_msg = getattr(frame, "error", None) or "inspect evidence"
-        logger.warning("Pipeline failed ({})", type(frame).__name__)
-        self.errors.append(f"Pipeline failed: {err_msg}")
+        operational_event(
+            RuntimeEvent.PIPELINE_FAILED,
+            level="WARNING",
+            status="failed",
+            run_id=opaque_id(self.run_id),
+        )
+        self.errors.append("Pipeline failed; inspect structured diagnostics")
         if self.tracker is not None:
-            self.tracker.diagnostic(**text_error_diagnostic(str(err_msg)))
+            self.tracker.diagnostic(**text_error_diagnostic(err_msg))
         await self.worker.cancel()
 
     async def _finish_end_call(self) -> None:
@@ -1988,7 +2085,7 @@ class NativePipelineHost:
                 source="modem",
                 code="termination_status_unavailable",
                 message="Could not read modem state at call termination",
-                detail=str(exc),
+                detail=error_category(exc),
                 uncertain=True,
             )
             return
@@ -2044,7 +2141,7 @@ class NativePipelineHost:
             source="modem",
             code=code,
             message=message,
-            detail=status.last_error,
+            detail=None,
             uncertain=category == "call_termination",
             metadata=metadata,
         )
@@ -2102,9 +2199,7 @@ class NativePipelineHost:
                             )
                             await session.commit()
                     except Exception:
-                        logger.exception(
-                            "Could not finalize pending context events for run {}", self.run_id
-                        )
+                        operational_event(RuntimeEvent.EVIDENCE_FAILED, level="ERROR")
                         if self.tracker:
                             try:
                                 self.tracker.diagnostic(
@@ -2115,9 +2210,7 @@ class NativePipelineHost:
                                     message="Pending asynchronous outcomes could not be finalized at call end",
                                 )
                             except Exception:
-                                logger.exception(
-                                    "Could not record context-event finalization diagnostic"
-                                )
+                                operational_event(RuntimeEvent.EVIDENCE_FAILED, level="ERROR")
             except asyncio.CancelledError as exc:
                 self.termination.request("cancelled")
                 primary_error = exc

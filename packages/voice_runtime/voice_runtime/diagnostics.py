@@ -1,28 +1,61 @@
 import argparse
 import asyncio
 import json
-import re
+import math
 from collections.abc import Mapping
 from typing import Any
 
 from serial.tools import list_ports
 
 from voice_runtime.contracts.diagnostics import diagnostic_dict
+from voice_runtime.safe_logs import error_category
 from voice_runtime.telephony.sim7600 import Sim7600Modem
 
+_PROVIDERS = frozenset({"groq", "gemini", "cartesia", "sarvam", "jev", "whatsapp"})
+_SOURCES = frozenset({"provider", "modem", "transport", "call", "evidence", "runtime"})
+_FAILURES = {
+    "runtime_exception": ("runtime_failure", "Runtime execution failed"),
+    "call_execution_failed": ("runtime_failure", "Call execution failed"),
+    "tool_error": ("tool_failure", "Tool execution failed"),
+    "jev_request_failed": ("provider_request_failed", "Provider request failed"),
+    "whatsapp_request_failed": ("provider_request_failed", "Provider request failed"),
+    "whatsapp_tool_unconfigured": ("tool_configuration", "WhatsApp tool is not configured"),
+    "whatsapp_template_unconfigured": ("tool_configuration", "WhatsApp template is not configured"),
+    "whatsapp_template_invalid": (
+        "tool_configuration",
+        "WhatsApp template configuration is invalid",
+    ),
+    **{
+        f"{provider}_classifier_failed": ("provider_request_failed", "Classifier request failed")
+        for provider in _PROVIDERS
+    },
+}
 
-def _safe_text(value: Any, limit: int = 2000) -> str | None:
-    if value is None:
+
+def _provider(value) -> str:
+    return value if type(value) is str and value in _PROVIDERS else "provider"
+
+
+def _source(value) -> str:
+    return value if type(value) is str and value in _SOURCES else "runtime"
+
+
+def _status(value) -> int | None:
+    return value if type(value) is int and 100 <= value <= 599 else None
+
+
+def _response(exc):
+    try:
+        return getattr(exc, "response", None)
+    except Exception:
         return None
-    text = str(value)
-    text = re.sub(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", text)
-    text = re.sub(r"\b(?:sk|gsk|key|token)[-_][A-Za-z0-9._-]+\b", "[REDACTED]", text)
-    text = re.sub(
-        r"(?i)(api[_ -]?key|access[_ -]?token|password|secret)\s*[:=]\s*[^,;\s]+",
-        r"\1=[REDACTED]",
-        text,
-    )
-    return text[:limit]
+
+
+def _response_status(response):
+    try:
+        return _status(getattr(response, "status_code", None))
+    except Exception:
+        return None
 
 
 def provider_error_diagnostic(
@@ -34,18 +67,19 @@ def provider_error_diagnostic(
     retry_after_seconds: float | None = None,
 ) -> dict:
     """Normalize provider response failures without retaining raw response bodies."""
-    body_map = body if isinstance(body, Mapping) else {}
+    provider = _provider(provider)
+    status_code = _status(status_code)
+    body_map = body if type(body) is dict else {}
     error = body_map.get("error") if body_map else None
-    error_map = error if isinstance(error, Mapping) else {}
-    provider_code = error_map.get("code") or body_map.get("code")
+    error_map = error if type(error) is dict else {}
     provider_message = (
         error_map.get("message")
         or body_map.get("message")
         or body_map.get("error_description")
-        or (body if isinstance(body, str) else None)
+        or (body if type(body) is str else None)
     )
-    failed_generation = error_map.get("failed_generation") or body_map.get("failed_generation")
-    lower = str(provider_message or "").lower()
+    # Content informs classification only. It never becomes persisted detail.
+    lower = provider_message[:2000].lower() if type(provider_message) is str else ""
     if status_code in {401, 403} or (
         status_code is None
         and any(term in lower for term in ("api key", "unauthorized", "forbidden"))
@@ -57,7 +91,7 @@ def provider_error_diagnostic(
             False,
         )
     elif status_code == 429 and any(
-        term in lower for term in ("quota", "credit", "usage limit", "billing")
+        term in lower for term in ("quota", "credits", "credit exhausted", "usage limit", "billing")
     ):
         category, code, message, retryable = (
             "provider_quota_exhausted",
@@ -90,17 +124,14 @@ def provider_error_diagnostic(
         severity="error",
         category=category,
         source="provider",
-        code=str(provider_code or code),
+        code=code,
         message=message,
-        detail=_safe_text(provider_message),
+        detail=None,
         retryable=retryable,
-        provider_request_id=_safe_text(request_id, 255),
+        provider_request_id=None,
         http_status=status_code,
-        retry_after_seconds=retry_after_seconds,
-        metadata={
-            "provider": provider,
-            **({"failed_generation": _safe_text(failed_generation)} if failed_generation else {}),
-        },
+        retry_after_seconds=_retry_after(retry_after_seconds),
+        metadata={"provider": provider},
     )
 
 
@@ -115,8 +146,8 @@ def exception_diagnostic(
     uncertain: bool = False,
 ) -> dict:
     """Normalize an exception for final progress fallback."""
-    response = getattr(exc, "response", None)
-    status_code = getattr(response, "status_code", None)
+    response = _response(exc)
+    status_code = _response_status(response)
     if status_code is not None and source == "provider":
         try:
             body = response.json()
@@ -126,69 +157,68 @@ def exception_diagnostic(
             provider="provider",
             status_code=status_code,
             body=body,
-            request_id=(getattr(response, "headers", {}) or {}).get("x-request-id"),
         )
+    code = code if type(code) is str and code in _FAILURES else "runtime_exception"
+    category, message = _FAILURES[code]
     return diagnostic_dict(
         severity="error",
         category=category,
-        source=source,  # type: ignore[arg-type]
+        source=_source(source),  # type: ignore[arg-type]
         code=code,
         message=message,
-        detail=_safe_text(exc),
-        retryable=retryable,
-        uncertain=uncertain,
+        detail=None,
+        retryable=retryable is True,
+        uncertain=uncertain is True,
+        metadata={"error_category": error_category(exc)},
     )
 
 
 def provider_exception_diagnostic(exc: BaseException, *, provider: str, operation: str) -> dict:
     """Extract safe provider response metadata from SDK exceptions across providers."""
-    response = getattr(exc, "response", None)
-    status_code = getattr(response, "status_code", None)
+    response = _response(exc)
+    status_code = _response_status(response)
     body = None
     if response is not None:
         try:
             body = response.json()
         except Exception:
             body = None
-    headers = getattr(response, "headers", {}) or {}
-    request_id = next(
-        (
-            headers[key]
-            for key in ("x-request-id", "request-id", "x-goog-request-id")
-            if headers.get(key)
-        ),
-        None,
-    )
+    try:
+        retry_after = (getattr(response, "headers", {}) or {}).get("retry-after")
+    except Exception:
+        retry_after = None
     diagnostic = provider_error_diagnostic(
         provider=provider,
         status_code=status_code,
-        body=body if isinstance(body, (Mapping, str)) else str(exc),
-        request_id=request_id,
-        retry_after_seconds=_retry_after(headers.get("retry-after")),
+        body=body,
+        retry_after_seconds=_retry_after(retry_after),
     )
-    diagnostic["metadata"]["operation"] = operation
-    # Some SDK exceptions stringify structured response details (notably Groq's
-    # invalid tool-call error) while hiding the response object.
-    if not diagnostic.get("metadata", {}).get("failed_generation"):
-        match = re.search(r"failed_generation['\"]?\s*[:=]\s*['\"]([^'\"]+)", str(exc), re.I)
-        if match:
-            diagnostic["metadata"]["failed_generation"] = _safe_text(match.group(1))
+    if type(operation) is str and operation in {"llm", "stt", "tts", "classifier", "embedding"}:
+        diagnostic["metadata"]["operation"] = operation
+    diagnostic["metadata"]["error_category"] = error_category(exc)
     return diagnostic
 
 
 def _retry_after(value: Any) -> float | None:
+    if type(value) not in (str, int, float):
+        return None
     try:
-        return max(0.0, min(float(value), 86400.0))
+        number = float(value)
+        return max(0.0, min(number, 86400.0)) if math.isfinite(number) else None
     except (TypeError, ValueError):
         return None
 
 
-def text_error_diagnostic(error: str, *, fallback_source: str = "runtime") -> dict:
+def text_error_diagnostic(error: object, *, fallback_source: str = "runtime") -> dict:
     """Classify provider-shaped pipeline text when an SDK hides HTTP fields."""
-    text = _safe_text(error) or "Runtime execution failed"
-    lower = text.lower()
+    lower = error[:2000].lower() if type(error) is str else ""
+    fallback_source = _source(fallback_source)
     provider = next(
-        (name for name in ("groq", "cartesia", "sarvam", "jev", "whatsapp") if name in lower),
+        (
+            name
+            for name in ("groq", "gemini", "cartesia", "sarvam", "jev", "whatsapp")
+            if name in lower
+        ),
         None,
     )
     if any(term in lower for term in ("tpm", "rate limit", "rate_limit", "throttl")):
@@ -198,7 +228,7 @@ def text_error_diagnostic(error: str, *, fallback_source: str = "runtime") -> di
             source="provider" if provider else fallback_source,  # type: ignore[arg-type]
             code="provider_throttled",
             message=f"{provider or 'Provider'} throttled the request",
-            detail=text,
+            detail=None,
             retryable=True,
             metadata={"provider": provider} if provider else {},
         )
@@ -211,7 +241,7 @@ def text_error_diagnostic(error: str, *, fallback_source: str = "runtime") -> di
             source="provider" if provider else fallback_source,  # type: ignore[arg-type]
             code="provider_quota_exhausted",
             message=f"{provider or 'Provider'} usage limit or quota was reached",
-            detail=text,
+            detail=None,
             retryable=False,
             metadata={"provider": provider} if provider else {},
         )
@@ -222,7 +252,7 @@ def text_error_diagnostic(error: str, *, fallback_source: str = "runtime") -> di
             source="provider" if provider else fallback_source,  # type: ignore[arg-type]
             code="provider_authentication_failed",
             message=f"{provider or 'Provider'} rejected the configured credentials",
-            detail=text,
+            detail=None,
             retryable=False,
             metadata={"provider": provider} if provider else {},
         )
@@ -232,7 +262,7 @@ def text_error_diagnostic(error: str, *, fallback_source: str = "runtime") -> di
         source=fallback_source,  # type: ignore[arg-type]
         code="pipeline_error",
         message="Pipecat pipeline failed",
-        detail=text,
+        detail=None,
     )
 
 
