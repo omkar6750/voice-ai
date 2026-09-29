@@ -281,7 +281,7 @@ async def tool_handlers(_: None = Operator) -> ToolHandlerCatalog:
             },
             {
                 "name": "schedule_callback",
-                "description": "Schedule an automated or operator callback based on caller request or spoken phrases like 'call me back tomorrow'.",
+                "description": "Record a callback request for the contact's local date and time. An operator can launch it from the callback queue; this tool does not place a future call.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -292,6 +292,10 @@ async def tool_handlers(_: None = Operator) -> ToolHandlerCatalog:
                         "reason": {
                             "type": "string",
                             "description": "Brief context or topic for the callback",
+                        },
+                        "timezone": {
+                            "type": "string",
+                            "description": "IANA timezone, required only when the contact timezone is unknown",
                         },
                     },
                     "required": ["time"],

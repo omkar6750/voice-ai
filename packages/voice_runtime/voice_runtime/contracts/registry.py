@@ -131,12 +131,19 @@ _HANDLER_SPECS: tuple[RegisteredHandlerSpec, ...] = (
     ),
     RegisteredHandlerSpec(
         name="schedule_callback",
-        description="Schedule an automated or operator callback based on caller request or spoken phrases.",
+        description=(
+            "Record a callback request for the contact's local date and time. An operator can "
+            "launch the callback from the callback queue; this tool does not place a future call."
+        ),
         parameters={
             "type": "object",
             "properties": {
                 "time": {"type": "string"},
                 "reason": {"type": "string"},
+                "timezone": {
+                    "type": "string",
+                    "description": "IANA timezone, required only when the contact timezone is unknown",
+                },
             },
             "required": ["time"],
         },

@@ -91,7 +91,9 @@ def resolve_timeframe(
             raise SchedulingError("Could not understand the requested callback timeframe")
     date = (current + timedelta(days=day_offset)).date()
     remainder = text.strip()
-    if match := re.search(r"(?:at|after)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", remainder):
+    if match := re.search(
+        r"(?:(?:at|after)\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", remainder
+    ):
         hour, minute, meridiem = int(match.group(1)), int(match.group(2) or 0), match.group(3)
         if meridiem == "pm" and hour < 12:
             hour += 12
@@ -110,6 +112,14 @@ def resolve_timeframe(
     if end <= current:
         raise SchedulingError("The requested callback time is already past")
     return TimeWindow(phrase, start, end, timezone)
+
+
+def format_local_callback_time(value: datetime, timezone: str) -> str:
+    """Format a callback time consistently on Windows and POSIX hosts."""
+    local = value.astimezone(_zone(timezone))
+    hour = local.hour % 12 or 12
+    meridiem = "AM" if local.hour < 12 else "PM"
+    return f"{local:%A} at {hour}:{local.minute:02d} {meridiem} ({timezone})"
 
 
 def generate_slots(
@@ -238,17 +248,35 @@ async def calendar_call(
             "timeZone": kwargs["timezone"],
             "items": [{"id": integration.calendar_id or "primary"}],
         }
-        response = service.freebusy().query(body=body).execute()
-        return [
-            BusyPeriod(datetime.fromisoformat(item["start"]), datetime.fromisoformat(item["end"]))
-            for item in response.get("calendars", {})
-            .get(integration.calendar_id or "primary", {})
-            .get("busy", [])
-        ]
+        try:
+            response = service.freebusy().query(body=body).execute()
+        except Exception as exc:
+            raise SchedulingError("Google Calendar could not verify calendar availability") from exc
+        calendars = response.get("calendars", {})
+        calendar_id = integration.calendar_id or "primary"
+        if calendar_id not in calendars:
+            raise SchedulingError("Google Calendar could not verify calendar availability")
+        calendar = calendars[calendar_id]
+        if calendar.get("errors"):
+            raise SchedulingError("Google Calendar could not verify calendar availability")
+        try:
+            return [
+                BusyPeriod(
+                    datetime.fromisoformat(item["start"]),
+                    datetime.fromisoformat(item["end"]),
+                )
+                for item in calendar.get("busy", [])
+            ]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise SchedulingError("Google Calendar returned invalid availability data") from exc
     if operation == "insert":
-        return service.events().insert(calendarId="primary", body=kwargs["event"]).execute()
+        return service.events().insert(
+            calendarId=integration.calendar_id or "primary", body=kwargs["event"]
+        ).execute()
     if operation == "delete":
-        return service.events().delete(calendarId="primary", eventId=kwargs["event_id"]).execute()
+        return service.events().delete(
+            calendarId=integration.calendar_id or "primary", eventId=kwargs["event_id"]
+        ).execute()
     raise SchedulingError("Unsupported Google Calendar operation")
 
 

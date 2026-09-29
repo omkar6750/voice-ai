@@ -21,11 +21,13 @@ from voice_api.models import (
     Contact,
 )
 from voice_api.models.common import new_id, now
+from voice_api.schemas.calendar import CallbackAvailabilityResponse, CallbackBookingResponse
 from voice_api.services.calendar_service import (
     SCOPES,
     SchedulingError,
     _put_secret,
     calendar_call,
+    format_local_callback_time,
     generate_slots,
     google_flow,
     resolve_timeframe,
@@ -252,7 +254,9 @@ async def disconnect(
     await session.commit()
 
 
-@router.post("/callback-scheduling/availability")
+@router.post(
+    "/callback-scheduling/availability", response_model=CallbackAvailabilityResponse
+)
 async def availability(
     body: AvailabilityRequest, session: AsyncSession = Session, _: None = Operator
 ) -> dict:
@@ -264,11 +268,13 @@ async def availability(
     if not config.enabled or role is None or not role.enabled:
         raise HTTPException(422, "Callback role is not configured")
     candidates = [p for p in config.bookable_people if p.enabled and body.role in p.roles]
+    if not candidates:
+        raise HTTPException(422, "No enabled person is configured for this callback role")
     slots = []
     for person in candidates:
         integration = await session.get(CalendarIntegration, person.calendar_integration_id)
         if integration is None or integration.status != "connected":
-            continue
+            raise HTTPException(503, "A configured callback calendar is unavailable")
         timezone = person.timezone or integration.timezone
         try:
             window = resolve_timeframe(body.timeframe, timezone)
@@ -283,8 +289,8 @@ async def availability(
                 end=window.end,
                 timezone=timezone,
             )
-        except SchedulingError:
-            continue
+        except SchedulingError as exc:
+            raise HTTPException(502, "Google Calendar availability could not be checked") from exc
         for start, end in generate_slots(
             window,
             busy,
@@ -309,7 +315,7 @@ async def availability(
             slots.append(
                 {
                     "slot_id": sign_slot(payload),
-                    "display": start.strftime("%A at %-I:%M %p"),
+                    "display": format_local_callback_time(start, timezone),
                     "_sort": start,
                 }
             )
@@ -324,7 +330,7 @@ async def availability(
     }
 
 
-@router.post("/callback-scheduling/book")
+@router.post("/callback-scheduling/book", response_model=CallbackBookingResponse)
 async def book(body: BookRequest, session: AsyncSession = Session, _: None = Operator) -> dict:
     try:
         payload = verify_slot(body.slot_id)
@@ -340,9 +346,12 @@ async def book(body: BookRequest, session: AsyncSession = Session, _: None = Ope
     if integration is None or integration.status != "connected" or contact is None:
         raise HTTPException(409, "Calendar or contact is unavailable")
     start, end = datetime.fromisoformat(payload["start"]), datetime.fromisoformat(payload["end"])
-    busy = await calendar_call(
-        session, integration, "freebusy", start=start, end=end, timezone=payload["timezone"]
-    )
+    try:
+        busy = await calendar_call(
+            session, integration, "freebusy", start=start, end=end, timezone=payload["timezone"]
+        )
+    except SchedulingError as exc:
+        raise HTTPException(502, "Google Calendar availability could not be checked") from exc
     if busy:
         return {
             "status": "slot_conflict",
@@ -399,6 +408,6 @@ async def book(body: BookRequest, session: AsyncSession = Session, _: None = Ope
     return {
         "status": "confirmed",
         "callback_id": callback.id,
-        "scheduled_time": start.strftime("%A at %-I:%M %p"),
+        "scheduled_time": format_local_callback_time(start, payload["timezone"]),
         "duration_minutes": int((end - start).total_seconds() / 60),
     }

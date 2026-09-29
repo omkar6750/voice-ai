@@ -100,6 +100,35 @@ def render_opening(text: str, state: dict[str, Any]) -> str:
     return _OPENING_PLACEHOLDER.sub(replace, text)
 
 
+def _callback_api_error_result(response: httpx.Response) -> dict[str, str]:
+    """Convert non-2xx callback API responses into a model-visible tool failure."""
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    detail = body.get("detail") if isinstance(body, dict) else None
+    if isinstance(detail, str) and detail.strip():
+        message = detail.strip()[:500]
+    else:
+        message = f"Callback scheduling request failed (HTTP {response.status_code})"
+    return {"status": "error", "error": message}
+
+
+def _callback_api_success_result(response: httpx.Response) -> dict[str, Any]:
+    """Require successful HTTP status and an object result from the callback API."""
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        return _callback_api_error_result(exc.response)
+    try:
+        result = response.json()
+    except ValueError:
+        return {"status": "error", "error": "Callback API returned invalid JSON"}
+    if not isinstance(result, dict):
+        return {"status": "error", "error": "Callback API returned an invalid result"}
+    return result
+
+
 def whatsapp_template_header_component(header: dict[str, Any] | None) -> dict | None:
     """Build Meta's template header component from a pinned provider reference."""
     if header is None:
@@ -328,60 +357,6 @@ async def run_jev_classification(
                 retryable=True,
             ),
         }
-
-
-def _parse_spoken_callback_time(phrase: str) -> datetime:
-    """Parse common spoken natural language date and time phrases into aware UTC datetime."""
-    phrase_lower = phrase.lower()
-    now = datetime.now(UTC)
-    if "hour" in phrase_lower:
-        m = re.search(r"(\d+)\s*hour", phrase_lower)
-        if m:
-            return now + timedelta(hours=int(m.group(1)))
-    target_date = now.date()
-    if "tomorrow" in phrase_lower:
-        target_date += timedelta(days=1)
-    elif "day after tomorrow" in phrase_lower:
-        target_date += timedelta(days=2)
-    elif "next week" in phrase_lower:
-        target_date += timedelta(days=7)
-    else:
-        weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-        for idx, day in enumerate(weekdays):
-            if day in phrase_lower:
-                days_ahead = (idx - target_date.weekday()) % 7
-                if days_ahead == 0:
-                    days_ahead = 7
-                target_date += timedelta(days=days_ahead)
-                break
-    hour, minute = 10, 0
-    if "morning" in phrase_lower:
-        hour, minute = 10, 0
-    elif "afternoon" in phrase_lower:
-        hour, minute = 14, 0
-    elif "evening" in phrase_lower:
-        hour, minute = 17, 0
-    elif "night" in phrase_lower:
-        hour, minute = 19, 0
-
-    match = re.search(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", phrase_lower)
-    if match:
-        h = int(match.group(1))
-        m = int(match.group(2)) if match.group(2) else 0
-        ampm = match.group(3)
-        if ampm == "pm" and h < 12:
-            h += 12
-        elif ampm == "am" and h == 12:
-            h = 0
-        elif not ampm and h < 8:
-            h += 12
-        if 0 <= h <= 23 and 0 <= m <= 59:
-            hour, minute = h, m
-
-    due = datetime(target_date.year, target_date.month, target_date.day, hour, minute, tzinfo=UTC)
-    if due <= now:
-        due += timedelta(days=1)
-    return due
 
 
 class TracedFlowManager(FlowManager):
@@ -1235,9 +1210,9 @@ class NativePipelineHost:
                         response = await client.post(
                             endpoint, json=payload, headers={"Authorization": f"Bearer {token}"}
                         )
-                    return response.json()
+                    return _callback_api_success_result(response)
                 except Exception as exc:
-                    logger.error("human callback tool failed: {}", exc)
+                    logger.error("human callback tool request failed: {}", type(exc).__name__)
                     return {"status": "error", "error": "Callback scheduling service unavailable"}
             if name == "schedule_callback":
                 raw_time = (
@@ -1245,8 +1220,9 @@ class NativePipelineHost:
                     or args.get("when")
                     or args.get("due_at")
                     or args.get("phrase")
-                    or "tomorrow morning"
                 )
+                if not isinstance(raw_time, str) or not raw_time.strip():
+                    return {"status": "error", "error": "A callback date and time are required"}
                 reason = args.get("reason") or "Customer requested callback"
                 contact = (
                     self._snapshot.get("_resolved", {}).get("contact")
@@ -1264,15 +1240,29 @@ class NativePipelineHost:
                         "error": "Contact ID or Agent Version ID not found in session",
                     }
 
-                timezone = contact.get("timezone") or "Asia/Kolkata"
-                due_at = _parse_spoken_callback_time(raw_time)
+                timezone = args.get("timezone") or contact.get("timezone")
+                if not isinstance(timezone, str) or not timezone.strip():
+                    return {
+                        "status": "error",
+                        "error": "The contact timezone is unknown; ask for it before scheduling",
+                    }
 
                 try:
                     from uuid import uuid4
 
                     from voice_api.db.session import SessionFactory
                     from voice_api.models import Callback
+                    from voice_api.services.calendar_service import (
+                        SchedulingError,
+                        format_local_callback_time,
+                        resolve_timeframe,
+                    )
 
+                    try:
+                        due_at = resolve_timeframe(raw_time, timezone).start
+                    except SchedulingError as exc:
+                        return {"status": "error", "error": str(exc)}
+                    formatted_time = format_local_callback_time(due_at, timezone)
                     request_key = f"{self.run_id}_{uuid4().hex[:8]}"
                     async with SessionFactory() as session:
                         cb = Callback(
@@ -1281,8 +1271,9 @@ class NativePipelineHost:
                             agent_version_id=agent_version_id,
                             due_at=due_at,
                             timezone=timezone,
-                            original_phrase=f"{raw_time} ({reason})",
+                            original_phrase=raw_time.strip(),
                             status="scheduled",
+                            reason=reason,
                         )
                         session.add(cb)
                         await session.commit()
@@ -1292,8 +1283,8 @@ class NativePipelineHost:
                         return {
                             "status": "ok",
                             "callback_id": cb.id,
-                            "scheduled_time": due_at.strftime("%A at %I:%M %p UTC"),
-                            "message": f"Callback confirmed for {due_at.strftime('%A at %I:%M %p')}",
+                            "scheduled_time": formatted_time,
+                            "message": f"Callback request recorded for {formatted_time}.",
                         }
                 except Exception as exc:
                     logger.error("schedule_callback failed to persist: {}", exc)
