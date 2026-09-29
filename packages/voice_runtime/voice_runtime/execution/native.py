@@ -337,7 +337,13 @@ def _parse_spoken_callback_time(phrase: str) -> datetime:
 
 class NativePipelineHost:
     def __init__(
-        self, run_id: str, recordings_dir: Path, settings, *, graceful_close_timeout_secs: float = 15
+        self,
+        run_id: str,
+        recordings_dir: Path,
+        settings,
+        *,
+        graceful_close_timeout_secs: float = 15,
+        termination: CallTermination | None = None,
     ) -> None:
         if not math.isfinite(graceful_close_timeout_secs) or graceful_close_timeout_secs <= 0:
             raise ValueError("Graceful close timeout must be finite and positive")
@@ -349,7 +355,7 @@ class NativePipelineHost:
         self.errors: list[str] = []
         self._call_hung_up: bool = False
         self._end_frame_queued = False
-        self.termination = CallTermination()
+        self.termination = termination if termination is not None else CallTermination()
         self._termination_diagnostic_recorded = False
         self._end_task: asyncio.Task | None = None
         self._idle_reprompts = 0

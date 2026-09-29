@@ -403,7 +403,8 @@ async def test_end_browser_session_cleans_up():
         ctx.host.close.assert_awaited_once()
         ctx.request_handler.close.assert_awaited_once()
         assert browser_session.status == "disconnected"
-        assert run.status == "completed"
+        assert run.status == "failed"
+        assert run.final_state["termination"]["cause"] == "caller_hangup"
 
         # Repeated cleanup is safe and does not close resources a second time.
         await end_browser_session(session_id, session_mock)

@@ -28,6 +28,7 @@ from voice_runtime.execution.evidence_client import ApiEvidenceIngestor, Evidenc
 from voice_runtime.execution.exchange import ExchangeTracker
 from voice_runtime.execution.native import NativePipelineHost
 from voice_runtime.execution.spool import DurableSpool
+from voice_runtime.execution.termination import CallTermination, TerminationCause
 
 from voice_api.core.config import Settings
 from voice_api.db.session import SessionFactory
@@ -54,12 +55,17 @@ class BrowserSessionContext:
         self.cleanup_lock = asyncio.Lock()
         self.cleanup_complete = False
         self.disconnect_task: asyncio.Task | None = None
+        self.termination = CallTermination()
         self._resources_lock = asyncio.Lock()
         self._resources_closed = False
         self._cleanup_error: BaseException | None = None
 
     def mark_ended(self) -> None:
         self.is_active = False
+
+    def request_end(self, cause: TerminationCause) -> None:
+        self.termination.request(cause)
+        self.mark_ended()
 
     async def is_still_active(self) -> bool:
         return self.is_active
@@ -103,7 +109,9 @@ class BrowserSessionContext:
                         self._cleanup_error = exc
                 self._resources_closed = True
             if self._cleanup_error is not None:
+                self.termination.summary.cleanup_status = "uncertain"
                 raise self._cleanup_error
+            self.termination.summary.cleanup_status = "confirmed"
 
 
 class BrowserSessionManager:
@@ -311,7 +319,9 @@ async def handle_browser_offer(
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(_transport, _client):
             logger.info("Browser WebRTC client disconnected for session {}", session_id)
-            ctx.mark_ended()
+            ctx.request_end("disconnect_unknown")
+            if ctx.disconnect_task is not None:
+                return
             ctx.disconnect_task = asyncio.create_task(
                 _finalize_browser_disconnect(session_id),
                 name=f"browser-disconnect-{session_id}",
@@ -366,6 +376,7 @@ async def end_browser_session(
 
     ctx = browser_session_manager.get_context(session_id)
     if ctx:
+        ctx.request_end("caller_hangup" if reason == "operator_stop" else "disconnect_unknown")
         await ctx.close_runtime()
         await browser_session_manager.remove_context(session_id)
 
@@ -395,7 +406,20 @@ async def end_browser_session(
                 uncertain=reason != "operator_stop",
             ),
         )
-        run.status = "completed"
+        termination = ctx.termination if ctx else CallTermination()
+        if ctx is None:
+            termination.request(
+                "caller_hangup" if reason == "operator_stop" else "disconnect_unknown"
+            )
+        run.status = termination.summary.execution_status
+        run.final_state = {
+            **(run.final_state or {}),
+            "termination": termination.snapshot(),
+            "evidence_incomplete": bool((run.final_state or {}).get("evidence_incomplete"))
+            or ctx is None,
+        }
+        if run.status == "failed" and not run.error:
+            run.error = f"Browser call ended before normal completion: {termination.summary.cause}"
         if not run.ended_at:
             run.ended_at = now()
 
@@ -433,6 +457,7 @@ async def _run_browser_pipeline(
         run_id=run_id,
         recordings_dir=recordings_dir,
         settings=settings,
+        termination=ctx.termination,
     )
     ctx.host = host
 
@@ -460,17 +485,22 @@ async def _run_browser_pipeline(
     ) as client:
         ingestor = ApiEvidenceIngestor(client, run_id, settings.operator_token or "")
         delivery_task = asyncio.create_task(stream_evidence(spool, ingestor))
-        execution_failed = False
+        final_state: dict[str, Any] = {}
 
         try:
 
-            async def execute_pipeline() -> None:
+            async def execute_pipeline() -> dict:
+                if not ctx.is_active:
+                    return {"termination": ctx.termination.snapshot()}
                 await host.prepare(snapshot, tracker, transport=transport)
-                await host.converse(ctx.is_still_active)
+                return await host.converse(ctx.is_still_active)
 
-            await supervise_execution(execute_pipeline(), delivery_task)
+            final_state = await supervise_execution(execute_pipeline(), delivery_task)
+        except asyncio.CancelledError:
+            ctx.termination.request("cancelled")
+            raise
         except Exception as exc:
-            execution_failed = True
+            ctx.termination.request("pipeline_failure")
             logger.exception("Browser pipeline failed during run {}: {}", run_id, exc)
             async with SessionFactory() as db_session:
                 r = await db_session.get(Run, run_id)
@@ -494,7 +524,6 @@ async def _run_browser_pipeline(
             try:
                 await ctx.close_runtime()
             except Exception:
-                execution_failed = True
                 logger.exception("Browser runtime cleanup failed for run {}", run_id)
             finalization = await finalize_evidence(spool, ingestor, delivery_task)
 
@@ -507,16 +536,24 @@ async def _run_browser_pipeline(
                         DiagnosticInput.model_validate(finalization.diagnostic),
                     )
                 if r and r.status in ("claimed", "running"):
-                    r.status = "failed" if execution_failed else "completed"
-                    r.final_state = {"evidence_incomplete": finalization.incomplete}
-                    if execution_failed and not r.error:
-                        r.error = "Browser pipeline stopped before normal completion"
+                    r.status = ctx.termination.summary.execution_status
+                    if r.status == "failed" and not r.error:
+                        r.error = (
+                            "Browser call ended before normal completion: "
+                            f"{ctx.termination.summary.cause}"
+                        )
                     if not r.ended_at:
                         r.ended_at = now()
-                elif r:
+                if r:
                     r.final_state = {
                         **(r.final_state or {}),
-                        "evidence_incomplete": finalization.incomplete,
+                        **final_state,
+                        "termination": ctx.termination.snapshot(),
+                        "evidence_incomplete": bool(
+                            (r.final_state or {}).get("evidence_incomplete")
+                        )
+                        or finalization.incomplete
+                        or not ctx.cleanup_complete,
                     }
                 bs = await db_session.get(BrowserSession, session_id)
                 if bs and bs.status in ("created", "connecting", "connected"):
@@ -524,6 +561,9 @@ async def _run_browser_pipeline(
                     if not bs.disconnected_at:
                         bs.disconnected_at = now()
                 await db_session.commit()
+
+            if ctx.cleanup_complete:
+                await browser_session_manager.remove_context(session_id)
 
             if host.directory.exists():
                 for kind in ("input", "output", "mixed", "pipeline_log"):
