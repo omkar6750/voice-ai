@@ -79,7 +79,9 @@ class CallTermination:
         if cause in failures or (not graceful and self.summary.pipeline_finished_at_ns is None):
             # Preserve the first failure, but do not mistake an interrupted goodbye
             # for success merely because the agent requested it first.
-            if self.summary.cause not in failures:
+            if self.summary.cause not in failures and (
+                cause in failures or self.summary.mode == "graceful"
+            ):
                 self.summary.cause = cause
             self.summary.mode = "immediate"
             if self.summary.playback_status == "speaking":

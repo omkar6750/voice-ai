@@ -60,6 +60,7 @@ from voice_runtime.execution.exchange import ExchangeTracker, bind_transcripts
 from voice_runtime.execution.observer import EvidenceObserver
 from voice_runtime.execution.speech import build_speech_services as build_speech_services
 from voice_runtime.execution.temporal import resolve_local_time_context
+from voice_runtime.execution.termination import CallTermination
 from voice_runtime.telephony.base import CallState
 
 
@@ -519,6 +520,7 @@ class NativePipelineHost:
         self.errors: list[str] = []
         self._call_hung_up: bool = False
         self._end_frame_queued = False
+        self.termination = CallTermination()
         self._termination_diagnostic_recorded = False
         self._end_task: asyncio.Task | None = None
         self._idle_reprompts = 0
@@ -603,6 +605,7 @@ class NativePipelineHost:
             )
             return
         self._call_hung_up = True
+        self.termination.request("caller_idle_timeout")
         if self.tracker is not None:
             self.tracker.diagnostic(
                 severity="info",
@@ -797,6 +800,7 @@ class NativePipelineHost:
                 if self._call_hung_up:
                     return {"status": "ok"}
                 self._call_hung_up = True
+                self.termination.request("agent_hangup", graceful=True)
                 self.tracker.diagnostic(
                     severity="info",
                     category="call_termination",
@@ -1640,20 +1644,23 @@ class NativePipelineHost:
 
         @self.worker.event_handler("on_pipeline_error")
         async def failed(_worker, frame):
-            if not self._call_hung_up:
-                err_msg = getattr(frame, "error", None) or "inspect evidence"
-                logger.warning("Pipeline error during active call: {}", err_msg)
-                self.errors.append(f"Pipeline failed: {err_msg}")
-                if self.tracker is not None:
-                    diagnostic = text_error_diagnostic(str(err_msg))
-                    self.tracker.diagnostic(**diagnostic)
-            await self.worker.cancel()
+            await self._pipeline_failed(frame)
 
         runner = WorkerRunner(handle_sigint=False, handle_sigterm=False)
         await runner.add_workers(self.worker)
         self.runner_task = asyncio.create_task(runner.run(), name=f"pipeline-{self.run_id}")
         async with asyncio.timeout(15):
             await self.ready.wait()
+
+    async def _pipeline_failed(self, frame) -> None:
+        """A shutdown request does not make a subsequent pipeline failure successful."""
+        self.termination.request("pipeline_failure")
+        err_msg = getattr(frame, "error", None) or "inspect evidence"
+        logger.warning("Pipeline failed ({})", type(frame).__name__)
+        self.errors.append(f"Pipeline failed: {err_msg}")
+        if self.tracker is not None:
+            self.tracker.diagnostic(**text_error_diagnostic(str(err_msg)))
+        await self.worker.cancel()
 
     async def _finish_end_call(self) -> None:
         """Queue graceful shutdown once, after the final end-call tool result."""
@@ -1690,7 +1697,7 @@ class NativePipelineHost:
             return await modem_or_check.state() == CallState.ACTIVE
 
         while self.runner_task and not self.runner_task.done():
-            if self.errors and not self._call_hung_up:
+            if self.errors:
                 raise RuntimeError(self.errors[-1])
             await asyncio.sleep(1)
             if not await _check_active():
@@ -1700,11 +1707,14 @@ class NativePipelineHost:
                 break
         if self.runner_task:
             await self.runner_task
-        if self.errors and not self._call_hung_up:
+        if self.errors:
             raise RuntimeError(self.errors[-1])
-        return {"flow_node": self.flow.current_node}
+        self.termination.pipeline_finished()
+        return {"flow_node": self.flow.current_node, "termination": self.termination.snapshot()}
 
     async def _record_call_termination(self, modem_or_check) -> None:
+        # Liveness alone cannot distinguish a caller hangup from a network drop.
+        self.termination.request("disconnect_unknown")
         if self._termination_diagnostic_recorded or self.tracker is None:
             return
         self._termination_diagnostic_recorded = True
@@ -1792,16 +1802,30 @@ class NativePipelineHost:
 
     async def close(self) -> None:
         try:
+            if (
+                not self.termination.closing
+                and self.termination.summary.pipeline_finished_at_ns is None
+            ):
+                self.termination.request("cancelled")
+            elif self.runner_task and not self.runner_task.done():
+                self.termination.request("cancelled")
             if self.worker:
                 await self.worker.cancel()
             if self.runner_task:
                 await self.runner_task
             if self._end_task:
                 await self._end_task
+        except asyncio.CancelledError:
+            self.termination.request("cancelled")
+            raise
+        except Exception:
+            self.termination.request("pipeline_failure")
+            raise
         finally:
             if self.tracker:
-                self.tracker.end_visit("completed")
-                self.tracker.end_exchange("completed")
+                status = self.termination.summary.evidence_status
+                self.tracker.end_visit(status)
+                self.tracker.end_exchange(status)
             if self.observer:
                 self.observer.close()
             if self.capture:

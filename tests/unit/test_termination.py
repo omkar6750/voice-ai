@@ -99,6 +99,13 @@ def test_late_disconnect_does_not_rewrite_finished_agent_close():
     assert call.summary.execution_status == "completed"
 
 
+def test_cleanup_cancellation_preserves_first_external_cause():
+    call = CallTermination()
+    call.request("caller_hangup")
+    call.request("cancelled")
+    assert call.summary.cause == "caller_hangup"
+
+
 def test_disconnect_escalates_close_but_does_not_rerun_termination():
     call = CallTermination()
     call.request("agent_hangup", graceful=True)
