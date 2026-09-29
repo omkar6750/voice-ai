@@ -14,6 +14,7 @@ from pipecat.frames.frames import (
     InterruptionFrame,
     OutputAudioRawFrame,
 )
+from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from starlette.websockets import WebSocketState
 from voice_runtime.execution.termination import CallTermination
@@ -317,3 +318,20 @@ async def test_cancel_serializer_and_finally_share_one_close_owner():
     await serializer.serialize(CancelFrame())
     await session.close()
     rest.complete.assert_awaited_once()
+
+
+@pytest.mark.parametrize("rate", [8000, 16000, 24000])
+@pytest.mark.asyncio
+async def test_managed_output_matches_stock_codec_at_pipeline_rates(rate):
+    session, _, sent, _ = setup()
+    managed = ManagedTwilioSerializer(session, sample_rate=rate)
+    stock = TwilioFrameSerializer(
+        STREAM, params=TwilioFrameSerializer.InputParams(sample_rate=rate, auto_hang_up=False)
+    )
+    setup_params = SimpleNamespace(audio_in_sample_rate=rate)
+    await managed.setup(setup_params)
+    await stock.setup(setup_params)
+    frame = OutputAudioRawFrame(audio=b"\0\0" * rate, sample_rate=rate, num_channels=1)
+    expected = await stock.serialize(frame)
+    await managed.serialize(frame)
+    assert sent == [json.loads(expected)]
