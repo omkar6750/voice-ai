@@ -294,6 +294,7 @@ export function TestAgentModal() {
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
       });
       pcRef.current = pc;
+      const controlChannel = pc.createDataChannel("chat", { ordered: true });
       const lifecycle = bindBrowserPeerLifecycle(
         pc,
         () => pcRef.current,
@@ -302,6 +303,7 @@ export function TestAgentModal() {
           setCallState("ended");
           cleanupCall();
         },
+        controlChannel,
       );
 
       // Add local audio tracks
