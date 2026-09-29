@@ -16,6 +16,13 @@ from voice_runtime.execution.exchange import ExchangeTracker
 from voice_runtime.execution.spool import BatchIngestor, DurableSpool
 
 
+def runtime_token_for_run(secret: str, run_id: str) -> str:
+    """Match the API's run-scoped internal runtime credential derivation."""
+    import hashlib
+
+    return f"{run_id}.{hashlib.sha256(f'{secret}:{run_id}'.encode()).hexdigest()}"
+
+
 class CallDriver(Protocol):
     async def prepare(self, snapshot: dict, tracker: ExchangeTracker) -> None: ...
     async def call(self, destination: str) -> dict: ...
@@ -39,7 +46,8 @@ async def execute_call(
     if not 0 < heartbeat_seconds <= 20:
         raise ValueError("Heartbeat interval must be within 20 seconds")
     token = str(uuid4())
-    headers = {"X-Voice-Runtime-Token": runtime_service_token}
+    run_runtime_token = runtime_token_for_run(runtime_service_token, run_id)
+    headers = {"X-Voice-Runtime-Token": run_runtime_token}
 
     async def post(suffix: str, body: dict) -> dict:
         if local_post is not None:
@@ -71,7 +79,7 @@ async def execute_call(
     if local_ingestor is not None:
         ingestor = local_ingestor
     elif client is not None:
-        ingestor = ApiEvidenceIngestor(client, run_id, runtime_service_token)
+        ingestor = ApiEvidenceIngestor(client, run_id, run_runtime_token)
     else:
         raise ValueError("HTTP client or local evidence ingestor is required")
 

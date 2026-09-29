@@ -50,6 +50,24 @@ export function OrganizationArea() {
 
   if (pathname.endsWith("/members")) return <Suspense fallback={<main className="p-6" role="status">Loading members…</main>}><OrganizationMembersPage /></Suspense>;
 
+  const settings = pathname.endsWith("/settings");
+
+  if (!settings) return <main className="mx-auto flex max-w-4xl flex-col gap-6 p-6">
+    <div>
+      <p className="text-sm text-muted-foreground">{organization.role === "org:admin" ? "Organization admin" : "Organization member"}{organization.is_owner ? " · Owner" : ""}</p>
+      <h1 className="text-2xl font-semibold">Welcome to {organization.name}</h1>
+      <p className="text-sm text-muted-foreground">Your organization workspace is ready.</p>
+    </div>
+    <Card>
+      <CardHeader><CardTitle>Workspace</CardTitle><CardDescription>Open the tools available to this organization.</CardDescription></CardHeader>
+      <CardContent className="flex flex-wrap gap-3">
+        <Button asChild><Link to="/runs">Open calls</Link></Button>
+        <Button asChild variant="outline"><Link to={`/orgs/${routeOrgId}/members`}>View members</Link></Button>
+        {organization.role === "org:admin" && <Button asChild variant="outline"><Link to={`/orgs/${routeOrgId}/settings`}>Organization settings</Link></Button>}
+      </CardContent>
+    </Card>
+  </main>;
+
   return <main className="mx-auto flex max-w-4xl flex-col gap-6 p-6">
     <div>
       <p className="text-sm text-muted-foreground">{organization.role === "org:admin" ? "Organization admin" : "Organization member"}{organization.is_owner ? " · Owner" : ""}</p>

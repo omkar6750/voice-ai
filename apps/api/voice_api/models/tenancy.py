@@ -97,3 +97,12 @@ class OrganizationAudit(Identity, Base):
     target_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
     action: Mapped[str] = mapped_column(String(80))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ClerkWebhookEvent(Base):
+    """Replay ledger for verified Clerk webhook deliveries."""
+
+    __tablename__ = "clerk_webhook_events"
+
+    event_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -1,6 +1,12 @@
-"""Signed-in identity endpoint and safe organization access summary."""
+"""Signed-in identity endpoint, organization access summary, and Clerk webhooks."""
 
-from fastapi import APIRouter, Depends
+import base64
+import hashlib
+import hmac
+import json
+import time
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -18,6 +24,7 @@ from voice_api.core.security import (
 )
 from voice_api.db.session import get_session
 from voice_api.models import (
+    ClerkWebhookEvent,
     LegacyDataTenant,
     Organization,
     OrganizationCreationClaim,
@@ -33,6 +40,65 @@ Owner = Depends(require_legacy_data_access)
 Session = Depends(get_session)
 Directory = Depends(get_clerk_organization_directory)
 OrganizationAccess = Depends(require_organization_access)
+
+
+def _verify_clerk_webhook(body: bytes, event_id: str | None, timestamp: str | None, signature: str | None) -> bool:
+    secret = get_settings().clerk_webhook_signing_secret
+    if not secret or not event_id or not timestamp or not signature:
+        return False
+    try:
+        timestamp_value = int(timestamp)
+    except ValueError:
+        return False
+    if abs(time.time() - timestamp_value) > 300:
+        return False
+    encoded_secret = secret.removeprefix("whsec_")
+    try:
+        key = base64.b64decode(encoded_secret)
+    except ValueError:
+        return False
+    signed = f"{event_id}.{timestamp}.".encode() + body
+    expected = base64.b64encode(hmac.new(key, signed, hashlib.sha256).digest()).decode()
+    return any(
+        hmac.compare_digest(expected, value.removeprefix("v1,"))
+        for value in signature.split()
+    )
+
+
+@router.post("/clerk/webhook", status_code=204)
+async def clerk_webhook(
+    request: Request,
+    session: AsyncSession = Session,
+    event_id: str | None = Header(default=None, alias="svix-id"),
+    timestamp: str | None = Header(default=None, alias="svix-timestamp"),
+    signature: str | None = Header(default=None, alias="svix-signature"),
+) -> None:
+    body = await request.body()
+    if not _verify_clerk_webhook(body, event_id, timestamp, signature):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid Clerk webhook signature")
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid webhook payload") from exc
+    if not isinstance(payload, dict) or not event_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid webhook payload")
+    inserted = await session.execute(
+        pg_insert(ClerkWebhookEvent)
+        .values(event_id=event_id)
+        .on_conflict_do_nothing(index_elements=[ClerkWebhookEvent.event_id])
+        .returning(ClerkWebhookEvent.event_id)
+    )
+    if inserted.scalar_one_or_none() is None:
+        return
+    if payload.get("type") == "user.deleted":
+        clerk_user_id = (payload.get("data") or {}).get("id")
+        if clerk_user_id:
+            await session.execute(
+                User.__table__.update()
+                .where(User.clerk_user_id == clerk_user_id)
+                .values(disabled_at=func.now())
+            )
+    await session.commit()
 
 
 class AccountOrganization(BaseModel):

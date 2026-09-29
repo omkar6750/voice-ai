@@ -41,6 +41,7 @@ from .operations import (
     ToolInvocationResult,
 )
 from .tenancy import (
+    ClerkWebhookEvent,
     LegacyDataTenant,
     Organization,
     OrganizationAudit,
@@ -64,6 +65,7 @@ __all__ = [
     "Classification",
     "ClassifierContextDelivery",
     "ClassifierResult",
+    "ClerkWebhookEvent",
     "Contact",
     "ContactFact",
     "ContextSummary",

@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/clerk/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Clerk Webhook */
+        post: operations["clerk_webhook_api_v1_auth_clerk_webhook_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/me": {
         parameters: {
             query?: never;
@@ -1814,6 +1831,23 @@ export interface paths {
         post?: never;
         /** Delete Session */
         delete: operations["delete_session_api_v1_browser_sessions__session_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/clerk/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Clerk Webhook */
+        post: operations["clerk_webhook_api_auth_clerk_webhook_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -6177,6 +6211,37 @@ export interface operations {
             };
         };
     };
+    clerk_webhook_api_v1_auth_clerk_webhook_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "svix-id"?: string | null;
+                "svix-timestamp"?: string | null;
+                "svix-signature"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     me_api_v1_auth_me_get: {
         parameters: {
             query?: never;
@@ -8069,7 +8134,9 @@ export interface operations {
     };
     update_endpoint_status_api_v1_runtime_endpoints__endpoint_id__status_post: {
         parameters: {
-            query?: never;
+            query?: {
+                run_id?: string | null;
+            };
             header?: {
                 "X-Voice-Runtime-Token"?: string | null;
             };
@@ -8144,7 +8211,7 @@ export interface operations {
                 "X-Voice-Runtime-Token"?: string | null;
             };
             path: {
-                run_id: string;
+                run_id: string | null;
             };
             cookie?: never;
         };
@@ -8183,7 +8250,7 @@ export interface operations {
                 "X-Voice-Runtime-Token"?: string | null;
             };
             path: {
-                run_id: string;
+                run_id: string | null;
             };
             cookie?: never;
         };
@@ -8255,7 +8322,7 @@ export interface operations {
                 "X-Voice-Runtime-Token"?: string | null;
             };
             path: {
-                run_id: string;
+                run_id: string | null;
             };
             cookie?: never;
         };
@@ -8294,7 +8361,7 @@ export interface operations {
                 "X-Voice-Runtime-Token"?: string | null;
             };
             path: {
-                run_id: string;
+                run_id: string | null;
             };
             cookie?: never;
         };
@@ -8333,7 +8400,7 @@ export interface operations {
                 "X-Voice-Runtime-Token"?: string | null;
             };
             path: {
-                run_id: string;
+                run_id: string | null;
                 visit_id: string;
             };
             cookie?: never;
@@ -8373,7 +8440,7 @@ export interface operations {
                 "X-Voice-Runtime-Token"?: string | null;
             };
             path: {
-                run_id: string;
+                run_id: string | null;
                 invocation_id: string;
             };
             cookie?: never;
@@ -8413,7 +8480,7 @@ export interface operations {
                 "X-Voice-Runtime-Token"?: string | null;
             };
             path: {
-                run_id: string;
+                run_id: string | null;
                 result_id: string;
             };
             cookie?: never;
@@ -8556,7 +8623,7 @@ export interface operations {
                 "X-Voice-Runtime-Token"?: string | null;
             };
             path: {
-                run_id: string;
+                run_id: string | null;
             };
             cookie?: never;
         };
@@ -8680,7 +8747,9 @@ export interface operations {
     };
     schedule_api_v1_callbacks_post: {
         parameters: {
-            query?: never;
+            query?: {
+                run_id?: string | null;
+            };
             header?: {
                 "X-Voice-Runtime-Token"?: string | null;
             };
@@ -9936,7 +10005,9 @@ export interface operations {
     };
     availability_api_v1_callback_scheduling_availability_post: {
         parameters: {
-            query?: never;
+            query?: {
+                run_id?: string | null;
+            };
             header?: {
                 "X-Voice-Runtime-Token"?: string | null;
             };
@@ -9973,7 +10044,9 @@ export interface operations {
     };
     book_api_v1_callback_scheduling_book_post: {
         parameters: {
-            query?: never;
+            query?: {
+                run_id?: string | null;
+            };
             header?: {
                 "X-Voice-Runtime-Token"?: string | null;
             };
@@ -10157,6 +10230,37 @@ export interface operations {
                         [key: string]: unknown;
                     };
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clerk_webhook_api_auth_clerk_webhook_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "svix-id"?: string | null;
+                "svix-timestamp"?: string | null;
+                "svix-signature"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -12061,7 +12165,9 @@ export interface operations {
     };
     update_endpoint_status_api_runtime_endpoints__endpoint_id__status_post: {
         parameters: {
-            query?: never;
+            query?: {
+                run_id?: string | null;
+            };
             header?: {
                 "X-Voice-Runtime-Token"?: string | null;
             };
@@ -12136,7 +12242,7 @@ export interface operations {
                 "X-Voice-Runtime-Token"?: string | null;
             };
             path: {
-                run_id: string;
+                run_id: string | null;
             };
             cookie?: never;
         };
@@ -12175,7 +12281,7 @@ export interface operations {
                 "X-Voice-Runtime-Token"?: string | null;
             };
             path: {
-                run_id: string;
+                run_id: string | null;
             };
             cookie?: never;
         };
@@ -12247,7 +12353,7 @@ export interface operations {
                 "X-Voice-Runtime-Token"?: string | null;
             };
             path: {
-                run_id: string;
+                run_id: string | null;
             };
             cookie?: never;
         };
@@ -12286,7 +12392,7 @@ export interface operations {
                 "X-Voice-Runtime-Token"?: string | null;
             };
             path: {
-                run_id: string;
+                run_id: string | null;
             };
             cookie?: never;
         };
@@ -12325,7 +12431,7 @@ export interface operations {
                 "X-Voice-Runtime-Token"?: string | null;
             };
             path: {
-                run_id: string;
+                run_id: string | null;
                 visit_id: string;
             };
             cookie?: never;
@@ -12365,7 +12471,7 @@ export interface operations {
                 "X-Voice-Runtime-Token"?: string | null;
             };
             path: {
-                run_id: string;
+                run_id: string | null;
                 invocation_id: string;
             };
             cookie?: never;
@@ -12405,7 +12511,7 @@ export interface operations {
                 "X-Voice-Runtime-Token"?: string | null;
             };
             path: {
-                run_id: string;
+                run_id: string | null;
                 result_id: string;
             };
             cookie?: never;
@@ -12548,7 +12654,7 @@ export interface operations {
                 "X-Voice-Runtime-Token"?: string | null;
             };
             path: {
-                run_id: string;
+                run_id: string | null;
             };
             cookie?: never;
         };
@@ -12672,7 +12778,9 @@ export interface operations {
     };
     schedule_api_callbacks_post: {
         parameters: {
-            query?: never;
+            query?: {
+                run_id?: string | null;
+            };
             header?: {
                 "X-Voice-Runtime-Token"?: string | null;
             };
@@ -13928,7 +14036,9 @@ export interface operations {
     };
     availability_api_callback_scheduling_availability_post: {
         parameters: {
-            query?: never;
+            query?: {
+                run_id?: string | null;
+            };
             header?: {
                 "X-Voice-Runtime-Token"?: string | null;
             };
@@ -13965,7 +14075,9 @@ export interface operations {
     };
     book_api_callback_scheduling_book_post: {
         parameters: {
-            query?: never;
+            query?: {
+                run_id?: string | null;
+            };
             header?: {
                 "X-Voice-Runtime-Token"?: string | null;
             };

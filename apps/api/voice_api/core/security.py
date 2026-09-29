@@ -128,11 +128,19 @@ async def require_legacy_data_access(
 require_legacy_owner = require_organization_access
 
 
+def runtime_token_for_run(secret: str, run_id: str) -> str:
+    """Derive a non-transferable runtime credential for one run."""
+    return f"{run_id}.{sha256(f'{secret}:{run_id}'.encode()).hexdigest()}"
+
+
 async def require_runtime_service(
     runtime_token: str | None = Header(default=None, alias="X-Voice-Runtime-Token"),
+    run_id: str | None = None,
 ) -> None:
-    """Authenticate internal runtime writes without a browser/user credential."""
+    """Authenticate runtime writes, scoping run mutations to the addressed run."""
     expected = get_settings().runtime_service_token
+    if run_id is not None and expected:
+        expected = runtime_token_for_run(expected, run_id)
     if not expected or not runtime_token or not compare_digest(runtime_token, expected):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Runtime service access required")
 

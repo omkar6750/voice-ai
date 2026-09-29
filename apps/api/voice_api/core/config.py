@@ -31,6 +31,9 @@ class Settings(BaseSettings):
         default=None, validation_alias="CLERK_PUBLISHABLE_KEY"
     )
     clerk_authorized_parties: str = "http://localhost:5173,http://localhost:8000"
+    clerk_webhook_signing_secret: str | None = Field(
+        default=None, validation_alias="CLERK_WEBHOOK_SIGNING_SECRET"
+    )
     organization_creation_enabled: bool = True
     public_base_url: str | None = None
     gemini_api_key: str | None = None

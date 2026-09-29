@@ -70,6 +70,9 @@ const SettingsPage = lazy(() =>
 const OrganizationMembersPage = lazy(() =>
   import("@/pages/organizations/members").then((page) => ({ default: page.OrganizationMembersPage })),
 );
+const OrganizationArea = lazy(() =>
+  import("@/pages/organizations/area").then((page) => ({ default: page.OrganizationArea })),
+);
 
 
 export function AppRoutes() {
@@ -108,7 +111,9 @@ export function AppRoutes() {
         <Route path="/endpoints" element={<EndpointsPage />} />
 
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/orgs/:orgId" element={<OrganizationArea />} />
         <Route path="/orgs/:orgId/members" element={<OrganizationMembersPage />} />
+        <Route path="/orgs/:orgId/settings" element={<OrganizationArea />} />
         <Route
           path="*"
           element={
