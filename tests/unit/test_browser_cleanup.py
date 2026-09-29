@@ -6,7 +6,6 @@ import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
-
 from voice_api.services.browser_session_service import BrowserSessionContext
 
 
