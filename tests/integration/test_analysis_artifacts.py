@@ -11,7 +11,7 @@ from voice_api.models import ConversationMessage, Exchange, RunArtifact, TraceSp
 from voice_api.models.common import new_id
 
 
-async def create_run(client):
+async def create_run(client, *, logging_override=None):
     config = {
         "name": "test",
         "flow": {"initial_node": "greeting", "nodes": [{"id": "greeting", "terminal": True}]},
@@ -19,7 +19,10 @@ async def create_run(client):
     agent = (await client.post("/api/agents", json={"name": new_id(), "config": config})).json()
     version = agent["version_id"]
     await client.post(f"/api/agent-versions/{version}/publish", json={"revision": 1})
-    return (await client.post("/api/runs", json={"agent_version_id": version})).json()["run_id"]
+    body = {"agent_version_id": version}
+    if logging_override is not None:
+        body["logging_override"] = logging_override
+    return (await client.post("/api/runs", json=body)).json()["run_id"]
 
 
 async def test_analysis_sources_replay_and_failure(client, database):
@@ -65,13 +68,14 @@ async def test_analysis_sources_replay_and_failure(client, database):
     with pytest.raises(IntegrityError):
         async with database.begin_nested():
             await database.execute(
-                text("UPDATE classifications SET verdict='hot' WHERE id=:id"), {"id": body["id"]}
+                text("UPDATE classifications SET verdict='hot' WHERE id=:id AND org_id=:org_id"),
+                {"id": body["id"], "org_id": database.sync_session.info["organization_scope_id"]},
             )
 
 
 async def test_artifact_retention_and_disabled_logs(client, database, tmp_path, monkeypatch):
     monkeypatch.setattr(get_settings(), "recordings_dir", str(tmp_path))
-    run_id = await create_run(client)
+    run_id = await create_run(client, logging_override=False)
     folder = tmp_path / run_id
     folder.mkdir()
     with wave.open(str(folder / "input.wav"), "wb") as audio:
@@ -84,11 +88,11 @@ async def test_artifact_retention_and_disabled_logs(client, database, tmp_path, 
     response = await client.post(path, json=body)
     assert response.status_code == 201, response.text
     assert (await client.get(f"/api/artifacts/{body['id']}/file")).status_code == 200
-    assert (
-        await client.post(
-            path, json={"id": new_id(), "kind": "pipeline_log", "path": f"{run_id}/pipeline.log"}
-        )
-    ).status_code == 409
+    disabled_log = await client.post(
+        path,
+        json={"id": new_id(), "kind": "pipeline_log", "path": f"{run_id}/pipeline.log"},
+    )
+    assert disabled_log.status_code == 409, disabled_log.text
     assert (
         await client.post(path, json={**body, "id": new_id(), "path": "../secret.wav"})
     ).status_code == 422

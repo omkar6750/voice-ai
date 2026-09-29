@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import { useOrganizationAccess } from "@/app/access";
 import type { components } from "@/generated/api";
 import {
   Dialog,
@@ -138,6 +139,7 @@ export function IntegrationDetailPage() {
   const { connectionId = "" } = useParams();
   const [params, setParams] = useSearchParams();
   const api = useApi();
+  const { canManage } = useOrganizationAccess();
   const navigate = useNavigate();
   const {
     data: connection,
@@ -421,6 +423,11 @@ export function IntegrationDetailPage() {
             : "WhatsApp account settings, credentials, and media. Secrets stay write-only on the server."
         }
         action={
+          <Button asChild variant="outline">
+            <Link to="/integrations">All integrations</Link>
+          </Button>
+        }
+        readOnlyAction={
           <div className="flex items-center gap-2">
             <Button asChild variant="outline">
               <Link to="/integrations">All integrations</Link>
@@ -465,7 +472,7 @@ export function IntegrationDetailPage() {
                         : "Meta WhatsApp Business account identifiers and status."}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  {canManage && <div className="flex items-center gap-2">
                     {isTwilio && (
                       <>
                         <Button
@@ -521,7 +528,7 @@ export function IntegrationDetailPage() {
                       <Trash2 className="size-3.5" />
                       Delete
                     </Button>
-                  </div>
+                  </div>}
                 </div>
 
                 <div className="rounded-lg border bg-card p-4">
@@ -853,7 +860,7 @@ export function IntegrationDetailPage() {
                       this Twilio account.
                     </p>
                   </div>
-                  <Button
+                  {canManage && <Button
                     variant="outline"
                     size="sm"
                     disabled={syncBusy}
@@ -864,7 +871,7 @@ export function IntegrationDetailPage() {
                       className={`size-3.5 ${syncBusy ? "animate-spin" : ""}`}
                     />
                     {syncBusy ? "Syncing…" : "Refresh from Twilio"}
-                  </Button>
+                  </Button>}
                 </div>
 
                 {!connection.config.phone_numbers ||
@@ -939,7 +946,7 @@ export function IntegrationDetailPage() {
                       versioned tools to send them during calls.
                     </p>
                   </div>
-                  <Button
+                  {canManage && <Button
                     variant="outline"
                     disabled={templateBusy}
                     onClick={() => void loadTemplates()}
@@ -949,7 +956,7 @@ export function IntegrationDetailPage() {
                       className={`size-3.5 ${templateBusy ? "animate-spin" : ""}`}
                     />
                     {templateBusy ? "Fetching…" : "Sync from Meta"}
-                  </Button>
+                  </Button>}
                 </div>
 
                 {templates === null && (
@@ -1014,7 +1021,7 @@ export function IntegrationDetailPage() {
                               />
                             </TableCell>
                             <TableCell className="text-right">
-                              <Button
+                              {canManage && <Button
                                 size="sm"
                                 variant="secondary"
                                 className="gap-1.5"
@@ -1022,7 +1029,7 @@ export function IntegrationDetailPage() {
                               >
                                 <Wrench className="size-3.5" />
                                 Create Tool
-                              </Button>
+                              </Button>}
                             </TableCell>
                           </TableRow>
                         ))}

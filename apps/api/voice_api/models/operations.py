@@ -16,10 +16,10 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .common import JSONB, Base, Created, Identity
+from .common import JSONB, Base, Created, Identity, OrganizationOwned
 
 
-class FlowNodeVisit(Identity, Created, Base):
+class FlowNodeVisit(Identity, Created, OrganizationOwned, Base):
     __tablename__ = "flow_node_visits"
     __table_args__ = (
         UniqueConstraint("run_id", "sequence"),
@@ -44,7 +44,7 @@ class FlowNodeVisit(Identity, Created, Base):
     triggered_by_tool_id: Mapped[str | None] = mapped_column(String(36), index=True)
 
 
-class ToolInvocationResult(Identity, Created, Base):
+class ToolInvocationResult(Identity, Created, OrganizationOwned, Base):
     __tablename__ = "tool_invocation_results"
     __table_args__ = (
         UniqueConstraint("tool_invocation_id", "sequence"),
@@ -78,7 +78,7 @@ class ToolInvocationResult(Identity, Created, Base):
     consumed_exchange_id: Mapped[str | None] = mapped_column(String(36), index=True)
 
 
-class ToolContextDelivery(Identity, Created, Base):
+class ToolContextDelivery(Identity, Created, OrganizationOwned, Base):
     """Proof that a result entered context and, optionally, which LLM consumed it."""
 
     __tablename__ = "tool_context_deliveries"
@@ -106,7 +106,7 @@ class ToolContextDelivery(Identity, Created, Base):
     consuming_span_id: Mapped[str | None] = mapped_column(String(36), index=True)
 
 
-class ClassifierResult(Identity, Created, Base):
+class ClassifierResult(Identity, Created, OrganizationOwned, Base):
     """The finalized result of an automatic entry or exit classifier run."""
 
     __tablename__ = "classifier_results"
@@ -132,7 +132,7 @@ class ClassifierResult(Identity, Created, Base):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
-class ClassifierContextDelivery(Identity, Created, Base):
+class ClassifierContextDelivery(Identity, Created, OrganizationOwned, Base):
     """Proof that a classifier result reached a subsequent LLM context."""
 
     __tablename__ = "classifier_context_deliveries"
@@ -158,7 +158,7 @@ class ClassifierContextDelivery(Identity, Created, Base):
     consuming_operation_id: Mapped[str | None] = mapped_column(String(36), index=True)
 
 
-class RunContextEvent(Identity, Created, Base):
+class RunContextEvent(Identity, Created, OrganizationOwned, Base):
     """Durable asynchronous outcome queued for the next caller-driven inference."""
 
     __tablename__ = "run_context_events"
@@ -198,7 +198,7 @@ class RunContextEvent(Identity, Created, Base):
     consuming_span_id: Mapped[str | None] = mapped_column(String(36))
 
 
-class InterruptionEvent(Identity, Created, Base):
+class InterruptionEvent(Identity, Created, OrganizationOwned, Base):
     """Causal interruption marker linking a frame to cancelled work."""
 
     __tablename__ = "interruption_events"
@@ -213,7 +213,7 @@ class InterruptionEvent(Identity, Created, Base):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
-class RunDiagnostic(Identity, Created, Base):
+class RunDiagnostic(Identity, Created, OrganizationOwned, Base):
     __tablename__ = "run_diagnostics"
     __table_args__ = (
         Index("ix_run_diagnostics_occurred_at", "occurred_at"),

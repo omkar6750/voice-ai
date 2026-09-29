@@ -3,20 +3,33 @@ from datetime import datetime
 from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .common import JSONB, Base, Created, Identity, Updated, now
+from .common import JSONB, Base, Created, Identity, OrganizationOwned, Updated, now
 
 
-class IntegrationConnection(Identity, Updated, Base):
+class IntegrationConnection(Identity, Updated, OrganizationOwned, Base):
     __tablename__ = "integration_connections"
-    __table_args__ = ()
-    label: Mapped[str] = mapped_column(String(120), unique=True)
+    __table_args__ = (
+        UniqueConstraint("org_id", "label", name="uq_integration_connections_org_label"),
+    )
+    label: Mapped[str] = mapped_column(String(120))
     provider: Mapped[str] = mapped_column(String(60))
     config: Mapped[dict] = mapped_column(JSONB, default=dict)
     enabled: Mapped[bool] = mapped_column(default=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class InboundWebhookMessage(Identity, Created, Base):
+class ProviderCredential(Identity, Updated, OrganizationOwned, Base):
+    """Encrypted AI-provider credential owned by exactly one organization."""
+
+    __tablename__ = "provider_credentials"
+    __table_args__ = (UniqueConstraint("org_id", "provider", name="uq_provider_credentials_org"),)
+    provider: Mapped[str] = mapped_column(String(40))
+    ciphertext: Mapped[str] = mapped_column(Text)
+    key_id: Mapped[str] = mapped_column(String(80))
+    updated_by_clerk_user_id: Mapped[str] = mapped_column(String(128))
+
+
+class InboundWebhookMessage(Identity, Created, OrganizationOwned, Base):
     __tablename__ = "inbound_webhook_messages"
     __table_args__ = ()
     connection_id: Mapped[str | None] = mapped_column(
@@ -28,7 +41,7 @@ class InboundWebhookMessage(Identity, Created, Base):
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 
 
-class IntegrationSecret(Identity, Base):
+class IntegrationSecret(Identity, OrganizationOwned, Base):
     __tablename__ = "integration_secrets"
     __table_args__ = (UniqueConstraint("connection_id", "name"),)
     connection_id: Mapped[str] = mapped_column(ForeignKey("integration_connections.id"))
@@ -38,7 +51,7 @@ class IntegrationSecret(Identity, Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
 
-class IntegrationMedia(Identity, Base):
+class IntegrationMedia(Identity, OrganizationOwned, Base):
     __tablename__ = "integration_media"
     __table_args__ = (UniqueConstraint("connection_id", "provider_media_id"),)
     connection_id: Mapped[str] = mapped_column(ForeignKey("integration_connections.id"))
@@ -56,7 +69,7 @@ class IntegrationMedia(Identity, Base):
     last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class CalendarIntegration(Identity, Updated, Base):
+class CalendarIntegration(Identity, Updated, OrganizationOwned, Base):
     __tablename__ = "calendar_integrations"
     provider: Mapped[str] = mapped_column(String(40), default="google_calendar")
     display_name: Mapped[str] = mapped_column(String(120))
@@ -70,7 +83,7 @@ class CalendarIntegration(Identity, Updated, Base):
     last_error: Mapped[str | None] = mapped_column(Text)
 
 
-class CalendarIntegrationSecret(Identity, Base):
+class CalendarIntegrationSecret(Identity, OrganizationOwned, Base):
     __tablename__ = "calendar_integration_secrets"
     __table_args__ = (UniqueConstraint("calendar_integration_id", "name"),)
     calendar_integration_id: Mapped[str] = mapped_column(
@@ -82,7 +95,7 @@ class CalendarIntegrationSecret(Identity, Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 
 
-class CalendarOAuthState(Identity, Base):
+class CalendarOAuthState(Identity, OrganizationOwned, Base):
     __tablename__ = "calendar_oauth_states"
     state_hash: Mapped[str] = mapped_column(String(64), unique=True)
     calendar_integration_id: Mapped[str] = mapped_column(

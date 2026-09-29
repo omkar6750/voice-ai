@@ -18,3 +18,7 @@
 | [ADR-0025](docs/adr/ADR-0025-callback-role-routing.md) | The model selects a configured callback role; the backend chooses the available person/calendar | Accepted |
 | [ADR-0026](docs/adr/ADR-0026-nonblocking-classifier-outcomes.md) | Only `classify_lead` is nonblocking; outcomes are injected before the next caller-turn LLM inference | Accepted |
 | [ADR-0027](docs/adr/ADR-0027-remove-unused-wait-settings.md) | Remove inert wait settings; runtime handlers define execution timing | Accepted |
+| [ADR-0029 browser transport](docs/adr/ADR-0029-browser-test-websocket-transport.md) | Use Pipecat WebSocket for single browser test calls | Accepted |
+| [ADR-0028 Clerk history](docs/adr/ADR-0028-clerk-organizations-workspaces-and-access.md) | Earlier nested tenant proposal | Superseded by Clerk org-only ADR |
+| [ADR-0030 Clerk history](docs/adr/ADR-0030-clerk-basic-org-access-for-demo.md) | Earlier basic-org/nested-tenant proposal | Superseded by Clerk org-only ADR |
+| [ADR-0031 Clerk org-only](docs/adr/ADR-0031-clerk-organization-is-tenant.md) | Make Clerk Organization the only customer tenant; org-scope all data and record platform admin in DB | Accepted |

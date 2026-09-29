@@ -4,7 +4,6 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.models import BrowserSession, Run
@@ -16,11 +15,11 @@ from voice_runtime.execution.native import NativePipelineHost
 @pytest.fixture
 def browser_runtime(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
-    ctx = service.BrowserSessionContext("session", "run", {})
-    ctx.request_handler = AsyncMock()
+    ctx = service.BrowserSessionContext("session", "run", {}, "org-test")
     run = Run(id="run", status="running", resolved_config={}, final_state={"prior": "kept"})
     browser = BrowserSession(id="session", run_id="run", status="connected")
     db = AsyncMock(spec=AsyncSession)
+    db.sync_session = SimpleNamespace(info={}, identity_map={})
 
     async def get(model, _id, **_kwargs):
         return {Run: run, BrowserSession: browser}.get(model)
@@ -33,7 +32,8 @@ def browser_runtime(monkeypatch, tmp_path):
     monkeypatch.setattr(service, "persist_diagnostic", AsyncMock())
     monkeypatch.setattr(service, "DurableSpool", MagicMock())
     monkeypatch.setattr(service, "ExchangeTracker", MagicMock())
-    monkeypatch.setattr(service, "ApiEvidenceIngestor", MagicMock())
+    monkeypatch.setattr(service, "settings_for_organization", AsyncMock(side_effect=lambda _session, _org, base: base))
+    monkeypatch.setattr(service, "register_local_artifacts", AsyncMock(return_value=[]))
     manager = service.BrowserSessionManager()
     manager._sessions[ctx.session_id] = ctx
     monkeypatch.setattr(service, "browser_session_manager", manager)
@@ -59,7 +59,6 @@ def browser_runtime(monkeypatch, tmp_path):
     monkeypatch.setattr(service, "finalize_evidence", finalize)
     settings = SimpleNamespace(
         recordings_dir=str(tmp_path),
-        operator_token="test-token",
         groq_api_key="",
         jev_api_key="",
         sarvam_api_key="",
@@ -85,7 +84,7 @@ def browser_runtime(monkeypatch, tmp_path):
 
 
 def test_native_host_can_share_browser_termination(tmp_path):
-    ctx = service.BrowserSessionContext("session", "run", {})
+    ctx = service.BrowserSessionContext("session", "run", {}, "org-test")
     host = NativePipelineHost("run", tmp_path, None, termination=ctx.termination)
     assert host.termination is ctx.termination
     ctx.request_end("caller_hangup")
@@ -170,7 +169,6 @@ async def test_external_stop_joins_pipeline_and_preserves_cause(browser_runtime,
     assert runtime.run.final_state["termination"]["cause"] == cause
     assert runtime.run.final_state["termination"]["cleanup_status"] == "confirmed"
     runtime.host.close.assert_awaited_once()
-    runtime.ctx.request_handler.close.assert_awaited_once()
 
 
 async def test_cleanup_failure_is_separate_from_completed_call(browser_runtime):
@@ -187,7 +185,6 @@ async def test_cleanup_failure_is_separate_from_completed_call(browser_runtime):
     assert runtime.run.status == "completed"
     assert runtime.run.final_state["termination"]["cleanup_status"] == "uncertain"
     assert runtime.run.final_state["evidence_incomplete"]
-    runtime.ctx.request_handler.close.assert_awaited_once()
     assert runtime.manager.get_context("session") is runtime.ctx
 
 
@@ -225,22 +222,13 @@ async def test_stop_before_pipeline_start_does_not_initialize_providers(browser_
 
 
 @pytest.mark.parametrize("call_failed", [False, True])
-@pytest.mark.parametrize("registration", [201, 302, 500, "timeout"])
+@pytest.mark.parametrize("artifact_failed", [False, True])
 async def test_artifact_registration_reports_failure_without_changing_call_outcome(
-    browser_runtime, monkeypatch, call_failed, registration
+    browser_runtime, call_failed, artifact_failed
 ):
     runtime = browser_runtime
-    runtime.host.directory.mkdir()
-    (runtime.host.directory / "input.wav").write_bytes(b"test input")
-    (runtime.host.directory / "output.wav").write_bytes(b"test output")
-    request = httpx.Request("POST", "http://runtime.local/api/runs/run/artifacts")
-    first = (
-        httpx.ReadTimeout("unsafe-secret-value")
-        if registration == "timeout"
-        else httpx.Response(registration, text="unsafe-secret-value", request=request)
-    )
-    post = AsyncMock(side_effect=[first, httpx.Response(201, request=request)])
-    monkeypatch.setattr(httpx.AsyncClient, "post", post)
+    registration = service.register_local_artifacts
+    registration.return_value = ["input"] if artifact_failed else []
 
     async def converse(_check):
         if call_failed:
@@ -254,18 +242,16 @@ async def test_artifact_registration_reports_failure_without_changing_call_outco
 
     assert runtime.run.status == ("failed" if call_failed else "completed")
     if call_failed:
-        assert "original pipeline failure" in runtime.run.error
-    failed_registration = registration != 201
-    assert runtime.run.final_state["artifacts_incomplete"] is failed_registration
-    assert runtime.run.final_state["evidence_incomplete"] is failed_registration
-    assert post.await_count == 2  # Independent files continue; failed writes are not retried.
-    assert [call.kwargs["json"]["kind"] for call in post.await_args_list] == ["input", "output"]
+        assert runtime.run.error == "Pipeline execution failed; inspect structured diagnostics"
+        assert "original pipeline failure" not in runtime.run.error
+    assert runtime.run.final_state["artifacts_incomplete"] is artifact_failed
+    assert runtime.run.final_state["evidence_incomplete"] is artifact_failed
+    registration.assert_awaited_once()
     diagnostics = [
         call.args[2]
         for call in service.persist_diagnostic.await_args_list
         if call.args[2].code == "artifact_registration_failed"
     ]
-    assert len(diagnostics) == int(failed_registration)
+    assert len(diagnostics) == int(artifact_failed)
     if diagnostics:
         assert diagnostics[0].metadata == {"kind": "input"}
-        assert "unsafe-secret-value" not in diagnostics[0].model_dump_json()

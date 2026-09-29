@@ -57,8 +57,8 @@ def _has_callback_evidence(call: Call) -> bool:
 def validate_twilio_dispatch_settings(settings: Any) -> str:
     """Reject invalid deployment settings before creating a queued request."""
     public_base_url = _canonical_public_base_url(settings.public_base_url)
-    if not settings.operator_token:
-        raise HTTPException(422, "Twilio dispatch requires the operator token")
+    if not settings.runtime_service_token:
+        raise HTTPException(422, "Twilio dispatch requires the runtime service token")
     return public_base_url
 
 

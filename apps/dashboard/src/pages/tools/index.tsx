@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { AlertTriangle, Lock, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import { useOrganizationAccess } from "@/app/access";
 import type { components } from "@/generated/api";
 import { LoadState, PageBody, PageHeader } from "@/components/record-page";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +31,7 @@ type ToolImpact = components["schemas"]["ToolImpactResponse"];
 
 export function ToolsPage() {
   const api = useApi();
+  const { canManage } = useOrganizationAccess();
   const { data, loading, error, reload } = useResource<{ tools: Tool[] }>(
     "/tools",
   );
@@ -126,7 +128,7 @@ export function ToolsPage() {
                       <Button asChild variant="link">
                         <Link to={`/tools/${tool.id}`}>Versions</Link>
                       </Button>
-                      {!isSystemTool && (
+                      {canManage && !isSystemTool && (
                         <Button
                           variant="ghost"
                           size="icon-sm"

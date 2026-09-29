@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import { AdminOnly } from "@/app/access";
 import { Button } from "@/components/ui/button";
 import {
   Field,
@@ -72,7 +73,7 @@ export function SecretsPanel({
           </Button>
         ))}
       </div>
-      <form onSubmit={save}>
+      <AdminOnly><form onSubmit={save}>
         <FieldGroup>
           <Field>
             <FieldLabel htmlFor="integration-secret">
@@ -94,7 +95,7 @@ export function SecretsPanel({
         <Button className="mt-4" type="submit" disabled={busy || !value}>
           {busy ? "Saving…" : "Save credential"}
         </Button>
-      </form>
+      </form></AdminOnly>
     </section>
   );
 }

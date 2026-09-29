@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import { useOrganizationAccess } from "@/app/access";
 import { ReadOnlyValue } from "@/components/record-page";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -16,6 +17,7 @@ export function IngestionPanel({
   saved: () => Promise<unknown>;
 }) {
   const api = useApi();
+  const { canManage } = useOrganizationAccess();
   const [name, setName] = useState(base.name);
   const [config, setConfig] = useState(base.config);
   const [busy, setBusy] = useState(false);
@@ -48,6 +50,7 @@ export function IngestionPanel({
           explicitly.
         </p>
       </div>
+      <fieldset disabled={!canManage}>
       <FieldGroup>
         <Field>
           <FieldLabel htmlFor="base-name">Name</FieldLabel>
@@ -126,6 +129,7 @@ export function IngestionPanel({
           />
         </Field>
       </FieldGroup>
+      </fieldset>
       <div>
         <ReadOnlyValue
           label="Embedding provider"
@@ -143,7 +147,7 @@ export function IngestionPanel({
           reason="Fixed by current ingestion contract."
         />
       </div>
-      <Button
+      {canManage && <Button
         className="self-start"
         type="submit"
         disabled={
@@ -151,7 +155,7 @@ export function IngestionPanel({
         }
       >
         {busy ? "Saving…" : "Save settings"}
-      </Button>
+      </Button>}
     </form>
   );
 }

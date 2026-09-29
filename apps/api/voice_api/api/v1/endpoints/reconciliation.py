@@ -7,12 +7,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from voice_api.api.deps import get_session, require_operator
+from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.core.security import safe_evidence
 from voice_api.models import Call, Callback, Run, RuntimeEndpoint
 from voice_runtime.contracts.base import ConfigModel
 
-router = APIRouter(tags=["reconciliation"], dependencies=[Depends(require_operator)])
+router = APIRouter(tags=["reconciliation"], dependencies=[Depends(require_legacy_owner)])
 Session = Depends(get_session)
 
 

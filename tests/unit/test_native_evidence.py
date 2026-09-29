@@ -409,7 +409,7 @@ async def test_call_dispatch_leaves_claim_to_executor(monkeypatch):
             pass
 
     monkeypatch.setattr(calls, "queue_call", queue)
-    monkeypatch.setattr(calls, "get_settings", lambda: SimpleNamespace(operator_token="test"))
+    monkeypatch.setattr(calls, "get_settings", lambda: SimpleNamespace(runtime_service_token=None))
     monkeypatch.setattr(
         calls, "_spawn_call_task", lambda run, endpoint: spawned.append((run, endpoint))
     )

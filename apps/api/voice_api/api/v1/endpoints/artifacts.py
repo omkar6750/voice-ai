@@ -11,14 +11,16 @@ from fastapi.responses import FileResponse
 from pydantic import Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from voice_api.api.deps import get_session, require_operator
+from voice_api.api.deps import get_session, require_legacy_owner, require_runtime_service
 from voice_api.core.config import get_settings
+from voice_api.core.security import allow_organization_member
+from voice_api.db.tenant_scope import bind_run_organization
 from voice_api.models import Run
 from voice_api.models.artifacts import RunArtifact
 from voice_api.services.artifact_service import artifact_path, file_metadata
 from voice_runtime.contracts.base import ConfigModel
 
-router = APIRouter(tags=["artifacts"], dependencies=[Depends(require_operator)])
+router = APIRouter(tags=["artifacts"])
 Session = Depends(get_session)
 
 
@@ -28,8 +30,11 @@ class ArtifactBody(ConfigModel):
     path: str
 
 
-@router.post("/runs/{run_id}/artifacts", status_code=201)
+@router.post(
+    "/runs/{run_id}/artifacts", status_code=201, dependencies=[Depends(require_runtime_service)]
+)
 async def register(run_id: str, body: ArtifactBody, session: AsyncSession = Session) -> dict:
+    await bind_run_organization(session, run_id)
     run = await session.get(Run, run_id, with_for_update=True)
     if run is None:
         raise HTTPException(404, "Run not found")
@@ -67,7 +72,8 @@ async def register(run_id: str, body: ArtifactBody, session: AsyncSession = Sess
     return {"id": row.id, "expires_at": row.expires_at}
 
 
-@router.get("/runs/{run_id}/artifacts")
+@router.get("/runs/{run_id}/artifacts", dependencies=[Depends(require_legacy_owner)])
+@allow_organization_member
 async def list_artifacts(run_id: str, session: AsyncSession = Session) -> dict:
     rows = (
         await session.scalars(
@@ -90,7 +96,8 @@ async def list_artifacts(run_id: str, session: AsyncSession = Session) -> dict:
     }
 
 
-@router.get("/artifacts/{artifact_id}/file")
+@router.get("/artifacts/{artifact_id}/file", dependencies=[Depends(require_legacy_owner)])
+@allow_organization_member
 async def download(artifact_id: str, session: AsyncSession = Session):
     row = await session.get(RunArtifact, artifact_id)
     if row is None:
@@ -106,7 +113,7 @@ async def download(artifact_id: str, session: AsyncSession = Session):
     return FileResponse(path, filename=path.name)
 
 
-@router.post("/artifacts/expire")
+@router.post("/artifacts/expire", dependencies=[Depends(require_legacy_owner)])
 async def expire(session: AsyncSession = Session) -> dict:
     now = datetime.now(UTC)
     rows = (

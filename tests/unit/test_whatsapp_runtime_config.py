@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from voice_api.services.vault_service import CredentialVault
@@ -28,6 +29,10 @@ async def test_pinned_runtime_config_uses_connection_secret_without_global_setti
     monkeypatch,
 ) -> None:
     import voice_api.db.session
+    import voice_api.db.tenant_scope
+
+    bind = AsyncMock()
+    monkeypatch.setattr(voice_api.db.tenant_scope, "bind_run_organization", bind)
 
     connection = SimpleNamespace(
         id="connection-1",
@@ -50,11 +55,14 @@ async def test_pinned_runtime_config_uses_connection_secret_without_global_setti
     monkeypatch.delenv("VOICE_WHATSAPP_PHONE_NUMBER_ID", raising=False)
 
     host = object.__new__(NativePipelineHost)
+    host.run_id = "run-1"
     host.settings = SimpleNamespace(
         whatsapp_access_token=None,
         whatsapp_phone_number_id=None,
     )
     resolved = await host._whatsapp_runtime_config(connection_id="connection-1")
+    bind.assert_awaited_once()
+    assert bind.await_args.args[1] == "run-1"
     assert resolved == (
         "connection-token",
         "123456",

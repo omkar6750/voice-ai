@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import DateTime, String, func
+from sqlalchemy import DateTime, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,6 +18,12 @@ def now() -> datetime:
 
 class Identity:
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+
+
+class OrganizationOwned:
+    """Tenant-owned records must always belong to exactly one organization."""
+
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=False)
 
 
 class Created:

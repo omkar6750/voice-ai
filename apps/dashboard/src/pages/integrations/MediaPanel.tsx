@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import { AdminOnly } from "@/app/access";
 import type { components } from "@/generated/api";
 import { LoadState, StatusBadge } from "@/components/record-page";
 import { Button } from "@/components/ui/button";
@@ -155,7 +156,7 @@ export function MediaPanel({ connectionId }: { connectionId: string }) {
             safe metadata only; no image bytes are retained locally.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <AdminOnly><div className="flex flex-wrap gap-2">
           <Input
             className="max-w-56"
             value={uploadName}
@@ -184,7 +185,7 @@ export function MediaPanel({ connectionId }: { connectionId: string }) {
           >
             Add existing Meta ID
           </Button>
-        </div>
+        </div></AdminOnly>
       </div>
       <LoadState
         loading={loading}
@@ -225,7 +226,7 @@ export function MediaPanel({ connectionId }: { connectionId: string }) {
                     · {item.status}
                   </p>
                 </div>
-                <div className="flex flex-wrap justify-end gap-1">
+                <AdminOnly><div className="flex flex-wrap justify-end gap-1">
                   <Button
                     type="button"
                     size="sm"
@@ -257,13 +258,13 @@ export function MediaPanel({ connectionId }: { connectionId: string }) {
                   >
                     Delete from Meta
                   </Button>
-                </div>
+                </div></AdminOnly>
               </CardContent>
             </Card>
           ))}
         </div>
       </LoadState>
-      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+      <AdminOnly><Dialog open={importOpen} onOpenChange={setImportOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add existing Meta media</DialogTitle>
@@ -415,7 +416,7 @@ export function MediaPanel({ connectionId }: { connectionId: string }) {
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </Dialog></AdminOnly>
     </section>
   );
 }

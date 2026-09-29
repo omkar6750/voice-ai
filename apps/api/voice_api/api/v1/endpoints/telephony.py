@@ -11,12 +11,14 @@ from starlette.websockets import WebSocketState
 from voice_api.api.deps import get_session
 from voice_api.core.config import get_settings
 from voice_api.db.session import SessionFactory
+from voice_api.db.tenant_scope import bind_call_organization
 from voice_api.services.call_service import (
     apply_twilio_call_status,
     apply_twilio_stream_status,
     claim_twilio_media,
     get_by_correlation_id,
 )
+from voice_api.services.provider_credentials import settings_for_run
 from voice_api.services.twilio_runtime_service import (
     finalize_twilio_startup_failure,
     run_twilio_pipeline,
@@ -37,6 +39,7 @@ Session = Depends(get_session)
 
 
 async def _authenticated_callback(session, correlation_id, request, *, stream: bool):
+    await bind_call_organization(session, correlation_id)
     call = await get_by_correlation_id(session, correlation_id)
     if call is None or call.provider != "twilio":
         raise HTTPException(404, "Call not found")
@@ -44,7 +47,10 @@ async def _authenticated_callback(session, correlation_id, request, *, stream: b
         session, call.telephony_connection_id, require_enabled=False
     )
     form = await request.form()
-    urls = PublicTelephonyUrls(get_settings().public_base_url or "")
+    public_base_url = get_settings().public_base_url
+    if not public_base_url:
+        raise HTTPException(503, "Twilio public URL is not configured")
+    urls = PublicTelephonyUrls(public_base_url)
     url = (
         urls.twilio_stream_status(correlation_id)
         if stream
@@ -124,6 +130,11 @@ async def twilio_stream_status(
 @router.websocket("/twilio/media/{correlation_id}")
 async def twilio_media_endpoint(websocket: WebSocket, correlation_id: str) -> None:
     async with SessionFactory() as session:
+        try:
+            await bind_call_organization(session, correlation_id)
+        except HTTPException:
+            await websocket.close(code=1008)
+            return
         call = await get_by_correlation_id(session, correlation_id)
         if (
             call is None
@@ -181,6 +192,7 @@ async def twilio_media_endpoint(websocket: WebSocket, correlation_id: str) -> No
     media = TwilioMediaSession(stream_sid, CallTermination(), websocket.send_json, rest)
     try:
         async with SessionFactory() as session:
+            await bind_call_organization(session, correlation_id)
             snapshot = await claim_twilio_media(
                 session,
                 call_id=call_id,
@@ -223,7 +235,7 @@ async def twilio_media_endpoint(websocket: WebSocket, correlation_id: str) -> No
             snapshot=snapshot,
             transport=transport,
             media=media,
-            settings=settings,
+            settings=await settings_for_run(run_id, settings),
             auth_token=credentials.auth_token,
         )
     except asyncio.CancelledError:

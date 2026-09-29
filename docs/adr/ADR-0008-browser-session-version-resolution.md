@@ -1,6 +1,6 @@
 # ADR-0008 · Browser-session version resolution and idempotent cleanup
 
-Status: Accepted
+Status: Accepted (transport/handler details superseded by ADR-0029)
 Date: 2026-09-27
 Related: [PLAN-0008](../plan/PLAN-0008-browser-session-regression.md), [ADR-0006](ADR-0006-versioned-configuration.md), [ADR-0007](ADR-0007-exchanges-and-integration-secrets.md)
 

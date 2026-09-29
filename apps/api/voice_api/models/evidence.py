@@ -14,10 +14,10 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .common import JSONB, Base, Created, Identity, now
+from .common import JSONB, Base, Created, Identity, OrganizationOwned, now
 
 
-class Run(Identity, Created, Base):
+class Run(Identity, Created, OrganizationOwned, Base):
     __tablename__ = "runs"
     __table_args__ = (
         Index("ix_runs_status_created", "status", "created_at"),
@@ -48,7 +48,7 @@ class Run(Identity, Created, Base):
     error: Mapped[str | None] = mapped_column(Text)
 
 
-class Call(Identity, Created, Base):
+class Call(Identity, Created, OrganizationOwned, Base):
     __tablename__ = "calls"
     __table_args__ = (UniqueConstraint("run_id"),)
     # Missing legacy creation timestamps stay unknown; new rows use DB time.
@@ -76,7 +76,7 @@ class Call(Identity, Created, Base):
     from_number: Mapped[str | None] = mapped_column(String(50))
 
 
-class BrowserSession(Identity, Created, Base):
+class BrowserSession(Identity, Created, OrganizationOwned, Base):
     __tablename__ = "browser_sessions"
     __table_args__ = (UniqueConstraint("run_id"),)
 
@@ -92,7 +92,7 @@ class BrowserSession(Identity, Created, Base):
     connection_id: Mapped[str | None] = mapped_column(String(255))
 
 
-class Exchange(Identity, Created, Base):
+class Exchange(Identity, Created, OrganizationOwned, Base):
     __tablename__ = "exchanges"
     __table_args__ = (
         UniqueConstraint("call_id", "sequence"),
@@ -108,7 +108,7 @@ class Exchange(Identity, Created, Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class ConversationMessage(Identity, Created, Base):
+class ConversationMessage(Identity, Created, OrganizationOwned, Base):
     __tablename__ = "conversation_messages"
     __table_args__ = (
         Index("ix_conversation_messages_exchange_id_run_id", "exchange_id", "run_id"),
@@ -131,7 +131,7 @@ class ConversationMessage(Identity, Created, Base):
     playback_ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class TraceSpan(Identity, Base):
+class TraceSpan(Identity, OrganizationOwned, Base):
     __tablename__ = "trace_spans"
     __table_args__ = (
         ForeignKeyConstraint(
@@ -197,7 +197,7 @@ class TraceSpan(Identity, Base):
     attributes: Mapped[dict] = mapped_column(JSONB, default=dict)
 
 
-class ToolInvocation(Identity, Base):
+class ToolInvocation(Identity, OrganizationOwned, Base):
     __tablename__ = "tool_invocations"
     __table_args__ = (
         ForeignKeyConstraint(
@@ -242,7 +242,7 @@ class ToolInvocation(Identity, Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class Callback(Identity, Created, Base):
+class Callback(Identity, Created, OrganizationOwned, Base):
     __tablename__ = "callbacks"
     __table_args__ = (
         Index(

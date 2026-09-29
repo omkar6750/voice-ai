@@ -5,10 +5,10 @@ from datetime import datetime
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from .common import JSONB, Base, Created, Identity
+from .common import JSONB, Base, Created, Identity, OrganizationOwned
 
 
-class Classification(Identity, Created, Base):
+class Classification(Identity, Created, OrganizationOwned, Base):
     __tablename__ = "classifications"
     __table_args__ = (
         ForeignKeyConstraint(["operation_id", "run_id"], ["trace_spans.id", "trace_spans.run_id"]),
@@ -27,7 +27,7 @@ class Classification(Identity, Created, Base):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
-class ContextSummary(Identity, Created, Base):
+class ContextSummary(Identity, Created, OrganizationOwned, Base):
     __tablename__ = "context_summaries"
     __table_args__ = (
         ForeignKeyConstraint(["operation_id", "run_id"], ["trace_spans.id", "trace_spans.run_id"]),
@@ -39,7 +39,7 @@ class ContextSummary(Identity, Created, Base):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
-class ContactFact(Identity, Created, Base):
+class ContactFact(Identity, Created, OrganizationOwned, Base):
     __tablename__ = "contact_facts"
     contact_id: Mapped[str] = mapped_column(ForeignKey("contacts.id"), index=True)
     run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)

@@ -9,16 +9,20 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useOrganizationAccess } from "@/app/access";
 
 export function PageHeader({
   title,
   description,
   action,
+  readOnlyAction,
 }: {
   title: string;
   description?: string;
   action?: ReactNode;
+  readOnlyAction?: ReactNode;
 }) {
+  const { canManage } = useOrganizationAccess();
   return (
     <header className="flex flex-wrap items-start justify-between gap-4 border-b pb-5">
       <div className="min-w-0">
@@ -27,7 +31,7 @@ export function PageHeader({
           <p className="mt-1 text-sm text-muted-foreground">{description}</p>
         )}
       </div>
-      {action}
+      {canManage ? action : readOnlyAction}
     </header>
   );
 }

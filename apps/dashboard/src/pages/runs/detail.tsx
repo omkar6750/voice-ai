@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useAuth } from "@clerk/react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Activity, ArrowLeft, FileAudio, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
-import { useApi, useOperatorToken } from "@/app/api";
+import { requestBlob, useApi, useSupportSession } from "@/app/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -35,7 +36,8 @@ import type {
 } from "./types";
 
 function AudioTrack({ artifact }: { artifact: Artifact }) {
-  const token = useOperatorToken();
+  const { getToken } = useAuth();
+  const supportSession = useSupportSession();
   const [url, setUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(
@@ -47,15 +49,10 @@ function AudioTrack({ artifact }: { artifact: Artifact }) {
   async function load() {
     setBusy(true);
     try {
-      const response = await fetch(
-        "/api/v1/artifacts/" + artifact.id + "/file",
-        {
-          headers: { Authorization: "Bearer " + token },
-        },
-      );
-      if (!response.ok)
-        throw new Error("Audio unavailable (" + response.status + ")");
-      setUrl(URL.createObjectURL(await response.blob()));
+      const sessionToken = await getToken();
+      if (!sessionToken) throw new Error("Sign in required");
+      const blob = await requestBlob(sessionToken, "/artifacts/" + artifact.id + "/file", supportSession);
+      setUrl(URL.createObjectURL(blob));
     } catch (cause) {
       toast.error(
         cause instanceof Error ? cause.message : "Could not load audio",
@@ -98,21 +95,17 @@ function AudioTrack({ artifact }: { artifact: Artifact }) {
 }
 
 function PipelineDebugLog({ artifact }: { artifact: Artifact }) {
-  const token = useOperatorToken();
+  const { getToken } = useAuth();
+  const supportSession = useSupportSession();
   const [content, setContent] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   async function load() {
     setBusy(true);
     try {
-      const response = await fetch(
-        "/api/v1/artifacts/" + artifact.id + "/file",
-        {
-          headers: { Authorization: "Bearer " + token },
-        },
-      );
-      if (!response.ok)
-        throw new Error("Pipeline log unavailable (" + response.status + ")");
-      setContent(await response.text());
+      const sessionToken = await getToken();
+      if (!sessionToken) throw new Error("Sign in required");
+      const blob = await requestBlob(sessionToken, "/artifacts/" + artifact.id + "/file", supportSession);
+      setContent(await blob.text());
     } catch (cause) {
       toast.error(
         cause instanceof Error ? cause.message : "Could not load pipeline log",

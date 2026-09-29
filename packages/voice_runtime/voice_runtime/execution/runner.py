@@ -1,6 +1,7 @@
 """One claimed call: fence before effects, renew ownership, always release transport first."""
 
 import asyncio
+import hashlib
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Protocol
@@ -13,8 +14,12 @@ from voice_runtime.diagnostics import diagnostic_dict, exception_diagnostic
 from voice_runtime.execution.delivery import finalize_evidence, stream_evidence
 from voice_runtime.execution.evidence_client import ApiEvidenceIngestor
 from voice_runtime.execution.exchange import ExchangeTracker
-from voice_runtime.execution.spool import DurableSpool
+from voice_runtime.execution.spool import BatchIngestor, DurableSpool
 from voice_runtime.execution.termination import TerminationSummary
+
+
+def runtime_token_for_run(secret: str, run_id: str) -> str:
+    return f"{run_id}.{hashlib.sha256(f'{secret}:{run_id}'.encode()).hexdigest()}"
 
 
 class CallDriver(Protocol):
@@ -24,8 +29,8 @@ class CallDriver(Protocol):
 
 
 async def execute_call(
-    client: httpx.AsyncClient,
-    operator_token: str,
+    client: httpx.AsyncClient | None,
+    runtime_service_token: str,
     run_id: str,
     endpoint_id: str,
     driver: CallDriver,
@@ -34,13 +39,20 @@ async def execute_call(
     heartbeat_seconds: float = 20,
     secrets: tuple[str, ...] = (),
     after_close: Callable[[], Awaitable[None]] | None = None,
+    local_post: Callable[[str, dict], Awaitable[dict]] | None = None,
+    local_ingestor: BatchIngestor | None = None,
 ) -> str:
     if not 0 < heartbeat_seconds <= 20:
         raise ValueError("Heartbeat interval must be within 20 seconds")
     token = str(uuid4())
-    headers = {"Authorization": f"Bearer {operator_token}"}
+    run_runtime_token = runtime_token_for_run(runtime_service_token, run_id)
+    headers = {"X-Voice-Runtime-Token": run_runtime_token}
 
     async def post(suffix: str, body: dict) -> dict:
+        if local_post is not None:
+            return await local_post(suffix, body)
+        if client is None:
+            raise ValueError("HTTP client or local control service is required")
         response = await client.post(
             f"/api/runs/{run_id}/{suffix}",
             json=body,
@@ -63,7 +75,12 @@ async def execute_call(
     released, incomplete = False, False
     call_task = heartbeat_task = delivery_task = None
     spool = None
-    ingestor = ApiEvidenceIngestor(client, run_id, operator_token)
+    if local_ingestor is not None:
+        ingestor = local_ingestor
+    elif client is not None:
+        ingestor = ApiEvidenceIngestor(client, run_id, run_runtime_token)
+    else:
+        raise ValueError("HTTP client or local evidence ingestor is required")
 
     async def heartbeat():
         while True:
@@ -79,7 +96,8 @@ async def execute_call(
     try:
         heartbeat_task = asyncio.create_task(heartbeat())
         spool = DurableSpool(spool_path)
-        tracker = ExchangeTracker(run_id, spool, secrets=(*secrets, operator_token))
+        redacted_secrets = (*secrets, runtime_service_token) if runtime_service_token else secrets
+        tracker = ExchangeTracker(run_id, spool, secrets=redacted_secrets)
         delivery_task = asyncio.create_task(stream_evidence(spool, ingestor))
         call_task = asyncio.create_task(work())
         done, _ = await asyncio.wait(
@@ -113,10 +131,15 @@ async def execute_call(
                 )
     except Exception as exc:
         outcome = "failed"
-        logger.exception("Call task raised exception during run {}: {}", run_id, exc)
-        error = f"Call execution failed: {exc}"
+        logger.error("Call task failed for run {} ({})", run_id, type(exc).__name__)
+        error = "Call execution failed; inspect structured diagnostics"
         diagnostics.append(
-            exception_diagnostic(exc, code="call_execution_failed", message="Call execution failed")
+            {
+                **exception_diagnostic(
+                    exc, code="call_execution_failed", message="Call execution failed"
+                ),
+                "detail": type(exc).__name__,
+            }
         )
     except asyncio.CancelledError:
         error = "Call execution cancelled"

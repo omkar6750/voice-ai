@@ -10,8 +10,10 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from voice_api.api.deps import get_session, require_operator
+from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.core.config import get_settings
+from voice_api.core.security import allow_organization_member
+from voice_api.db.tenant_scope import bind_integration_organization, bind_organization
 from voice_api.models import (
     AgentVersion,
     AgentVersionTool,
@@ -43,7 +45,7 @@ from voice_api.services.whatsapp_service import WhatsAppAdapter, _inbound_window
 router = APIRouter(tags=["integrations"])
 Session = Depends(get_session)
 
-Operator = Depends(require_operator)
+Operator = Depends(require_legacy_owner)
 MAX_WHATSAPP_IMAGE_BYTES = 5 * 1024 * 1024
 ALLOWED_WHATSAPP_IMAGE_TYPES = {"image/png", "image/jpeg"}
 
@@ -146,6 +148,7 @@ async def whatsapp(session: AsyncSession, connection: IntegrationConnection) -> 
 
 
 @router.get("/integrations")
+@allow_organization_member
 async def list_connections(session: AsyncSession = Session, _: None = Operator) -> dict:
     connections = (
         await session.scalars(select(IntegrationConnection).order_by(IntegrationConnection.label))
@@ -274,6 +277,7 @@ async def delete_connection(
 
 
 @router.get("/integrations/{connection_id}")
+@allow_organization_member
 async def get_connection(
     connection_id: str,
     session: AsyncSession = Session,
@@ -432,6 +436,7 @@ async def rotate_secrets(
 
 
 @router.get("/integrations/{connection_id}/media", response_model=MediaListResponse)
+@allow_organization_member
 async def list_media(
     connection_id: str,
     session: AsyncSession = Session,
@@ -754,6 +759,7 @@ async def verify_media(
 
 
 @router.get("/integrations/{connection_id}/templates")
+@allow_organization_member
 async def templates(
     connection_id: str,
     session: AsyncSession = Session,
@@ -953,7 +959,11 @@ async def verify_webhook(
     request: Request,
     session: AsyncSession = Session,
 ) -> PlainTextResponse:
-    await connection_or_404(session, connection_id)
+    await bind_integration_organization(session, connection_id)
+    connection = await connection_or_404(session, connection_id)
+    if not connection.org_id:
+        raise HTTPException(404, "Integration connection not found")
+    bind_organization(session.sync_session, connection.org_id)
     verify = await secret_value(session, connection_id, "verify_token")
     if request.query_params.get("hub.mode") != "subscribe" or not compare_digest(
         request.query_params.get("hub.verify_token", "").encode(), verify.encode()
@@ -966,7 +976,11 @@ async def verify_webhook(
 async def receive_webhook(
     connection_id: str, request: Request, session: AsyncSession = Session
 ) -> None:
+    await bind_integration_organization(session, connection_id)
     connection = await connection_or_404(session, connection_id)
+    if not connection.org_id:
+        raise HTTPException(404, "Integration connection not found")
+    bind_organization(session.sync_session, connection.org_id)
     body = await request.body()
     signature = request.headers.get("X-Hub-Signature-256")
     app_secret = await secret_value(session, connection_id, "app_secret")

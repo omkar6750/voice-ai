@@ -20,6 +20,11 @@ ACCOUNT, SID, STREAM = "AC" + "a" * 32, "CA" + "b" * 32, "MZ" + "c" * 32
 BASE, CORR, RUN, TOKEN = "https://voice.example.com", "corr", "run", "fake-token"
 
 
+@pytest.fixture(autouse=True)
+def scoped_call_bootstrap(monkeypatch):
+    monkeypatch.setattr(telephony, "bind_call_organization", AsyncMock(return_value="org-test"))
+
+
 def make_call():
     return Call(
         id="call",
@@ -36,7 +41,7 @@ def make_call():
 @pytest.mark.parametrize(
     "scenario,expected",
     [
-        ("no_base", 403),
+        ("no_base", 503),
         ("wrong_account", 409),
         ("wrong_call", 409),
         ("no_signature", 403),
@@ -210,8 +215,10 @@ def websocket_setup(*, signature=True, custom=None, claim=True):
             new=AsyncMock(return_value=(None, TwilioCredentials(ACCOUNT, TOKEN))),
         )
     )
+    settings = SimpleNamespace(public_base_url=BASE)
+    stack.enter_context(patch.object(telephony, "get_settings", return_value=settings))
     stack.enter_context(
-        patch.object(telephony, "get_settings", return_value=SimpleNamespace(public_base_url=BASE))
+        patch.object(telephony, "settings_for_run", new=AsyncMock(return_value=settings))
     )
     stack.enter_context(patch.object(telephony, "TwilioRestCall", return_value=rest))
     stack.enter_context(patch.object(telephony, "claim_twilio_media", new=claim_fn))

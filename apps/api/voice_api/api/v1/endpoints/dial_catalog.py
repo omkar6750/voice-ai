@@ -3,11 +3,11 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from voice_api.api.deps import get_session, require_operator
+from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.models import Agent, AgentVersion, Run, RuntimeEndpoint
 from voice_api.schemas.execution import EndpointConfig
 
-router = APIRouter(tags=["calls"], dependencies=[Depends(require_operator)])
+router = APIRouter(tags=["calls"], dependencies=[Depends(require_legacy_owner)])
 Session = Depends(get_session)
 
 

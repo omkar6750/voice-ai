@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { CalendarClock, PhoneCall, Play } from "lucide-react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
+import { AdminOnly, useOrganizationAccess } from "@/app/access";
 import {
   LoadState,
   PageBody,
@@ -72,10 +73,11 @@ type DialOptions = {
 
 export function CallbacksPage() {
   const api = useApi();
+  const { canManage } = useOrganizationAccess();
   const [filter, setFilter] = useState<string>("all");
   const url = filter === "all" ? "/callbacks" : `/callbacks?status=${filter}`;
   const { data, loading, error, reload } = useResource<CallbacksResponse>(url);
-  const dialOptions = useResource<DialOptions>("/dial-options");
+  const dialOptions = useResource<DialOptions>("/dial-options", canManage);
 
   const [selectedCallback, setSelectedCallback] =
     useState<CallbackRecord | null>(null);
@@ -228,7 +230,7 @@ export function CallbacksPage() {
                   <StatusBadge value={cb.status} />
                 </TableCell>
                 <TableCell className="text-right">
-                  {cb.status === "scheduled" ? (
+                  {cb.status === "scheduled" && canManage ? (
                     <Button
                       size="sm"
                       variant="outline"
@@ -257,7 +259,7 @@ export function CallbacksPage() {
       </LoadState>
 
       {/* Manual Launch Sheet */}
-      <Sheet
+      <AdminOnly><Sheet
         open={Boolean(selectedCallback)}
         onOpenChange={(open) => !open && setSelectedCallback(null)}
       >
@@ -326,7 +328,7 @@ export function CallbacksPage() {
             </div>
           )}
         </SheetContent>
-      </Sheet>
+      </Sheet></AdminOnly>
     </PageBody>
   );
 }
