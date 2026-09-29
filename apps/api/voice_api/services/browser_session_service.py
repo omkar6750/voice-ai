@@ -22,7 +22,7 @@ from pipecat.transports.smallwebrtc.request_handler import (
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from voice_runtime.diagnostics import text_error_diagnostic
+from voice_runtime.diagnostics import diagnostic_dict, text_error_diagnostic
 from voice_runtime.execution.delivery import finalize_evidence, stream_evidence, supervise_execution
 from voice_runtime.execution.evidence_client import ApiEvidenceIngestor, EvidenceDeliveryError
 from voice_runtime.execution.exchange import ExchangeTracker
@@ -525,10 +525,42 @@ async def _run_browser_pipeline(
                 await ctx.close_runtime()
             except Exception:
                 logger.exception("Browser runtime cleanup failed for run {}", run_id)
+            artifact_diagnostics: list[DiagnosticInput] = []
+            if host.directory.exists():
+                for kind in ("input", "output", "mixed", "pipeline_log"):
+                    filename = "pipeline.log" if kind == "pipeline_log" else f"{kind}.wav"
+                    if not (host.directory / filename).is_file():
+                        continue
+                    try:
+                        response = await client.post(
+                            f"/api/runs/{run_id}/artifacts",
+                            headers=headers,
+                            json={
+                                "id": str(uuid5(NAMESPACE_URL, f"{run_id}/{kind}")),
+                                "kind": kind,
+                                "path": f"{run_id}/{filename}",
+                            },
+                        )
+                        response.raise_for_status()
+                    except Exception:
+                        artifact_diagnostics.append(
+                            DiagnosticInput.model_validate(
+                                diagnostic_dict(
+                                    severity="error",
+                                    category="artifact_failure",
+                                    source="runtime",
+                                    code="artifact_registration_failed",
+                                    message="Browser call artifact could not be registered",
+                                    metadata={"kind": kind},
+                                )
+                            )
+                        )
             finalization = await finalize_evidence(spool, ingestor, delivery_task)
 
             async with SessionFactory() as db_session:
                 r = await db_session.get(Run, run_id)
+                for diagnostic in artifact_diagnostics:
+                    await persist_diagnostic(db_session, run_id, diagnostic)
                 if finalization.diagnostic:
                     await persist_diagnostic(
                         db_session,
@@ -553,7 +585,12 @@ async def _run_browser_pipeline(
                             (r.final_state or {}).get("evidence_incomplete")
                         )
                         or finalization.incomplete
-                        or not ctx.cleanup_complete,
+                        or not ctx.cleanup_complete
+                        or bool(artifact_diagnostics),
+                        "artifacts_incomplete": bool(
+                            (r.final_state or {}).get("artifacts_incomplete")
+                        )
+                        or bool(artifact_diagnostics),
                     }
                 bs = await db_session.get(BrowserSession, session_id)
                 if bs and bs.status in ("created", "connecting", "connected"):
@@ -564,21 +601,3 @@ async def _run_browser_pipeline(
 
             if ctx.cleanup_complete:
                 await browser_session_manager.remove_context(session_id)
-
-            if host.directory.exists():
-                for kind in ("input", "output", "mixed", "pipeline_log"):
-                    filename = "pipeline.log" if kind == "pipeline_log" else f"{kind}.wav"
-                    if not (host.directory / filename).is_file():
-                        continue
-                    try:
-                        await client.post(
-                            f"/api/runs/{run_id}/artifacts",
-                            headers=headers,
-                            json={
-                                "id": str(uuid5(NAMESPACE_URL, f"{run_id}/{kind}")),
-                                "kind": kind,
-                                "path": f"{run_id}/{filename}",
-                            },
-                        )
-                    except Exception:
-                        pass

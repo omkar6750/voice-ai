@@ -4,6 +4,7 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.models import BrowserSession, Run
@@ -221,3 +222,50 @@ async def test_stop_before_pipeline_start_does_not_initialize_providers(browser_
     runtime.host.converse.assert_not_awaited()
     assert runtime.run.status == "failed"
     assert runtime.run.final_state["termination"]["cause"] == "caller_hangup"
+
+
+@pytest.mark.parametrize("call_failed", [False, True])
+@pytest.mark.parametrize("registration", [201, 302, 500, "timeout"])
+async def test_artifact_registration_reports_failure_without_changing_call_outcome(
+    browser_runtime, monkeypatch, call_failed, registration
+):
+    runtime = browser_runtime
+    runtime.host.directory.mkdir()
+    (runtime.host.directory / "input.wav").write_bytes(b"test input")
+    (runtime.host.directory / "output.wav").write_bytes(b"test output")
+    request = httpx.Request("POST", "http://runtime.local/api/runs/run/artifacts")
+    first = (
+        httpx.ReadTimeout("unsafe-secret-value")
+        if registration == "timeout"
+        else httpx.Response(registration, text="unsafe-secret-value", request=request)
+    )
+    post = AsyncMock(side_effect=[first, httpx.Response(201, request=request)])
+    monkeypatch.setattr(httpx.AsyncClient, "post", post)
+
+    async def converse(_check):
+        if call_failed:
+            raise RuntimeError("original pipeline failure")
+        runtime.ctx.termination.request("terminal_completed", graceful=True)
+        runtime.ctx.termination.pipeline_finished()
+        return {"termination": runtime.ctx.termination.snapshot()}
+
+    runtime.host.converse.side_effect = converse
+    await runtime.execute()
+
+    assert runtime.run.status == ("failed" if call_failed else "completed")
+    if call_failed:
+        assert "original pipeline failure" in runtime.run.error
+    failed_registration = registration != 201
+    assert runtime.run.final_state["artifacts_incomplete"] is failed_registration
+    assert runtime.run.final_state["evidence_incomplete"] is failed_registration
+    assert post.await_count == 2  # Independent files continue; failed writes are not retried.
+    assert [call.kwargs["json"]["kind"] for call in post.await_args_list] == ["input", "output"]
+    diagnostics = [
+        call.args[2]
+        for call in service.persist_diagnostic.await_args_list
+        if call.args[2].code == "artifact_registration_failed"
+    ]
+    assert len(diagnostics) == int(failed_registration)
+    if diagnostics:
+        assert diagnostics[0].metadata == {"kind": "input"}
+        assert "unsafe-secret-value" not in diagnostics[0].model_dump_json()
