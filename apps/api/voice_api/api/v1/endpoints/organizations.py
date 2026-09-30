@@ -110,6 +110,8 @@ async def joined_organizations(
     directory: ClerkOrganizationDirectory = Directory,
 ) -> list[OrganizationView]:
     raise HTTPException(410, "Organization lists are managed by Clerk")
+
+
 @router.post("", status_code=201, response_model=OrganizationView)
 async def create_organization(
     body: CreateOrganizationBody,
@@ -226,7 +228,9 @@ async def provision_existing_organization(
     if membership is None or membership.role not in {"org:owner", "org:admin"}:
         raise HTTPException(403, "Organization owner access required")
     if await session.scalar(select(Organization).where(Organization.clerk_org_id == org_id)):
-        organization = await session.scalar(select(Organization).where(Organization.clerk_org_id == org_id))
+        organization = await session.scalar(
+            select(Organization).where(Organization.clerk_org_id == org_id)
+        )
         assert organization is not None
         return OrganizationView(
             id=organization.clerk_org_id,
@@ -342,29 +346,41 @@ async def _record_org_action(
 
 @router.get("/{org_id}/credentials", response_model=list[CredentialStatus])
 async def provider_credential_status(
-    org_id: str, principal: ClerkPrincipal = Principal, session: AsyncSession = Session,
+    org_id: str,
+    principal: ClerkPrincipal = Principal,
+    session: AsyncSession = Session,
     directory: ClerkOrganizationDirectory = Directory,
 ) -> list[CredentialStatus]:
     organization, _ = await _registered_org(org_id, session, directory, principal)
     bind_organization(session.sync_session, organization.id)
-    rows = (await session.scalars(select(ProviderCredential).order_by(ProviderCredential.name))).all()
+    rows = (
+        await session.scalars(select(ProviderCredential).order_by(ProviderCredential.name))
+    ).all()
     return [credential_service.status(row) for row in rows]
 
 
 @router.post("/{org_id}/credentials", response_model=CredentialStatus, status_code=201)
 async def create_provider_credential(
-    org_id: str, body: CredentialCreate, principal: ClerkPrincipal = Principal,
-    session: AsyncSession = Session, directory: ClerkOrganizationDirectory = Directory,
+    org_id: str,
+    body: CredentialCreate,
+    principal: ClerkPrincipal = Principal,
+    session: AsyncSession = Session,
+    directory: ClerkOrganizationDirectory = Directory,
 ) -> CredentialStatus:
     organization = await _require_admin(org_id, session, directory, principal)
     bind_organization(session.sync_session, organization.id)
-    return credential_service.status(await credential_service.store(session, body, principal.user_id))
+    return credential_service.status(
+        await credential_service.store(session, body, principal.user_id)
+    )
 
 
 @router.get("/{org_id}/credentials/{credential_id}", response_model=CredentialStatus)
 async def get_provider_credential(
-    org_id: str, credential_id: str, principal: ClerkPrincipal = Principal,
-    session: AsyncSession = Session, directory: ClerkOrganizationDirectory = Directory,
+    org_id: str,
+    credential_id: str,
+    principal: ClerkPrincipal = Principal,
+    session: AsyncSession = Session,
+    directory: ClerkOrganizationDirectory = Directory,
 ) -> CredentialStatus:
     organization, _ = await _registered_org(org_id, session, directory, principal)
     bind_organization(session.sync_session, organization.id)
@@ -373,21 +389,29 @@ async def get_provider_credential(
 
 @router.put("/{org_id}/credentials/{credential_id}", response_model=CredentialStatus)
 async def replace_provider_credential(
-    org_id: str, credential_id: str, body: CredentialReplace,
-    principal: ClerkPrincipal = Principal, session: AsyncSession = Session,
+    org_id: str,
+    credential_id: str,
+    body: CredentialReplace,
+    principal: ClerkPrincipal = Principal,
+    session: AsyncSession = Session,
     directory: ClerkOrganizationDirectory = Directory,
 ) -> CredentialStatus:
     organization = await _require_admin(org_id, session, directory, principal)
     bind_organization(session.sync_session, organization.id)
-    return credential_service.status(await credential_service.store(
-        session, body, principal.user_id, credential_id=credential_id
-    ))
+    return credential_service.status(
+        await credential_service.store(
+            session, body, principal.user_id, credential_id=credential_id
+        )
+    )
 
 
 @router.patch("/{org_id}/credentials/{credential_id}/name", response_model=CredentialStatus)
 async def rename_provider_credential(
-    org_id: str, credential_id: str, body: CredentialRename,
-    principal: ClerkPrincipal = Principal, session: AsyncSession = Session,
+    org_id: str,
+    credential_id: str,
+    body: CredentialRename,
+    principal: ClerkPrincipal = Principal,
+    session: AsyncSession = Session,
     directory: ClerkOrganizationDirectory = Directory,
 ) -> CredentialStatus:
     organization = await _require_admin(org_id, session, directory, principal)
@@ -397,8 +421,11 @@ async def rename_provider_credential(
 
 @router.delete("/{org_id}/credentials/{credential_id}", status_code=204)
 async def delete_provider_credential(
-    org_id: str, credential_id: str, body: CredentialDelete,
-    principal: ClerkPrincipal = Principal, session: AsyncSession = Session,
+    org_id: str,
+    credential_id: str,
+    body: CredentialDelete,
+    principal: ClerkPrincipal = Principal,
+    session: AsyncSession = Session,
     directory: ClerkOrganizationDirectory = Directory,
 ) -> None:
     organization = await _require_admin(org_id, session, directory, principal)

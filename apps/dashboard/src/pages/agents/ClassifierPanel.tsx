@@ -20,6 +20,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Textarea } from "@/components/ui/textarea";
 import { NumberField } from "./ConfigFields";
 import { CredentialBindingSelect, bindCredential } from "./CredentialBindingSelect";
+import { OpenRouterModelPicker } from "./OpenRouterModelPicker";
 import type {
   AgentConfig,
   JevQuestion,
@@ -81,6 +82,8 @@ export function ClassifierPanel({
     max_tokens: 256,
     top_p: null,
     reasoning_effort: "none",
+    models: [],
+    provider_preferences: null,
     prompt: "",
     output_fields: {},
     max_output_tokens: 256,
@@ -287,7 +290,7 @@ export function ClassifierPanel({
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold">LLM Classifier</h3>
-                  <p className="text-xs text-muted-foreground">Groq / Gemini</p>
+            <p className="text-xs text-muted-foreground">Groq / Gemini / OpenRouter</p>
                 </div>
               </div>
               <Badge variant={classifierType === "llm" ? "default" : "outline"} className="text-[11px]">
@@ -474,7 +477,13 @@ export function ClassifierPanel({
                     </NativeSelect>
                   </Field>
 
-                  <Field>
+                  {currentProvider === "openrouter" ? <OpenRouterModelPicker
+                    stage="classifier"
+                    credentialId={config.credential_refs.classifier}
+                    value={currentLlm.model || ""}
+                    disabled={disabled}
+                    onChange={(model) => update({ llm: { ...currentLlm, model } })}
+                  /> : <Field>
                     <FieldLabel htmlFor="classifier-model">Model</FieldLabel>
                     <NativeSelect
                       id="classifier-model"
@@ -495,7 +504,7 @@ export function ClassifierPanel({
                         </NativeSelectOption>
                       ))}
                     </NativeSelect>
-                  </Field>
+                  </Field>}
                 </div>
                 <CredentialBindingSelect stage="classifier" provider={currentLlm.provider} value={config.credential_refs.classifier} disabled={disabled} change={(id) => change(bindCredential(config, "classifier", id))} />
 

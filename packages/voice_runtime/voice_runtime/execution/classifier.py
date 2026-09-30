@@ -6,11 +6,9 @@ import json
 from typing import Any
 
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.services.google.llm import GoogleLLMService
-from pipecat.services.groq.llm import GroqLLMService
 
 from voice_runtime.diagnostics import exception_diagnostic, provider_error_diagnostic
-from voice_runtime.execution.credential_keys import stage_api_key
+from voice_runtime.execution.llm_factory import build_llm_service
 from voice_runtime.safe_logs import RuntimeEvent, error_category, operational_event
 
 DEFAULT_OUTPUT_FIELDS = {
@@ -101,37 +99,19 @@ class PipecatLLMClassifierRunner:
         system_instruction = (
             f"{prompt}\nReturn only one compact JSON object. Allowed fields and labels: {schema}."
         )
-        if provider == "groq":
-            api_key = stage_api_key(settings, "classifier", "groq")
-            if not api_key:
-                return _diagnostic_error("groq", "Groq API key is not configured")
-            service = GroqLLMService(
-                api_key=api_key,
-                settings=GroqLLMService.Settings(
-                    model=model,
-                    system_instruction=system_instruction,
-                    temperature=0.1,
-                    max_tokens=max_tokens,
-                    reasoning_effort="none",
-                ),
-            )
-        elif provider == "gemini":
-            api_key = stage_api_key(settings, "classifier", "gemini")
-            if not api_key:
-                return _diagnostic_error("gemini", "Gemini API key is not configured")
-            service = GoogleLLMService(
-                api_key=api_key,
-                settings=GoogleLLMService.Settings(
-                    model=model,
-                    system_instruction=system_instruction,
-                    temperature=0.1,
-                    max_tokens=max_tokens,
-                ),
-            )
-        else:
-            return _diagnostic_error("classifier", f"Unsupported classifier provider: {provider}")
-
         try:
+            service = build_llm_service(
+                settings,
+                {
+                    **config,
+                    "model": model,
+                    "temperature": 0.1,
+                    "max_tokens": max_tokens,
+                    "reasoning_effort": "none",
+                },
+                stage="classifier",
+                system_instruction=system_instruction,
+            )
             context = LLMContext([{"role": "user", "content": transcript}])
             raw = await service.run_inference(context, max_tokens=max_tokens)
             result = normalize_classifier_result(raw, output_fields)

@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
-CredentialProvider = Literal["groq", "gemini", "sarvam", "cartesia", "jev", "twilio", "whatsapp"]
+CredentialProvider = Literal["groq", "gemini", "openrouter", "sarvam", "cartesia", "jev", "twilio", "whatsapp"]
 
 
 class CredentialCreate(BaseModel):

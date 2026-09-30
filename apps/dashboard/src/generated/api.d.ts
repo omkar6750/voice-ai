@@ -195,6 +195,57 @@ export interface paths {
         patch: operations["rename_provider_credential_api_v1_orgs__org_id__credentials__credential_id__name_patch"];
         trace?: never;
     };
+    "/api/v1/orgs/{org_id}/openrouter/{credential_id}/account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Openrouter Account */
+        get: operations["openrouter_account_api_v1_orgs__org_id__openrouter__credential_id__account_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{org_id}/openrouter/{credential_id}/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Openrouter Models */
+        get: operations["openrouter_models_api_v1_orgs__org_id__openrouter__credential_id__models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{org_id}/openrouter/{credential_id}/models/{author}/{slug}/endpoints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Openrouter Model Endpoints */
+        get: operations["openrouter_model_endpoints_api_v1_orgs__org_id__openrouter__credential_id__models__author___slug__endpoints_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/orgs": {
         parameters: {
             query?: never;
@@ -2068,6 +2119,57 @@ export interface paths {
         head?: never;
         /** Rename Provider Credential */
         patch: operations["rename_provider_credential_api_orgs__org_id__credentials__credential_id__name_patch"];
+        trace?: never;
+    };
+    "/api/orgs/{org_id}/openrouter/{credential_id}/account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Openrouter Account */
+        get: operations["openrouter_account_api_orgs__org_id__openrouter__credential_id__account_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{org_id}/openrouter/{credential_id}/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Openrouter Models */
+        get: operations["openrouter_models_api_orgs__org_id__openrouter__credential_id__models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{org_id}/openrouter/{credential_id}/models/{author}/{slug}/endpoints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Openrouter Model Endpoints */
+        get: operations["openrouter_model_endpoints_api_orgs__org_id__openrouter__credential_id__models__author___slug__endpoints_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/platform/orgs": {
@@ -4303,7 +4405,7 @@ export interface components {
              * @default groq
              * @enum {string}
              */
-            provider: "groq" | "gemini";
+            provider: "groq" | "gemini" | "openrouter";
             /**
              * Model
              * @default qwen/qwen3.8-27b
@@ -4327,6 +4429,9 @@ export interface components {
              * @enum {string}
              */
             reasoning_effort: "none" | "provider_default";
+            /** Models */
+            models?: string[];
+            provider_preferences?: components["schemas"]["OpenRouterProviderPreferences"] | null;
             /**
              * Prompt
              * @default Classify the supplied conversation using only observed evidence.
@@ -4554,7 +4659,7 @@ export interface components {
              * Provider
              * @enum {string}
              */
-            provider: "groq" | "gemini" | "sarvam" | "cartesia" | "jev" | "twilio" | "whatsapp";
+            provider: "groq" | "gemini" | "openrouter" | "sarvam" | "cartesia" | "jev" | "twilio" | "whatsapp";
             /** Api Key */
             api_key?: string | null;
             /** Account Sid */
@@ -4586,7 +4691,7 @@ export interface components {
              * Provider
              * @enum {string}
              */
-            provider: "groq" | "gemini" | "sarvam" | "cartesia" | "jev" | "twilio" | "whatsapp";
+            provider: "groq" | "gemini" | "openrouter" | "sarvam" | "cartesia" | "jev" | "twilio" | "whatsapp";
             /** Api Key */
             api_key?: string | null;
             /** Account Sid */
@@ -4610,7 +4715,7 @@ export interface components {
              * Provider
              * @enum {string}
              */
-            provider: "groq" | "gemini" | "sarvam" | "cartesia" | "jev" | "twilio" | "whatsapp";
+            provider: "groq" | "gemini" | "openrouter" | "sarvam" | "cartesia" | "jev" | "twilio" | "whatsapp";
             /** Purpose */
             purpose: string;
             /** Version */
@@ -5322,7 +5427,7 @@ export interface components {
              * @default groq
              * @enum {string}
              */
-            provider: "groq" | "gemini";
+            provider: "groq" | "gemini" | "openrouter";
             /**
              * Model
              * @default qwen/qwen3.8-27b
@@ -5346,6 +5451,9 @@ export interface components {
              * @enum {string}
              */
             reasoning_effort: "none" | "provider_default";
+            /** Models */
+            models?: string[];
+            provider_preferences?: components["schemas"]["OpenRouterProviderPreferences"] | null;
         };
         /** LanguageConfig */
         LanguageConfig: {
@@ -5493,6 +5601,182 @@ export interface components {
              * @default false
              */
             interrupted: boolean;
+        };
+        /** ModelCatalogResponse */
+        ModelCatalogResponse: {
+            /** Items */
+            items: components["schemas"]["ModelOptionResponse"][];
+            /** Total Count */
+            total_count?: number | null;
+            /** Next Offset */
+            next_offset?: number | null;
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
+            /** Checked At */
+            checked_at?: string | null;
+        };
+        /** ModelOptionResponse */
+        ModelOptionResponse: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Author */
+            author?: string | null;
+            /** Source */
+            source: string;
+            /** Slots */
+            slots: ("llm" | "stt" | "tts" | "embedding")[];
+            /** Input Modalities */
+            input_modalities?: string[];
+            /** Output Modalities */
+            output_modalities?: string[];
+            /** Modality */
+            modality?: string | null;
+            /** Context Length */
+            context_length?: number | null;
+            /** Max Completion Tokens */
+            max_completion_tokens?: number | null;
+            /** Supported Parameters */
+            supported_parameters?: string[];
+            pricing: components["schemas"]["ModelPricingResponse"];
+            /** Is Free */
+            is_free: boolean;
+            /**
+             * Tool Calling
+             * @default false
+             */
+            tool_calling: boolean;
+            /**
+             * Structured Output
+             * @default false
+             */
+            structured_output: boolean;
+            /**
+             * Reasoning
+             * @default false
+             */
+            reasoning: boolean;
+            /**
+             * Account Available
+             * @default true
+             */
+            account_available: boolean;
+            /**
+             * Runtime Supported
+             * @default false
+             */
+            runtime_supported: boolean;
+            /** Compatibility Reason */
+            compatibility_reason?: string | null;
+            /** Endpoint Providers */
+            endpoint_providers?: string[];
+        };
+        /** ModelPricingResponse */
+        ModelPricingResponse: {
+            /** Prompt */
+            prompt: string;
+            /** Completion */
+            completion: string;
+            /** Request */
+            request: string;
+            /** Image */
+            image: string;
+        };
+        /** OpenRouterAccountResponse */
+        OpenRouterAccountResponse: {
+            /** Credential Id */
+            credential_id: string;
+            /** Label */
+            label?: string | null;
+            /** Valid */
+            valid: boolean;
+            /** Is Free Tier */
+            is_free_tier?: boolean | null;
+            /** Limit */
+            limit?: number | null;
+            /** Limit Remaining */
+            limit_remaining?: number | null;
+            /** Usage */
+            usage?: number | null;
+            /** Usage Daily */
+            usage_daily?: number | null;
+            /** Usage Monthly */
+            usage_monthly?: number | null;
+            /** Credits Total */
+            credits_total?: number | null;
+            /** Credits Usage */
+            credits_usage?: number | null;
+            /** Free Model Daily Requests */
+            free_model_daily_requests?: {
+                [key: string]: number;
+            };
+            /** Error Category */
+            error_category?: string | null;
+            /** Checked At */
+            checked_at?: string | null;
+        };
+        /** OpenRouterEndpointCatalogResponse */
+        OpenRouterEndpointCatalogResponse: {
+            /** Model Id */
+            model_id: string;
+            /** Endpoints */
+            endpoints: components["schemas"]["OpenRouterEndpointResponse"][];
+            /** Checked At */
+            checked_at?: string | null;
+        };
+        /** OpenRouterEndpointResponse */
+        OpenRouterEndpointResponse: {
+            /** Provider Name */
+            provider_name?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Tag */
+            tag?: string | null;
+            /** Quantization */
+            quantization?: string | null;
+            /** Context Length */
+            context_length?: number | null;
+            /** Max Completion Tokens */
+            max_completion_tokens?: number | null;
+            /** Supported Parameters */
+            supported_parameters?: string[];
+            pricing: components["schemas"]["ModelPricingResponse"];
+            /** Uptime Last 30M */
+            uptime_last_30m?: number | null;
+            /** Latency Last 30M */
+            latency_last_30m?: {
+                [key: string]: number;
+            };
+            /** Throughput Last 30M */
+            throughput_last_30m?: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * OpenRouterProviderPreferences
+         * @description Safe subset of OpenRouter routing controls persisted in agent snapshots.
+         */
+        OpenRouterProviderPreferences: {
+            /** Order */
+            order?: string[];
+            /** Only */
+            only?: string[];
+            /** Ignore */
+            ignore?: string[];
+            /** Allow Fallbacks */
+            allow_fallbacks?: boolean | null;
+            /** Data Collection */
+            data_collection?: ("allow" | "deny") | null;
+            /** Zdr */
+            zdr?: boolean | null;
+            /** Sort By */
+            sort_by?: ("price" | "throughput" | "latency") | null;
+            /** Partition */
+            partition?: "none" | null;
         };
         /** OperationEnded */
         OperationEnded: {
@@ -5688,7 +5972,7 @@ export interface components {
             /** Provider */
             provider: string;
             /** Slots */
-            slots: ("llm" | "stt" | "tts")[];
+            slots: ("llm" | "stt" | "tts" | "embedding")[];
             /** Models */
             models: string[];
             /** Models By Slot */
@@ -7446,6 +7730,115 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CredentialStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    openrouter_account_api_v1_orgs__org_id__openrouter__credential_id__account_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+                credential_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenRouterAccountResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    openrouter_models_api_v1_orgs__org_id__openrouter__credential_id__models_get: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                free_only?: boolean | null;
+                author?: string | null;
+                tool_calling?: boolean | null;
+                structured_output?: boolean | null;
+                reasoning?: boolean | null;
+                min_context?: number | null;
+                max_prompt_price?: string | null;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                org_id: string;
+                credential_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCatalogResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    openrouter_model_endpoints_api_v1_orgs__org_id__openrouter__credential_id__models__author___slug__endpoints_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+                credential_id: string;
+                author: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenRouterEndpointCatalogResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11607,6 +12000,115 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CredentialStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    openrouter_account_api_orgs__org_id__openrouter__credential_id__account_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+                credential_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenRouterAccountResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    openrouter_models_api_orgs__org_id__openrouter__credential_id__models_get: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                free_only?: boolean | null;
+                author?: string | null;
+                tool_calling?: boolean | null;
+                structured_output?: boolean | null;
+                reasoning?: boolean | null;
+                min_context?: number | null;
+                max_prompt_price?: string | null;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                org_id: string;
+                credential_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCatalogResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    openrouter_model_endpoints_api_orgs__org_id__openrouter__credential_id__models__author___slug__endpoints_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+                credential_id: string;
+                author: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenRouterEndpointCatalogResponse"];
                 };
             };
             /** @description Validation Error */

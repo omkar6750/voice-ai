@@ -21,6 +21,7 @@ from voice_api.api.v1.endpoints import (
 from voice_api.api.v1.endpoints.auth import router as auth_router
 from voice_api.api.v1.endpoints.calendar import router as calendar_router
 from voice_api.api.v1.endpoints.dial_catalog import router as dial_catalog_router
+from voice_api.api.v1.endpoints.openrouter import router as openrouter_router
 from voice_api.api.v1.endpoints.organizations import router as organizations_router
 from voice_api.api.v1.endpoints.platform import router as platform_router
 from voice_api.api.v1.endpoints.recordings import router as recordings_router
@@ -29,6 +30,7 @@ api_router = APIRouter()
 
 api_router.include_router(auth_router)
 api_router.include_router(organizations_router)
+api_router.include_router(openrouter_router)
 api_router.include_router(platform_router)
 api_router.include_router(providers_router)
 api_router.include_router(workspace_router)
