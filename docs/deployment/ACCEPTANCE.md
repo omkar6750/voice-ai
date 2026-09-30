@@ -26,7 +26,7 @@ The local PostgreSQL database and the migration graph both reported the single
 measurement was performed. The checklist remains open where it depends on external
 services or live capacity.
 
-- [ ] Parent wires hosted admission, one concurrent call and 300-second duration settings;
+- [ ] Parent wires hosted admission, one concurrent call and 600-second duration settings;
   tests prove rejection before DB claim/provider effects with hosted calls disabled.
 - [ ] Parent enforces browser/Twilio-only transport, modem denial and all automation off;
   rejects missing production credentials and dev-only bypasses.
@@ -85,13 +85,13 @@ general customer admission; close it again after the test. Record actual values:
 | --- | --- | --- |
 | Commit, image digest, service/region, free plan | Pending | Reproducible tested revision |
 | Cold startup, idle wake, model warmup | Pending | No incorrect admission during startup |
-| Idle / model-loaded / peak five-minute RSS | Pending | Below measured free memory with cleanup/upload headroom, no OOM |
+| Idle / model-loaded / peak ten-minute RSS | Pending | Below measured free memory with cleanup/upload headroom, no OOM |
 | CPU and event-loop lag during streaming/upload | Pending | Operator-approved real-time budget met |
 | STT/LLM/TTS and caller-to-audible p50/p95 latency | Pending | Record target budget before test; observed values meet it |
 | Browser WebSocket/audio interruption and cancel | Pending | Deterministic single owner and cleanup |
 | Twilio signatures, media marks/clear and remote hangup | Pending | Approved test allowance; no duplicate/redial |
 | Second concurrent request | Pending | Rejected before external effects |
-| Server deadline at 300 seconds | Pending | Transport released; fenced terminal evidence |
+| Server deadline at 600 seconds | Pending | Transport released; fenced terminal evidence |
 | Storage failure / unknown quota | Pending | Required capture blocks or closes; truthful evidence |
 | Drain and forced restart | Pending | No new admission, stale owner fenced, no redial |
 | Platform/provider budgets | Pending | Free allowance, no auto-purchase/upgrade |
@@ -105,12 +105,12 @@ authorization; this plan never silently chooses a larger instance.
 1. Confirm all applicable gates, exact commit, free quotas and no automatic spending.
 2. Close the database-backed admission/drain gate. Confirm hosted calls disabled and
    no new provider work can start. Do not use an env redeploy as the drain operation.
-3. Let the current run finish (up to five minutes) and finalize remote uploads/evidence;
+3. Let the current run finish (up to ten minutes) and finalize remote uploads/evidence;
    confirm zero live and uncertain claims, or stop for explicit reconciliation.
 4. Run only approved direct-connection migrations outside service startup; record head.
 5. Operator manually deploys the already-reviewed image/ref; auto-deploy remains off.
 6. Verify health, organization auth, private storage and incomplete-run reconciliation.
-7. Reopen admission only for accepted browser/Twilio demos; one concurrency, 300 seconds.
+7. Reopen admission only for accepted browser/Twilio demos; one concurrency, 600 seconds.
 8. For rollback, repeat the drain. Verify schema compatibility; never automatically
    downgrade or discard evidence. Keep calls disabled if acceptance no longer holds.
 

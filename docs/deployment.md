@@ -37,7 +37,7 @@ does not implement its gate. Parent must wire and test these before public expos
 | `VOICE_DEBUG_DIAGNOSTICS` | `debug_diagnostics` | `false`; detailed validation diagnostics remain a local-development feature |
 | `VOICE_HOSTED_CALLS_ENABLED` | `hosted_calls_enabled` | `false`; parent gate applies when `env != dev`, before admitting or starting calls |
 | `VOICE_MAX_CONCURRENT_CALLS` | `max_concurrent_calls` | `1` across browser and Twilio; database-backed global admission fence |
-| `VOICE_CALL_MAX_DURATION_SECONDS` | `call_max_duration_seconds` | `300`; enforce on the server and release safely on timeout |
+| `VOICE_CALL_MAX_DURATION_SECONDS` | `call_max_duration_seconds` | `600`; enforce on the server and release safely on timeout |
 | `VOICE_ORGANIZATION_CREATION_ENABLED` | `organization_creation_enabled` | `true`; Clerk organization creation is enabled, subject to the one-org claim and live Clerk configuration |
 | `VOICE_RECORDINGS_DIR` | `recordings_dir` | `/app/data/recordings`; temporary finalized upload staging only |
 | `VOICE_PUBLIC_BASE_URL` | `public_base_url` | Exact public Render HTTPS origin for callback/signature validation |
@@ -62,7 +62,7 @@ does not implement its gate. Parent must wire and test these before public expos
 
 Parent admission must allow only browser/Twilio when `env != dev`; no fabricated
 transport/automation env flags are provided. Parent constrains `max_concurrent_calls`
-to at most 1 and `call_max_duration_seconds` to at most 300. No scheduler or worker
+to at most 1 and `call_max_duration_seconds` to at most 600. No scheduler or worker
 is started by these manifests. Existing per-workspace callback settings must also
 remain off. A flag never substitutes
 for durable DB fencing, per-operation organization authorization, or runtime enforcement.
@@ -222,7 +222,7 @@ automatic spending and stop before exhaustion. See [Render Free constraints](htt
 One Uvicorn process preserves local ownership, but old/new processes can overlap during
 a deployment. Require durable PostgreSQL admission/claim fencing before provider/media
 side effects; uncertain attempts stay reserved until explicit reconciliation. Every
-browser/Twilio session shares the single-call cap, and has a 300-second server deadline.
+browser/Twilio session shares the single-call cap, and has a 600-second server deadline.
 No fallback to local SIM7600 or automatically retried telephone attempt is permitted.
 
 Before every manual release or rollback: close durable admission, keep hosted calls
@@ -231,7 +231,7 @@ upload to finish, and verify zero live/uncertain claims before deploying. A live
 needs a DB-backed drain decision; changing a Render env var can itself redeploy and
 is not a safe drain mechanism. If the drain interface is absent, keep calls disabled.
 Render allows at most 300 seconds of shutdown delay; the image's Uvicorn timeout is
-285 seconds. Neither setting guarantees five-minute call completion on redeploy.
+285 seconds. Neither setting guarantees ten-minute call completion on redeploy.
 See [Render deploy/shutdown behavior](https://render.com/docs/deploys#graceful-shutdown).
 After restart reconcile incomplete evidence and external state without redial, test
 health/auth/storage, then reopen admission only after operator acceptance.

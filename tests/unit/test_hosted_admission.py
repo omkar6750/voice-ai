@@ -31,8 +31,12 @@ def test_local_modem_inventory_is_unavailable_in_production(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "setting", [{"max_concurrent_calls": 2}, {"call_max_duration_seconds": 301}]
+    "setting", [{"max_concurrent_calls": 2}, {"call_max_duration_seconds": 601}]
 )
 def test_free_demo_limits_cannot_be_relaxed_accidentally(setting):
     with pytest.raises(ValidationError):
         Settings(_env_file=None, **setting)
+
+
+def test_hosted_call_duration_accepts_ten_minutes():
+    assert Settings(_env_file=None, call_max_duration_seconds=600).call_max_duration_seconds == 600

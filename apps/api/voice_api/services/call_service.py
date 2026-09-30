@@ -8,6 +8,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
+from voice_api.core.config import MAX_CALL_DURATION_SECONDS
 from voice_api.core.hosting import require_hosted_call_admission
 from voice_api.models import (
     AgentVersion,
@@ -154,7 +155,7 @@ async def atomically_claim_run(
     run_id: str,
     *,
     claim_token: str | None = None,
-    lease_seconds: int = 300,
+    lease_seconds: int = MAX_CALL_DURATION_SECONDS,
 ) -> bool:
     token = claim_token or new_id()
     current_time = now()
@@ -240,7 +241,7 @@ async def claim_twilio_media(
     run.status = "claimed"
     run.claim_token = new_id()
     run.claimed_at = current_time
-    run.lease_expires_at = current_time + timedelta(seconds=300)
+    run.lease_expires_at = current_time + timedelta(seconds=MAX_CALL_DURATION_SECONDS)
     run.status = "running"
     run.started_at = run.started_at or current_time
 

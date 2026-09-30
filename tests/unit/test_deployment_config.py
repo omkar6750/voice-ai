@@ -80,7 +80,7 @@ def test_render_secrets_and_fail_closed_demo_defaults():
         "VOICE_DEBUG_DIAGNOSTICS": "false",
         "VOICE_HOSTED_CALLS_ENABLED": "false",
         "VOICE_MAX_CONCURRENT_CALLS": "1",
-        "VOICE_CALL_MAX_DURATION_SECONDS": "300",
+        "VOICE_CALL_MAX_DURATION_SECONDS": "600",
         "VOICE_ORGANIZATION_CREATION_ENABLED": "true",
         "VOICE_RECORDINGS_DIR": "/app/data/recordings",
         "VOICE_SUPABASE_PRIVATE_BUCKET": "voice-private",

@@ -32,7 +32,7 @@ from voice_api.db.tenant_scope import bind_organization
 from voice_api.models import Agent, AgentVersion, BrowserSession, Contact, Organization, Run, User
 from voice_api.models.common import new_id, now
 from voice_api.schemas.diagnostics import DiagnosticInput
-from voice_api.services.credential_lease_service import acquire, release
+from voice_api.services.credential_lease_service import acquire, call_seconds, release
 from voice_api.services.credential_runtime_host import CredentialRuntimeHost as NativePipelineHost
 from voice_api.services.diagnostic_service import persist_diagnostic
 from voice_api.services.local_runtime_service import LocalEvidenceIngestor, register_local_artifacts
@@ -390,7 +390,7 @@ async def handle_browser_socket(session_id: str, websocket: WebSocket, settings:
                 audio_out_enabled=True,
                 add_wav_header=False,
                 serializer=ProtobufFrameSerializer(),
-                session_timeout=300,
+                session_timeout=call_seconds(settings, ctx.snapshot),
                 allowed_origins=allowed,
             ),
         )

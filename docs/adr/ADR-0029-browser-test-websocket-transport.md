@@ -37,4 +37,4 @@ The transport is simpler to deploy, but TCP head-of-line blocking and lost
 WebRTC media features can increase latency or degrade speech on poor networks.
 It is a demo choice, not a recommendation for multi-user production voice.
 Provider credentials and a verified Clerk user are still needed for a live
-end-to-end call. The five-minute browser session limit remains.
+end-to-end call. The browser session limit is ten minutes.

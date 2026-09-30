@@ -10,6 +10,8 @@ _ENV_FILES = (
     str(_API_ROOT / ".env.local"),
 )
 
+MAX_CALL_DURATION_SECONDS = 600
+
 
 class Settings(BaseSettings):
     env: str = "dev"
@@ -26,7 +28,9 @@ class Settings(BaseSettings):
     runtime_service_token: str | None = None
     hosted_calls_enabled: bool = False
     max_concurrent_calls: int = Field(default=1, ge=1, le=1)
-    call_max_duration_seconds: int = Field(default=300, ge=1, le=300)
+    call_max_duration_seconds: int = Field(
+        default=MAX_CALL_DURATION_SECONDS, ge=1, le=MAX_CALL_DURATION_SECONDS
+    )
     cloudinary_cloud_name: str | None = None
     cloudinary_api_key: SecretStr | None = None
     cloudinary_api_secret: SecretStr | None = None

@@ -7,7 +7,7 @@ Status: implementation complete; live hosting acceptance remains pending. Supers
 Netlify dashboard/public build assets; one Render FastAPI/Pipecat worker;
 Neon application PostgreSQL; authenticated Cloudinary recordings; private
 Supabase documents and sanitized diagnostic artifacts. One concurrent call,
-browser/Twilio only, maximum300seconds. Hosted calls disabled until memory/latency
+browser/Twilio only, maximum 600 seconds. Hosted calls disabled until memory/latency
 verified. No paid provisioning, implicit DB migration, cron, unattended deletion
 worker, automatic redial or spending. Preserve protected demo and main callbacks,
 async classifiers, fences/termination plus Clerk org creation/home.
@@ -19,7 +19,7 @@ async classifiers, fences/termination plus Clerk org creation/home.
 2. Named org credentials with immutable IDs, provider/purpose bindings, write-only
    admin CRUD, versioned replacement, no silent fallback. Per-secret envelopes
    with org/record/provider/purpose AAD, explicit legacy upgrade and server-only
-   leases<=60s handshake+300s call+60s cleanup. Delete ciphertext and revoke leases;
+   leases<=60s handshake+600s call+60s cleanup. Delete ciphertext and revoke leases;
    re-add uses a new ID requiring intentional binding repair.
 3. Allowlisted logs/sanitized errors: no keys, prompts, transcripts, phone numbers,
    tool payloads, vendor exceptions, SDK wire logs or SQL parameters. Clear browser

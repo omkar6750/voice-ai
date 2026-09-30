@@ -149,6 +149,6 @@ def runtime_provider_capability(provider: str) -> dict:
 
 
 class CallLimits(ConfigModel):
-    max_duration_secs: int = Field(default=300, gt=0)
+    max_duration_secs: int = Field(default=600, gt=0)
     idle_timeout_secs: int = Field(default=60, gt=0)
     interruptions_enabled: bool = True

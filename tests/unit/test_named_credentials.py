@@ -125,13 +125,13 @@ def test_hosted_admission_and_phase_limits():
     with pytest.raises(HTTPException) as error:
         leases.admit_settings(SimpleNamespace(env="production", hosted_calls_enabled=False))
     assert error.value.status_code == 503
-    assert (leases.HANDSHAKE_SECONDS, leases.CALL_SECONDS, leases.CLEANUP_SECONDS) == (60, 300, 60)
+    assert (leases.HANDSHAKE_SECONDS, leases.CALL_SECONDS, leases.CLEANUP_SECONDS) == (60, 600, 60)
     assert (
         leases.call_seconds(
-            SimpleNamespace(call_max_duration_seconds=300),
+            SimpleNamespace(call_max_duration_seconds=600),
             {"call_limits": {"max_duration_secs": 900}},
         )
-        == 300
+        == 600
     )
 
 

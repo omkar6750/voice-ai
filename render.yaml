@@ -26,7 +26,7 @@ services:
       - key: VOICE_MAX_CONCURRENT_CALLS
         value: "1"
       - key: VOICE_CALL_MAX_DURATION_SECONDS
-        value: "300"
+        value: "600"
       - key: VOICE_ORGANIZATION_CREATION_ENABLED
         value: "true"
       - key: VOICE_RECORDINGS_DIR
