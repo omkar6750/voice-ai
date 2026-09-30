@@ -77,6 +77,7 @@ def test_render_secrets_and_fail_closed_demo_defaults():
     defaults = {
         "PORT": "10000",
         "VOICE_ENV": "production",
+        "VOICE_DEBUG_DIAGNOSTICS": "false",
         "VOICE_HOSTED_CALLS_ENABLED": "false",
         "VOICE_MAX_CONCURRENT_CALLS": "1",
         "VOICE_CALL_MAX_DURATION_SECONDS": "300",
@@ -143,6 +144,8 @@ def test_docker_context_is_default_deny_with_secret_exclusions():
             "**/.env.*",
             "**/.git",
             "**/.venv",
+            "**/.pytest_*",
+            ".pytest_*",
             "**/node_modules",
             "**/*.wav",
             "**/*.pem",

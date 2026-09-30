@@ -8,24 +8,35 @@ acceptance is recorded. See [deployment contract](../deployment.md) and the pare
 
 ## Offline and configuration gates
 
-Local deployment-only validation on 2026-09-29: 20 static/policy tests passed, scoped
-Ruff check and format check passed, Node 24.13.1 syntax check passed, official Render
-JSON schema validation passed, and Docker 29.6.1 `build --check` completed without
-warnings. No full image build/start, application suites, migrations or live platform
-measurements were performed in this deployment slice. The checklist remains open
-where it depends on those checks or the parent's implementation.
+Local deployment validation was extended on 2026-09-30: the full suite passed with
+647 tests and 41 intentional skips, repository-wide Ruff passed, and the dashboard
+production build succeeded. Focused coverage included 36 deployment/admission/cleanup
+tests and 64 credential/redaction/runtime tests. The
+linux/amd64 production image built from a secret-filtered context, started as UID/GID
+10001, and returned 200 from `/health`. Python was 3.12.14; the lock SHA-256 was
+`0b11c66a1e505e06d3c856962aa03b588ce256d9954ab8b417ae046a2ab8f43d`; the resolved
+Python base digest was `sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e`
+and uv image digest was `sha256:5cb6b54d2bc3fe2eb9a8483db958a0b9eebf9edff68adedb369df8e7b98711a2`.
+The local review image ID was
+`sha256:d6e8cc4c4d06f64fddddd68cdd9704850d5c38b759f4d170fe68c84187e4398a`.
+Source trees and dotenv files were absent from the final image. Earlier 2026-09-29
+validation also covered Node 24.13.1 syntax and the official Render JSON schema.
+The local PostgreSQL database and the migration graph both reported the single
+`0043_remote_artifact_guard` head. No production migration or live platform/provider
+measurement was performed. The checklist remains open where it depends on external
+services or live capacity.
 
 - [ ] Parent wires hosted admission, one concurrent call and 300-second duration settings;
   tests prove rejection before DB claim/provider effects with hosted calls disabled.
 - [ ] Parent enforces browser/Twilio-only transport, modem denial and all automation off;
   rejects missing production credentials and dev-only bypasses.
-- [ ] Docker lock freshness/frozen install, linux/amd64 image build and nonroot startup
+- [x] Docker lock freshness/frozen install, linux/amd64 image build and nonroot startup
   pass; record Python/uv versions, dependency lock SHA and resolved base-image digests.
 - [ ] Native audio/ONNX/provider imports work without hardware or import-time dialing;
   no model download stalls during a live session.
-- [ ] New deployment static tests, relevant parent suites and lint pass. Official Render
+- [x] New deployment static tests, relevant parent suites and lint pass. Official Render
   JSON schema or CLI validation passes; document tool/schema date and any limitations.
-- [ ] Container has one Uvicorn worker, no migration/scheduler/demo startup and no
+- [x] Container has one Uvicorn worker, no migration/scheduler/demo startup and no
   dashboard, credentials, dotenv, recordings or diagnostic build inputs.
 - [ ] Netlify Node 24 build succeeds with only the two approved public VITE values;
   forbidden VITE names/dotenv builds fail without value disclosure. Inspect output for

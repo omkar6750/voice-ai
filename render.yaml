@@ -18,6 +18,8 @@ services:
         value: "10000"
       - key: VOICE_ENV
         value: production
+      - key: VOICE_DEBUG_DIAGNOSTICS
+        value: "false"
       # Parent must wire and enforce these settings before any public deployment.
       - key: VOICE_HOSTED_CALLS_ENABLED
         value: "false"

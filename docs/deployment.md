@@ -34,6 +34,7 @@ does not implement its gate. Parent must wire and test these before public expos
 | Environment name | Settings field | Required behavior |
 | --- | --- | --- |
 | `VOICE_ENV` | `env` | `production`; fail closed for missing production credentials; no dev identity/default keys |
+| `VOICE_DEBUG_DIAGNOSTICS` | `debug_diagnostics` | `false`; detailed validation diagnostics remain a local-development feature |
 | `VOICE_HOSTED_CALLS_ENABLED` | `hosted_calls_enabled` | `false`; parent gate applies when `env != dev`, before admitting or starting calls |
 | `VOICE_MAX_CONCURRENT_CALLS` | `max_concurrent_calls` | `1` across browser and Twilio; database-backed global admission fence |
 | `VOICE_CALL_MAX_DURATION_SECONDS` | `call_max_duration_seconds` | `300`; enforce on the server and release safely on timeout |
@@ -70,9 +71,10 @@ reviewed replacement/rotation plan. Callback signing must also use a configured
 backend secret if that feature is enabled; no new weak signing default is supplied.
 
 Do not add STT/LLM/TTS/embedding provider keys to Render's environment or Netlify.
-Hosted provider resolution must use the credential owner's approved encrypted
-organization credential path and fail closed. The current runtime's environment-key
-path is a release blocker until that integration is complete. No secrets belong in
+Hosted provider resolution uses the encrypted organization credential and stage-binding
+path and fails closed when a binding is missing, ambiguous, replaced or revoked. Direct
+local/reference callers may still supply developer-owned settings, but hosted run
+resolution clears process-level provider values before selecting named credentials. No secrets belong in
 build arguments, Docker layers, dotenv copies, frontend settings, diagnostics, or logs.
 `sync: false` prompts on initial Blueprint creation; later additions require a manual
 Dashboard value. It does not rotate a key. See [Render env wiring](https://render.com/docs/blueprint-spec#environment-variables).

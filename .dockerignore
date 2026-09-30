@@ -16,6 +16,8 @@
 **/.env.*
 **/.git
 **/.venv
+**/.pytest_*
+.pytest_*
 **/node_modules
 **/__pycache__
 **/*.pyc
