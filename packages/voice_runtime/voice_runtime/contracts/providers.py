@@ -27,20 +27,40 @@ class STTConfig(ConfigModel):
     model: Literal["saaras:v3"] = "saaras:v3"
 
 
+class OpenRouterProviderPreferences(ConfigModel):
+    """Safe subset of OpenRouter routing controls persisted in agent snapshots."""
+
+    order: list[str] = Field(default_factory=list)
+    only: list[str] = Field(default_factory=list)
+    ignore: list[str] = Field(default_factory=list)
+    allow_fallbacks: bool | None = None
+    data_collection: Literal["allow", "deny"] | None = None
+    zdr: bool | None = None
+    sort_by: Literal["price", "throughput", "latency"] | None = None
+    partition: Literal["none"] | None = None
+
+
 class LLMConfig(ConfigModel):
-    provider: Literal["groq", "gemini"] = "groq"
+    provider: Literal["groq", "gemini", "openrouter"] = "groq"
     model: str = Field(default="qwen/qwen3.8-27b", min_length=1)
     temperature: float = Field(default=0.4, ge=0, le=2)
     max_tokens: int = Field(default=180, gt=0)
     top_p: float | None = Field(default=None, gt=0, le=1)
     reasoning_effort: Literal["none", "provider_default"] = "none"
+    models: list[str] = Field(default_factory=list)
+    provider_preferences: "OpenRouterProviderPreferences | None" = None
 
     @model_validator(mode="after")
     def validate_reasoning(self):
         if self.provider == "gemini" and self.reasoning_effort != "provider_default":
             raise ValueError("Gemini reasoning uses the provider default")
-        if self.provider == "groq" and self.reasoning_effort != "none":
-            raise ValueError("Groq reasoning is disabled in this runtime")
+        if self.provider in {"groq", "openrouter"} and self.reasoning_effort not in {
+            "none",
+            "provider_default",
+        }:
+            raise ValueError("This provider uses provider-default reasoning or no reasoning")
+        if self.provider != "openrouter" and (self.models or self.provider_preferences):
+            raise ValueError("OpenRouter routing settings require the openrouter provider")
         return self
 
 

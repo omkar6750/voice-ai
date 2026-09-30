@@ -31,8 +31,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.google.llm import GoogleLLMService
-from pipecat.services.groq.llm import GroqLLMService
 from pipecat.turns.user_start import TranscriptionUserTurnStartStrategy, VADUserTurnStartStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.utils.context.llm_context_summarization import (
@@ -57,6 +55,7 @@ from voice_runtime.execution.contact_context import sanitize_contact_variables
 from voice_runtime.execution.credential_keys import stage_api_key
 from voice_runtime.execution.exchange import ExchangeTracker, bind_transcripts
 from voice_runtime.execution.flow_manager import TracedFlowManager as TracedFlowManager
+from voice_runtime.execution.llm_factory import build_llm_service
 from voice_runtime.execution.observer import EvidenceObserver
 from voice_runtime.execution.speech import build_speech_services as build_speech_services
 from voice_runtime.execution.temporal import resolve_local_time_context
@@ -1652,41 +1651,27 @@ class NativePipelineHost:
             for name in self._nodes[key]["tool_bindings"]:
                 if name not in snapshot["_resolved"]["tools"]:
                     raise ValueError("Node references unavailable tool binding")
-        required_credentials = [("sarvam_api_key", self.settings.sarvam_api_key)]
+        required_credentials = [("stt:sarvam", stage_api_key(self.settings, "stt", "sarvam"))]
         llm_provider = snapshot["llm"]["provider"]
-        required_credentials.append(
-            (
-                "gemini_api_key" if llm_provider == "gemini" else "groq_api_key",
-                self.settings.gemini_api_key
-                if llm_provider == "gemini"
-                else self.settings.groq_api_key,
-            )
-        )
+        required_credentials.append((f"llm:{llm_provider}", stage_api_key(self.settings, "llm", llm_provider)))
         classifier_cfg = snapshot.get("classifier", {})
         if classifier_cfg.get("classifier_type") == "jev":
             required_credentials.append(
                 ("jev_api_key", getattr(self.settings, "jev_api_key", None))
             )
-        elif (classifier_cfg.get("llm") or {}).get("provider", "groq") == "gemini":
-            required_credentials.append(("gemini_api_key", self.settings.gemini_api_key))
         else:
-            required_credentials.append(("groq_api_key", self.settings.groq_api_key))
+            classifier_provider = (classifier_cfg.get("llm") or {}).get("provider", "groq")
+            required_credentials.append((f"classifier:{classifier_provider}", stage_api_key(self.settings, "classifier", classifier_provider)))
         summarizer_cfg = snapshot.get("context", {}).get("summarizer", {})
         if summarizer_cfg.get("enabled"):
             summary_provider = (summarizer_cfg.get("model") or {}).get("provider", llm_provider)
-            required_credentials.append(
-                (
-                    "gemini_api_key" if summary_provider == "gemini" else "groq_api_key",
-                    self.settings.gemini_api_key
-                    if summary_provider == "gemini"
-                    else self.settings.groq_api_key,
-                )
-            )
+            required_credentials.append((f"summarizer:{summary_provider}", stage_api_key(self.settings, "summarizer", summary_provider)))
         for name, value in required_credentials:
             if not value:
                 raise ValueError(f"{name} is not configured")
-        if snapshot["tts"]["provider"] == "cartesia" and not self.settings.cartesia_api_key:
-            raise ValueError("cartesia_api_key is not configured")
+        tts_provider = snapshot["tts"]["provider"]
+        if not stage_api_key(self.settings, "tts", tts_provider):
+            raise ValueError(f"tts:{tts_provider} is not configured")
         rate = snapshot["audio"]["sample_rate"]
         self.directory.mkdir(parents=True, exist_ok=True)
         self.capture = CallCapture(self.directory, rate)
@@ -1705,30 +1690,7 @@ class NativePipelineHost:
             ).transport()
         stt, tts = build_speech_services(self.settings, snapshot, rate)
         llm_config = snapshot["llm"]
-        llm_settings = {
-            "model": llm_config["model"],
-            "system_instruction": snapshot["system_prompt"],
-            "reasoning_effort": llm_config["reasoning_effort"],
-            "temperature": llm_config["temperature"],
-            "max_tokens": llm_config["max_tokens"],
-        }
-        if llm_config.get("top_p") is not None:
-            llm_settings["top_p"] = llm_config["top_p"]
-        if llm_config["provider"] == "groq":
-            llm = GroqLLMService(
-                api_key=stage_api_key(self.settings, "llm", "groq"),
-                settings=GroqLLMService.Settings(**llm_settings),
-            )
-        elif llm_config["provider"] == "gemini":
-            if not self.settings.gemini_api_key:
-                raise ValueError("Gemini API key is not configured")
-            # Preserve provider-default thinking. No universal disable setting exists.
-            llm = GoogleLLMService(
-                api_key=stage_api_key(self.settings, "llm", "gemini"),
-                settings=GoogleLLMService.Settings(llm_settings),
-            )
-        else:
-            raise ValueError("Unsupported LLM provider")
+        llm = build_llm_service(self.settings, llm_config, stage="llm", system_instruction=snapshot["system_prompt"])
 
         summarizer_cfg = snapshot.get("context", {}).get("summarizer", {})
         assistant_params = None
@@ -1744,21 +1706,11 @@ class NativePipelineHost:
             }
             if summary_model.get("top_p") is not None:
                 summary_settings["top_p"] = summary_model["top_p"]
-            if summary_provider == "groq":
-                summary_llm = GroqLLMService(
-                    api_key=stage_api_key(self.settings, "summarizer", "groq"),
-                    settings=GroqLLMService.Settings(
-                        **summary_settings,
-                        reasoning_effort="none",
-                    ),
-                )
-            elif summary_provider == "gemini":
-                summary_llm = GoogleLLMService(
-                    api_key=stage_api_key(self.settings, "summarizer", "gemini"),
-                    settings=GoogleLLMService.Settings(**summary_settings),
-                )
-            else:
-                raise ValueError(f"Unsupported summarizer provider: {summary_provider}")
+            summary_llm = build_llm_service(
+                self.settings,
+                {**summary_model, **summary_settings, "provider": summary_provider, "reasoning_effort": "none"},
+                stage="summarizer",
+            )
 
             summary_config = LLMContextSummaryConfig(
                 target_context_tokens=summarizer_cfg.get("output_budget_tokens", 512),

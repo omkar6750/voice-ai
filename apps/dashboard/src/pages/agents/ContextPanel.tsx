@@ -9,6 +9,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { NumberField } from "./ConfigFields";
 import { CredentialBindingSelect, bindCredential } from "./CredentialBindingSelect";
+import { OpenRouterModelPicker } from "./OpenRouterModelPicker";
 import type { AgentConfig, ProviderCatalog, SummarizerConfig } from "./types";
 
 export function ContextPanel({
@@ -123,7 +124,13 @@ export function ContextPanel({
         </div>
 
         <FieldGroup>
-          <Field>
+          {summaryModel.provider === "openrouter" ? <OpenRouterModelPicker
+            stage="summarizer"
+            credentialId={config.credential_refs.summarizer}
+            value={summaryModel.model ?? ""}
+            disabled={disabled}
+            onChange={(model) => updateSummaryModel({ model })}
+          /> : <Field>
             <FieldLabel htmlFor="summarizer-enabled">Summarizer status</FieldLabel>
             <NativeSelect
               id="summarizer-enabled"
@@ -134,23 +141,23 @@ export function ContextPanel({
               <option value="disabled">Disabled</option>
               <option value="enabled">Enabled</option>
             </NativeSelect>
-          </Field>
+          </Field>}
           {summarizer.enabled && <CredentialBindingSelect stage="summarizer" provider={summaryModel.provider} value={config.credential_refs.summarizer} disabled={disabled} change={(id) => change(bindCredential(config, "summarizer", id))} />}
 
           <Field>
             <FieldLabel htmlFor="summary-provider">Summary LLM provider</FieldLabel>
             <NativeSelect id="summary-provider" className="w-full" value={summaryModel.provider}
               disabled={disabled || !catalog} onChange={(event) => {
-                const provider = event.target.value as "groq" | "gemini";
+                const provider = event.target.value as NonNullable<typeof summaryModel>["provider"];
                 const selected = llmProviders.find((item) => item.provider === provider);
                 const models = selected?.models_by_slot?.llm ?? selected?.models ?? [];
-                if (!models.length) return;
-                updateSummaryModel({ provider, model: models[0], reasoning_effort: provider === "gemini" ? "provider_default" : "none" });
+                if (!models.length && provider !== "openrouter") return;
+                updateSummaryModel({ provider, model: models[0] ?? summaryModel.model, reasoning_effort: provider === "gemini" || provider === "openrouter" ? "provider_default" : "none" });
               }}>
               {llmProviders.map((item) => {
                 const models = item.models_by_slot?.llm ?? item.models ?? [];
-                return <option key={item.provider} value={item.provider} disabled={!models.length}>
-                  {item.provider}{!models.length ? ` (${item.status ?? "unavailable"})` : ""}
+                return <option key={item.provider} value={item.provider} disabled={!models.length && item.provider !== "openrouter"}>
+                  {item.provider}{!models.length && item.provider !== "openrouter" ? ` (${item.status ?? "unavailable"})` : ""}
                 </option>;
               })}
             </NativeSelect>

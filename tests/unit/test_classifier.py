@@ -47,7 +47,7 @@ async def test_pipecat_runner_uses_public_context_and_provider_service(monkeypat
             captured["max_tokens"] = max_tokens
             return '{"lead_temperature":"warm","extra":"ignored"}'
 
-    monkeypatch.setattr(classifier, "GroqLLMService", FakeService)
+    monkeypatch.setattr(classifier, "build_llm_service", lambda *args, **kwargs: FakeService(**kwargs))
     result = await classifier.PipecatLLMClassifierRunner().run(
         settings=SimpleNamespace(groq_api_key="test"),
         config={
@@ -63,7 +63,7 @@ async def test_pipecat_runner_uses_public_context_and_provider_service(monkeypat
     assert result == {"lead_temperature": "warm"}
     assert captured["messages"] == [{"role": "user", "content": "Caller: interested"}]
     assert captured["max_tokens"] == 96
-    assert captured["settings"]["system_instruction"].startswith("Classify")
+    assert captured["service"]["system_instruction"].startswith("Classify")
 
 
 def test_classifier_operation_not_interrupted_by_caller_barge_in():

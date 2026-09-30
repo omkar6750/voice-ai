@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NumberField } from "./ConfigFields";
 import { CredentialBindingSelect, bindCredential } from "./CredentialBindingSelect";
+import { OpenRouterModelPicker } from "./OpenRouterModelPicker";
 import type { AgentConfig, ProviderCatalog } from "./types";
 
 export function ModelsPanel({
@@ -59,20 +60,20 @@ export function ModelsPanel({
           <Field>
             <FieldLabel htmlFor="llm-provider">Provider</FieldLabel>
             <NativeSelect id="llm-provider" className="w-full" value={config.llm.provider} disabled={disabled || !catalog} onChange={(event) => {
-              const provider = event.target.value as "groq" | "gemini";
+              const provider = event.target.value as AgentConfig["llm"]["provider"];
               const choice = llmProviders.find((item) => item.provider === provider);
               const available = choice?.models_by_slot?.llm ?? choice?.models ?? [];
-              if (!available.length) return;
+              if (!available.length && provider !== "openrouter") return;
               change({ ...config, llm: {
-                ...config.llm, provider, model: available[0],
-                reasoning_effort: provider === "gemini" ? "provider_default" : "none",
+                ...config.llm, provider, model: available[0] ?? config.llm.model,
+                reasoning_effort: provider === "gemini" || provider === "openrouter" ? "provider_default" : "none",
               } });
             }}>
               {llmProviders.map((item) => {
                 const available = item.models_by_slot?.llm ?? item.models;
                 return (
-                  <option key={item.provider} value={item.provider} disabled={!available.length}>
-                    {item.provider}{!available.length ? ` (${item.status ?? "unavailable"})` : ""}
+                  <option key={item.provider} value={item.provider} disabled={!available.length && item.provider !== "openrouter"}>
+                    {item.provider}{!available.length && item.provider !== "openrouter" ? ` (${item.status ?? "unavailable"})` : ""}
                   </option>
                 );
               })}
@@ -80,14 +81,20 @@ export function ModelsPanel({
             <FieldDescription>Select the organization-owned credential used by this stage.</FieldDescription>
           </Field>
           <CredentialBindingSelect stage="llm" provider={config.llm.provider} value={config.credential_refs.llm} disabled={disabled} change={(id) => change(bindCredential(config, "llm", id))} />
-          <Field>
+          {config.llm.provider === "openrouter" ? <OpenRouterModelPicker
+            stage="llm"
+            credentialId={config.credential_refs.llm}
+            value={config.llm.model}
+            disabled={disabled}
+            onChange={(model) => change({ ...config, llm: { ...config.llm, model } })}
+          /> : <Field>
             <FieldLabel htmlFor="llm-model">Model</FieldLabel>
             <NativeSelect id="llm-model" className="w-full" value={config.llm.model} disabled={disabled || !catalog || llmModels.length === 0} onChange={(event) => change({ ...config, llm: { ...config.llm, model: event.target.value } })}>
               {!modelListed && <option value={config.llm.model}>{config.llm.model} (stored)</option>}
               {llmModels.map((model) => <option key={model} value={model}>{model}</option>)}
             </NativeSelect>
             <FieldDescription>Catalog status: {selectedLlm?.status ?? "configured"}. Segmented to LLM chat models only.</FieldDescription>
-          </Field>
+          </Field>}
           <NumberField id="llm-temperature" label="Temperature" value={config.llm.temperature} min={0} max={2} step={0.1} disabled={disabled} onChange={(temperature) => change({ ...config, llm: { ...config.llm, temperature } })} />
           <NumberField id="llm-max-tokens" label="Maximum output tokens" value={config.llm.max_tokens} min={1} disabled={disabled} onChange={(max_tokens) => change({ ...config, llm: { ...config.llm, max_tokens } })} />
           <Field>

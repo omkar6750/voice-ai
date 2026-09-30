@@ -34,6 +34,13 @@ from voice_api.schemas.integrations import (
 )
 from voice_api.schemas.knowledge import BaseCreate, SearchHit, SearchRequest, SourceCreate
 from voice_api.schemas.providers import (
+    ModelCatalogResponse,
+    ModelOptionResponse,
+    ModelPricingResponse,
+    OpenRouterAccountResponse,
+    OpenRouterEndpointCatalogResponse,
+    OpenRouterEndpointResponse,
+    OpenRouterModelQuery,
     ProviderCatalogResponse,
     ProviderEntryResponse,
     ProviderField,
@@ -75,6 +82,13 @@ __all__ = [
     "MediaListResponse",
     "MediaResponse",
     "MediaUpdateBody",
+    "ModelCatalogResponse",
+    "ModelOptionResponse",
+    "ModelPricingResponse",
+    "OpenRouterAccountResponse",
+    "OpenRouterEndpointCatalogResponse",
+    "OpenRouterEndpointResponse",
+    "OpenRouterModelQuery",
     "Progress",
     "ProviderCatalogResponse",
     "ProviderEntryResponse",

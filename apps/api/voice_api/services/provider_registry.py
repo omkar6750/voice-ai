@@ -89,6 +89,23 @@ async def get_provider_registry(settings: Settings) -> ProviderCatalogResponse:
                 "runtime_status": "supported",
             }
         )
+    providers.append(
+        {
+            "provider": "openrouter",
+            "slots": ["llm"],
+            "models": [],
+            "models_by_slot": {"llm": []},
+            "fields": {
+                "model": {
+                    "type": "string",
+                    "runtime_supported": True,
+                    "description": "Bind an organization OpenRouter credential to load account models.",
+                }
+            },
+            "status": "unconfigured",
+            "runtime_status": "supported",
+        }
+    )
     for name, key in (("sarvam", settings.sarvam_api_key), ("cartesia", settings.cartesia_api_key)):
         capability = runtime_provider_capability(name)
         providers.append(

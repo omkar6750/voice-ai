@@ -11,6 +11,7 @@ from voice_api.services.vault_service import CredentialVault, SecretScope, Vault
 
 PROVIDER_FIELDS = {
     "groq": "groq_api_key",
+    "openrouter": "openrouter_api_key",
     "gemini": "gemini_api_key",
     "sarvam": "sarvam_api_key",
     "cartesia": "cartesia_api_key",
