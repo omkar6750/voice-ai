@@ -5,6 +5,11 @@ export const ApiContext = createContext<Api | null>(null);
 export const SupportSessionContext = createContext<string | null>(null);
 const apiOrigin = (import.meta.env.VITE_API_ORIGIN ?? "").replace(/\/$/, "");
 
+export function healthUrl(): string {
+  const origin = apiOrigin || (import.meta.env.DEV ? "http://127.0.0.1:8000" : window.location.origin);
+  return new URL("/health", origin).toString();
+}
+
 export function apiUrl(path: string): string {
   return `${apiOrigin}/api/v1${path}`;
 }

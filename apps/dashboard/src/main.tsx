@@ -4,6 +4,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./app/App";
+import { clerkUrls } from "./app/clerk-config";
 import { queryClient } from "./lib/query-client";
 import "./styles.css";
 
@@ -13,7 +14,12 @@ if (!publishableKey) throw new Error("Clerk publishable key is not configured");
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <ClerkProvider publishableKey={publishableKey} afterSignOutUrl="/">
+      <ClerkProvider
+        publishableKey={publishableKey}
+        signInUrl={clerkUrls.signIn}
+        signUpUrl={clerkUrls.signUp}
+        afterSignOutUrl="/"
+      >
         <BrowserRouter>
           <App />
         </BrowserRouter>

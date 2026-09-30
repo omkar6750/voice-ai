@@ -76,7 +76,7 @@ async def require_organization_access(
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Organization not found")
         request.state.platform_support_session = token_hash
         bind_organization(session.sync_session, organization.id)
-        return ClerkPrincipal(user_id=principal.user_id, org_id=organization.clerk_org_id)
+        return ClerkPrincipal(user_id=principal.user_id, org_id=organization.clerk_org_id, org_role="org:owner")
     if not principal.org_id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Organization access required")
     try:
@@ -88,7 +88,7 @@ async def require_organization_access(
     if organization_id is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Organization access required")
     membership = await directory.membership(principal.org_id, principal.user_id)
-    if membership is None or membership.role not in {"org:admin", "org:member"}:
+    if membership is None or membership.role not in {"org:owner", "org:admin", "org:member"}:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Organization access required")
     disabled_user = await session.scalar(
         select(User.id).where(
@@ -127,7 +127,9 @@ async def require_platform_admin_user(
     )
     if user is None or assignment is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Platform administrator required")
-    mark_platform_admin(session.sync_session)
+    sync_session = getattr(session, "sync_session", None)
+    if sync_session is not None:
+        mark_platform_admin(sync_session)
     return user
 
 

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@clerk/react";
 import { Link } from "react-router-dom";
 import { Search, RefreshCw, Activity } from "lucide-react";
 import { toast } from "sonner";
@@ -40,44 +42,35 @@ function formatProvider(provider?: string) {
 
 export function RunsPage() {
   const api = useApi();
-  const [runs, setRuns] = useState<RunSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { orgId } = useAuth();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
-  const [error, setError] = useState("");
-  const [reload, setReload] = useState(0);
+  const runsQuery = useQuery({
+    queryKey: ["runs", orgId ?? "personal"],
+    queryFn: () => api<{ runs: RunSummary[] }>("/runs"),
+    staleTime: 5_000,
+    gcTime: 30 * 60_000,
+    refetchOnWindowFocus: false,
+    refetchInterval: (query) => {
+      const data = query.state.data as { runs: RunSummary[] } | undefined;
+      return data?.runs.some((run) => isActive(run.status)) ? 10_000 : false;
+    },
+  });
+  const runs = runsQuery.data?.runs ?? [];
+  const loading = runsQuery.isPending;
+  const error = runsQuery.error?.message ?? "";
   const lastNotifiedError = useRef("");
   useEffect(() => {
-    let cancelled = false;
-    const load = () => {
-      api<{ runs: RunSummary[] }>("/runs")
-        .then((data) => {
-          if (cancelled) return;
-          setRuns(data.runs);
-          setError("");
-          lastNotifiedError.current = "";
-        })
-        .catch((cause) => {
-          if (cancelled) return;
-          const message =
-            cause instanceof Error ? cause.message : "Could not load runs";
-          setError(message);
-          if (message !== lastNotifiedError.current) {
-            toast.error(message);
-            lastNotifiedError.current = message;
-          }
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
-    };
-    load();
-    const timer = window.setInterval(load, 10000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [api, reload]);
+    if (!error) {
+      lastNotifiedError.current = "";
+      return;
+    }
+    if (error !== lastNotifiedError.current) {
+      toast.error(error);
+      lastNotifiedError.current = error;
+    }
+  }, [error]);
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return runs.filter(
@@ -104,7 +97,8 @@ export function RunsPage() {
         </div>
         <Button
           variant="outline"
-          onClick={() => setReload((value) => value + 1)}
+          onClick={() => void queryClient.invalidateQueries({ queryKey: ["runs", orgId ?? "personal"] })}
+          disabled={runsQuery.isFetching}
         >
           <RefreshCw data-icon="inline-start" /> Refresh
         </Button>

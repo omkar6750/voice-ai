@@ -2,7 +2,17 @@
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
-const publicKeys = ["VITE_CLERK_PUBLISHABLE_KEY", "VITE_API_ORIGIN"];
+const publicKeys = [
+  "VITE_CLERK_PUBLISHABLE_KEY",
+  "VITE_API_ORIGIN",
+  "VITE_CLERK_SIGN_IN_URL",
+  "VITE_CLERK_SIGN_UP_URL",
+  "VITE_CLERK_AFTER_SIGN_IN_URL",
+  "VITE_CLERK_AFTER_SIGN_UP_URL",
+  "VITE_CLERK_ORGANIZATION_PROFILE_URL",
+  "VITE_CLERK_CREATE_ORGANIZATION_URL",
+  "VITE_CLERK_INVITATION_REDIRECT_URL",
+];
 const unexpected = Object.keys(process.env).filter(
   (key) => key.startsWith("VITE_") && !publicKeys.includes(key),
 );

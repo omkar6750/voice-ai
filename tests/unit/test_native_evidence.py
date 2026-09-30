@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-import voice_runtime.execution.native as native_module
+import voice_runtime.execution.classifier_runtime as classifier_runtime
 from pipecat.frames.frames import LLMContextFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection
@@ -212,7 +212,7 @@ async def test_configured_node_classifier_runs_once_and_returns_context_message(
         }
     }
     monkeypatch.setattr(
-        native_module,
+        classifier_runtime,
         "run_selected_classifier",
         AsyncMock(return_value={"lead_temperature": "warm"}),
     )

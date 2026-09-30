@@ -24,10 +24,13 @@ export function useResource<T>(path: string, enabled = true) {
     if (enabled) await query.refetch();
   }, [enabled, query.refetch]);
 
-  return {
-    data: query.data ?? null,
-    loading: enabled && (query.isPending || query.isFetching),
-    error: query.error?.message ?? null,
-    reload,
-  };
+    return {
+      data: query.data ?? null,
+      // Keep cached data visible while a stale query refreshes in the
+      // background. Full-page loading is only appropriate before first data.
+      loading: enabled && query.isPending,
+      fetching: enabled && query.isFetching,
+      error: query.error?.message ?? null,
+      reload,
+    };
 }

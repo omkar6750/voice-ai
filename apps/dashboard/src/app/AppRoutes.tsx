@@ -68,12 +68,6 @@ const EndpointsPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import("@/pages/settings").then((page) => ({ default: page.SettingsPage })),
 );
-const OrganizationMembersPage = lazy(() =>
-  import("@/pages/organizations/members").then((page) => ({ default: page.OrganizationMembersPage })),
-);
-const OrganizationArea = lazy(() =>
-  import("@/pages/organizations/area").then((page) => ({ default: page.OrganizationArea })),
-);
 
 
 export function AppRoutes({ platformAdmin }: { platformAdmin: boolean }) {
@@ -113,9 +107,7 @@ export function AppRoutes({ platformAdmin }: { platformAdmin: boolean }) {
         <Route path="/endpoints" element={platformAdmin ? <EndpointsPage /> : <Navigate to="/runs" replace />} />
 
         <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/orgs/:orgId" element={<OrganizationArea />} />
-        <Route path="/orgs/:orgId/members" element={<OrganizationMembersPage />} />
-        <Route path="/orgs/:orgId/settings" element={<OrganizationArea />} />
+        <Route path="/orgs/:orgId/*" element={<Navigate to="/organizations/profile" replace />} />
         <Route
           path="*"
           element={

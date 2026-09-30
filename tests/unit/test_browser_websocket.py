@@ -18,8 +18,27 @@ from voice_api.services.browser_session_service import (
     BrowserSessionContext,
     BrowserSessionManager,
     _run_browser_pipeline,
+    verify_ticket_actor,
 )
 from voice_runtime.execution.delivery import EvidenceFinalization
+
+
+@pytest.mark.asyncio
+async def test_browser_ticket_accepts_owner_membership():
+    db = AsyncMock(spec=AsyncSession)
+    db.scalar.return_value = SimpleNamespace(disabled_at=None)
+    db.get.return_value = SimpleNamespace(id="org-local", clerk_org_id="org_clerk")
+    directory = AsyncMock()
+    directory.membership.return_value = SimpleNamespace(role="org:owner")
+    ctx = BrowserSessionContext(
+        "browser-test", "run-test", {}, "org-local", actor_user_id="user-test"
+    )
+    with patch(
+        "voice_api.services.browser_session_service.get_clerk_organization_directory",
+        return_value=directory,
+    ):
+        await verify_ticket_actor(db, ctx)
+    directory.membership.assert_awaited_once_with("org_clerk", "user-test")
 
 
 def test_websocket_auth_and_binary_audio_round_trip():

@@ -2,13 +2,12 @@ import {
   Activity, AudioLines, CalendarClock, Database, Link2, ListTodo,
   LogOut, PhoneCall, Radio, Settings2, ShieldCheck, Users,
 } from "lucide-react";
-import { UserButton, useAuth, useClerk } from "@clerk/react";
+import { OrganizationSwitcher, UserButton, useAuth, useClerk } from "@clerk/react";
 import { lazy, Suspense, useState } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { AppRoutes } from "./AppRoutes";
-import { OrgSwitcher } from "./OrgSwitcher";
+import { clerkUrls } from "./clerk-config";
 import { OrganizationAccessContext, type OrganizationAccess } from "./access";
-import type { OrganizationView } from "./organizations";
 import {
   Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList,
   BreadcrumbPage, BreadcrumbSeparator,
@@ -23,22 +22,40 @@ import { Button } from "@/components/ui/button";
 const QuickDial = lazy(() => import("./QuickDial").then((module) => ({ default: module.QuickDial })));
 const TestAgentModal = lazy(() => import("./TestAgentModal").then((module) => ({ default: module.TestAgentModal })));
 
+function TestAgentLoadingDialog() {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 backdrop-blur-xs" role="status">
+      <div className="w-[calc(100%-2rem)] max-w-lg rounded-xl border border-border bg-card p-6 shadow-xl">
+        <div className="flex flex-col gap-1.5">
+          <p className="font-heading text-lg font-semibold">Test Agent</p>
+          <p className="text-sm text-muted-foreground">Loading test call controls…</p>
+        </div>
+        <div className="mt-6 flex flex-col gap-4 animate-pulse">
+          <div className="h-3 w-20 rounded bg-muted" />
+          <div className="h-8 w-full rounded-lg bg-muted" />
+          <div className="h-24 w-full rounded-lg bg-muted" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DeferredQuickDial() {
   const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState(false);
-  if (!loaded) {
-    return <Button size="sm" onClick={() => { setLoaded(true); setOpen(true); }}><PhoneCall data-icon="inline-start" />Quick dial</Button>;
-  }
-  return <Suspense fallback={<Button size="sm" disabled>Loading…</Button>}><QuickDial open={open} onOpenChange={setOpen} hideTrigger /></Suspense>;
+  return <>
+    <Button size="sm" onClick={() => { setLoaded(true); setOpen(true); }}><PhoneCall data-icon="inline-start" />Quick dial</Button>
+    {loaded && <Suspense fallback={null}><QuickDial open={open} onOpenChange={setOpen} hideTrigger /></Suspense>}
+  </>;
 }
 
 function DeferredTestAgentModal() {
   const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState(false);
-  if (!loaded) {
-    return <Button variant="outline" size="sm" className="gap-2" onClick={() => { setLoaded(true); setOpen(true); }}><Radio className="size-4 text-emerald-500 animate-pulse" /><span>Test Agent</span></Button>;
-  }
-  return <Suspense fallback={<Button variant="outline" size="sm" disabled>Loading…</Button>}><TestAgentModal open={open} onOpenChange={setOpen} hideTrigger /></Suspense>;
+  return <>
+    <Button variant="outline" size="sm" className="gap-2" onClick={() => { setLoaded(true); setOpen(true); }}><Radio className="size-4 text-emerald-500 animate-pulse" /><span>Test Agent</span></Button>
+    {loaded && <Suspense fallback={open ? <TestAgentLoadingDialog /> : null}><TestAgentModal open={open} onOpenChange={setOpen} hideTrigger /></Suspense>}
+  </>;
 }
 
 const navigation = [
@@ -79,8 +96,8 @@ function SideNavigation({ platformAdmin, supportMode }: { platformAdmin: boolean
                 </SidebarMenuItem>
               ))}
               {orgId && !supportMode && <SidebarMenuItem>
-                <SidebarMenuButton asChild tooltip="Members" isActive={pathname === `/orgs/${orgId}/members`}>
-                  <NavLink to={`/orgs/${orgId}/members`}><Users aria-hidden="true" /><span>Members</span></NavLink>
+                <SidebarMenuButton asChild tooltip="Members" isActive={pathname.startsWith("/organizations/profile")}>
+                  <NavLink to="/organizations/profile"><Users aria-hidden="true" /><span>Members</span></NavLink>
                 </SidebarMenuButton>
               </SidebarMenuItem>}
               {platformAdmin && <SidebarMenuItem>
@@ -128,23 +145,22 @@ function LocationTrail() {
   );
 }
 
-export function AppShell({ organizations, platformAdmin = false, supportOrganization, onExitSupport }: { organizations: OrganizationView[]; platformAdmin?: boolean; supportOrganization?: { id: string; name: string }; onExitSupport?: () => void }) {
-  const { orgId } = useAuth();
-  const canCall = Boolean(supportOrganization) || organizations.some((org) => org.id === orgId);
-  const activeOrganization = organizations.find((org) => org.id === orgId);
-  const role: OrganizationAccess["role"] = supportOrganization || activeOrganization?.role === "org:admin"
+export function AppShell({ platformAdmin = false, supportOrganization, onExitSupport }: { platformAdmin?: boolean; supportOrganization?: { id: string; name: string }; onExitSupport?: () => void }) {
+  const { orgId, orgRole } = useAuth();
+  const canCall = Boolean(supportOrganization) || Boolean(orgId);
+  const role: OrganizationAccess["role"] = supportOrganization || orgRole === "org:owner" || orgRole === "org:admin"
     ? "org:admin"
-    : activeOrganization?.role === "org:member"
+    : orgRole === "org:member"
       ? "org:member"
       : null;
   const access = {
     role,
-    isOwner: Boolean(activeOrganization?.is_owner),
+    isOwner: orgRole === "org:owner",
     canManage: Boolean(supportOrganization) || role === "org:admin",
     canUseBrowserTest: canCall,
-    canDial: !supportOrganization && role === "org:admin",
+    canDial: !supportOrganization && (orgRole === "org:owner" || orgRole === "org:admin"),
   };
-  const canDial = !supportOrganization && activeOrganization?.role === "org:admin";
+  const canDial = !supportOrganization && (orgRole === "org:owner" || orgRole === "org:admin");
   return (
     <OrganizationAccessContext.Provider value={access}>
     <SidebarProvider>
@@ -158,7 +174,7 @@ export function AppShell({ organizations, platformAdmin = false, supportOrganiza
             <button className="font-medium underline" onClick={onExitSupport}>Exit</button>
           </div>}
           <div className="ml-auto flex items-center gap-2">
-            {!supportOrganization && <OrgSwitcher organizations={organizations} />}
+            {!supportOrganization && <OrganizationSwitcher hidePersonal afterSelectOrganizationUrl={clerkUrls.afterSignIn} createOrganizationMode="navigation" createOrganizationUrl={clerkUrls.createOrganization} organizationProfileMode="navigation" organizationProfileUrl={clerkUrls.organizationProfile} />}
             {canCall && <DeferredTestAgentModal />}
             {canDial && <DeferredQuickDial />}
             <UserButton />

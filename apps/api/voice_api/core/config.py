@@ -4,13 +4,10 @@ from pathlib import Path
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_REPO_ROOT = Path(__file__).resolve().parents[4]
+_API_ROOT = Path(__file__).resolve().parents[2]
 _ENV_FILES = (
-    str(_REPO_ROOT / ".env.main-copy"),
-    str(_REPO_ROOT / ".env"),
-    str(_REPO_ROOT / ".env.local"),
-    ".env",
-    ".env.local",
+    str(_API_ROOT / ".env"),
+    str(_API_ROOT / ".env.local"),
 )
 
 
@@ -42,9 +39,6 @@ class Settings(BaseSettings):
     supabase_service_key: SecretStr | None = None
     supabase_private_bucket: str = "voice-private"
     clerk_secret_key: str | None = Field(default=None, validation_alias="CLERK_SECRET_KEY")
-    clerk_publishable_key: str | None = Field(
-        default=None, validation_alias="CLERK_PUBLISHABLE_KEY"
-    )
     clerk_authorized_parties: str = "http://localhost:5173,http://localhost:8000"
     clerk_webhook_signing_secret: str | None = Field(
         default=None, validation_alias="CLERK_WEBHOOK_SIGNING_SECRET"

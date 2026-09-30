@@ -12,10 +12,6 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.core.clerk_auth import ClerkPrincipal, require_clerk_user
-from voice_api.core.clerk_organizations import (
-    ClerkOrganizationDirectory,
-    get_clerk_organization_directory,
-)
 from voice_api.core.config import get_settings
 from voice_api.core.security import (
     allow_organization_member,
@@ -25,20 +21,16 @@ from voice_api.core.security import (
 from voice_api.db.session import get_session
 from voice_api.models import (
     ClerkWebhookEvent,
-    LegacyDataTenant,
     Organization,
     OrganizationCreationClaim,
     PlatformAdministrator,
     User,
 )
-from voice_api.models.common import new_id
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-account_router = APIRouter(tags=["auth"])
 Principal = Depends(require_clerk_user)
 Owner = Depends(require_legacy_data_access)
 Session = Depends(get_session)
-Directory = Depends(get_clerk_organization_directory)
 OrganizationAccess = Depends(require_organization_access)
 
 
@@ -101,121 +93,74 @@ async def clerk_webhook(
     await session.commit()
 
 
-class AccountOrganization(BaseModel):
-    id: str
-    name: str
-    role: str
-    registered: bool
-    is_owner: bool
+class AppContextView(BaseModel):
+    """Small local application projection for the active Clerk organization."""
+
+    user_id: str
+    active_org_id: str | None
+    active_org_name: str | None
+    active_org_registered: bool
+    platform_admin: bool
+    user_disabled: bool
+    can_create_org: bool
+    organization_creation_enabled: bool
     capabilities: list[str]
 
 
-class AccountView(BaseModel):
-    user_id: str
-    active_org_id: str | None
-    platform_admin: bool
-    can_create_org: bool
-    organization_creation_enabled: bool
-    organizations: list[AccountOrganization]
-
-
-@router.get("/me")
-async def me(principal: ClerkPrincipal = Principal) -> dict:
-    return {"user_id": principal.user_id, "org_id": principal.org_id}
-
-
-@account_router.get("/me", response_model=AccountView)
-async def account(
+@router.get("/context", response_model=AppContextView)
+async def app_context(
     principal: ClerkPrincipal = Principal,
     session: AsyncSession = Session,
-    directory: ClerkOrganizationDirectory = Directory,
-) -> AccountView:
-    profile = await directory.verified_profile(principal.user_id)
-    await session.execute(
-        pg_insert(User)
-        .values(
-            id=new_id(),
-            clerk_user_id=principal.user_id,
-            primary_verified_email=profile["email"],
-            first_name=profile["first_name"],
-            last_name=profile["last_name"],
-        )
-        .on_conflict_do_update(
-            index_elements=[User.clerk_user_id],
-            set_={
-                "primary_verified_email": profile["email"],
-                "first_name": profile["first_name"],
-                "last_name": profile["last_name"],
-                "updated_at": func.now(),
-            },
-        )
-    )
-    await session.commit()
-    memberships = await directory.joined(principal.user_id)
-    ids = [item.clerk_org_id for item in memberships]
-    local_rows = (
-        (
-            await session.scalars(select(Organization).where(Organization.clerk_org_id.in_(ids)))
-        ).all()
-        if ids
-        else []
-    )
-    local = {item.clerk_org_id: item for item in local_rows}
+) -> AppContextView:
+    """Return only local product state for Clerk's current active org.
+
+    Clerk owns identity, memberships, and organization selection. This endpoint
+    deliberately does not call Clerk's Backend API or enumerate memberships.
+    Protected resource endpoints still perform their normal live membership
+    authorization checks.
+    """
     user = await session.scalar(select(User).where(User.clerk_user_id == principal.user_id))
-    claimed = owned = platform_admin = False
-    if user is not None:
-        claimed = (
-            await session.scalar(
-                select(OrganizationCreationClaim.user_id).where(
-                    OrganizationCreationClaim.user_id == user.id
-                )
-            )
-            is not None
+    disabled = bool(user and user.disabled_at is not None)
+    platform_admin = bool(
+        user
+        and await session.scalar(
+            select(PlatformAdministrator.user_id).where(PlatformAdministrator.user_id == user.id)
         )
-        owned = (
-            await session.scalar(
-                select(Organization.id).where(Organization.owner_user_id == user.id)
-            )
-            is not None
+    )
+    organization = (
+        await session.scalar(
+            select(Organization).where(Organization.clerk_org_id == principal.org_id)
         )
-        platform_admin = (
-            await session.scalar(
-                select(PlatformAdministrator.user_id).where(
-                    PlatformAdministrator.user_id == user.id
-                )
-            )
-            is not None
-        )
-    legacy_org_id = await session.scalar(select(LegacyDataTenant.organization_id))
-    organizations = []
-    for membership in memberships:
-        organization = local.get(membership.clerk_org_id)
-        capabilities = []
-        if organization is not None:
-            capabilities.extend(["read", "browser_test"])
-            if membership.role == "org:admin":
-                capabilities.extend(["manage_members", "configure"])
-                if organization.id == legacy_org_id:
-                    capabilities.append("twilio_dial")
-            if user and organization.owner_user_id == user.id:
-                capabilities.append("transfer_ownership")
-        organizations.append(
-            AccountOrganization(
-                id=membership.clerk_org_id,
-                name=membership.name,
-                role=membership.role,
-                registered=organization is not None,
-                is_owner=bool(user and organization and organization.owner_user_id == user.id),
-                capabilities=capabilities,
+        if principal.org_id
+        else None
+    )
+    claimed = bool(
+        user
+        and await session.scalar(
+            select(OrganizationCreationClaim.user_id).where(
+                OrganizationCreationClaim.user_id == user.id
             )
         )
-    return AccountView(
+    )
+    owned = bool(
+        user
+        and await session.scalar(select(Organization.id).where(Organization.owner_user_id == user.id))
+    )
+    capabilities = []
+    if organization is not None and not disabled:
+        capabilities = ["read", "browser_test"]
+        if principal.org_role in {"org:owner", "org:admin"}:
+            capabilities.extend(["manage_members", "configure"])
+    return AppContextView(
         user_id=principal.user_id,
         active_org_id=principal.org_id,
+        active_org_name=organization.name if organization else None,
+        active_org_registered=organization is not None,
         platform_admin=platform_admin,
+        user_disabled=disabled,
         can_create_org=not claimed and not owned,
         organization_creation_enabled=get_settings().organization_creation_enabled,
-        organizations=organizations,
+        capabilities=capabilities,
     )
 
 

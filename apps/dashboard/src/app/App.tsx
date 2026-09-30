@@ -40,7 +40,7 @@ function ProvisionOrganization() {
   });
   const { mutate, isPending, isSuccess, isError, error } = provision;
   useEffect(() => {
-    if (orgId && orgRole === "org:owner" && organization?.name && !isPending && !isSuccess) mutate();
+    if (orgId && (orgRole === "org:owner" || orgRole === "org:admin") && organization?.name && !isPending && !isSuccess) mutate();
   }, [isPending, isSuccess, mutate, orgId, orgRole, organization?.name]);
   if (isError) return <main className="mx-auto max-w-xl p-8"><p role="alert" className="text-destructive">Organization setup failed. {error.message}</p></main>;
   return <LoadingPage>Setting up organization…</LoadingPage>;
@@ -127,7 +127,7 @@ function AuthenticatedApp() {
             ? <Suspense fallback={<LoadingPage>Loading platform organizations…</LoadingPage>}><PlatformOrganizationsPage onEnterSupport={enterSupport} /></Suspense>
             : !orgId
               ? <Suspense fallback={<LoadingPage>Loading organizations…</LoadingPage>}><Routes><Route path="/organizations/create" element={<OrganizationCreatePage />} /><Route path="*" element={<OrganizationListPage />} /></Routes></Suspense>
-              : contextResolved && !registered && orgRole === "org:owner"
+              : contextResolved && !registered && (orgRole === "org:owner" || orgRole === "org:admin")
                 ? <ProvisionOrganization />
                 : pathname.startsWith("/organizations/profile")
                   ? <Suspense fallback={<LoadingPage>Loading organization profile…</LoadingPage>}><OrganizationProfilePage /></Suspense>
