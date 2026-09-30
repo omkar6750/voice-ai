@@ -1,12 +1,11 @@
 import {
   Activity, AudioLines, CalendarClock, Database, Link2, ListTodo,
-  LogOut, Radio, Settings2, ShieldCheck, Users,
+  LogOut, PhoneCall, Radio, Settings2, ShieldCheck, Users,
 } from "lucide-react";
 import { UserButton, useAuth, useClerk } from "@clerk/react";
+import { lazy, Suspense, useState } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { AppRoutes } from "./AppRoutes";
-import { QuickDial } from "./QuickDial";
-import { TestAgentModal } from "./TestAgentModal";
 import { OrgSwitcher } from "./OrgSwitcher";
 import { OrganizationAccessContext, type OrganizationAccess } from "./access";
 import type { OrganizationView } from "./organizations";
@@ -19,6 +18,28 @@ import {
   SidebarGroupLabel, SidebarHeader, SidebarInset, SidebarMenu,
   SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { Button } from "@/components/ui/button";
+
+const QuickDial = lazy(() => import("./QuickDial").then((module) => ({ default: module.QuickDial })));
+const TestAgentModal = lazy(() => import("./TestAgentModal").then((module) => ({ default: module.TestAgentModal })));
+
+function DeferredQuickDial() {
+  const [loaded, setLoaded] = useState(false);
+  const [open, setOpen] = useState(false);
+  if (!loaded) {
+    return <Button size="sm" onClick={() => { setLoaded(true); setOpen(true); }}><PhoneCall data-icon="inline-start" />Quick dial</Button>;
+  }
+  return <Suspense fallback={<Button size="sm" disabled>Loading…</Button>}><QuickDial open={open} onOpenChange={setOpen} hideTrigger /></Suspense>;
+}
+
+function DeferredTestAgentModal() {
+  const [loaded, setLoaded] = useState(false);
+  const [open, setOpen] = useState(false);
+  if (!loaded) {
+    return <Button variant="outline" size="sm" className="gap-2" onClick={() => { setLoaded(true); setOpen(true); }}><Radio className="size-4 text-emerald-500 animate-pulse" /><span>Test Agent</span></Button>;
+  }
+  return <Suspense fallback={<Button variant="outline" size="sm" disabled>Loading…</Button>}><TestAgentModal open={open} onOpenChange={setOpen} hideTrigger /></Suspense>;
+}
 
 const navigation = [
   { title: "Agents", path: "/agents", icon: AudioLines },
@@ -138,8 +159,8 @@ export function AppShell({ organizations, platformAdmin = false, supportOrganiza
           </div>}
           <div className="ml-auto flex items-center gap-2">
             {!supportOrganization && <OrgSwitcher organizations={organizations} />}
-            {canCall && <TestAgentModal />}
-            {canDial && <QuickDial />}
+            {canCall && <DeferredTestAgentModal />}
+            {canDial && <DeferredQuickDial />}
             <UserButton />
           </div>
         </header>

@@ -1,38 +1,33 @@
-import { useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect } from "react";
+import { useAuth } from "@clerk/react";
 import { toast } from "sonner";
-import { useApi } from "@/app/api";
+import { useApi, useSupportSession } from "@/app/api";
 
 export function useResource<T>(path: string, enabled = true) {
   const api = useApi();
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const reload = useCallback(async () => {
-    if (!enabled) return;
-    setLoading(true);
-    try {
-      setData(await api<T>(path));
-      setError(null);
-    } catch (cause) {
-      const message =
-        cause instanceof Error ? cause.message : "Could not load data";
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading(false);
-    }
-  }, [api, enabled, path]);
+  const { orgId } = useAuth();
+  const supportSession = useSupportSession();
+  const query = useQuery<T, Error>({
+    queryKey: ["resource", orgId ?? "no-organization", supportSession ?? "no-support-session", path],
+    queryFn: () => api<T>(path),
+    enabled,
+  });
 
   useEffect(() => {
-    if (!enabled) {
-      setData(null);
-      setError(null);
-      setLoading(false);
-      return;
+    if (query.error) {
+      toast.error(query.error.message || "Could not load data");
     }
-    void reload();
-  }, [enabled, reload]);
+  }, [query.error]);
 
-  return { data, loading, error, reload };
+  const reload = useCallback(async () => {
+    if (enabled) await query.refetch();
+  }, [enabled, query.refetch]);
+
+  return {
+    data: query.data ?? null,
+    loading: enabled && (query.isPending || query.isFetching),
+    error: query.error?.message ?? null,
+    reload,
+  };
 }

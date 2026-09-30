@@ -72,9 +72,17 @@ type BrowserSessionResponse = {
   sample_rate: number;
 };
 
-export function TestAgentModal() {
+type TestAgentModalProps = {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
+};
+
+export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger = false }: TestAgentModalProps = {}) {
   const api = useApi();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = onOpenChange ?? setInternalOpen;
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -321,12 +329,12 @@ export function TestAgentModal() {
   return (
     <>
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogTrigger asChild>
+        {!hideTrigger && <DialogTrigger asChild>
           <Button variant="outline" size="sm" className="gap-2">
             <Radio className="size-4 text-emerald-500 animate-pulse" />
             <span>Test Agent</span>
           </Button>
-        </DialogTrigger>
+        </DialogTrigger>}
         <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Test Agent</DialogTitle>

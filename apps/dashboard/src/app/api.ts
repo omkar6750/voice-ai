@@ -31,12 +31,16 @@ export async function request<T>(
   init: RequestInit = {},
   supportSession?: string | null,
 ): Promise<T> {
+  const startedAt = performance.now();
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${sessionToken}`);
   if (supportSession) headers.set("X-Platform-Support-Session", supportSession);
   if (init.body && !(init.body instanceof FormData))
     headers.set("Content-Type", "application/json");
   const response = await fetch(apiUrl(path), { ...init, headers });
+  if (import.meta.env.VITE_DEBUG_PERF === "true") {
+    console.debug(`[voice-api] ${init.method ?? "GET"} ${path} ${response.status} ${(performance.now() - startedAt).toFixed(0)}ms`);
+  }
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
     const detail = payload?.detail;

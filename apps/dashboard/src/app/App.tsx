@@ -1,11 +1,7 @@
 import { SignIn, SignUp, useAuth, UserButton } from "@clerk/react";
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { ApiContext, SupportSessionContext, request } from "./api";
-import { AppShell } from "./AppShell";
-import { OrgExplorer } from "./OrgExplorer";
-import { CreateOrganizationPage } from "@/pages/organizations/create";
-import { PlatformOrganizationsPage } from "@/pages/organizations/platform";
 import type { OrganizationView } from "./organizations";
 import type { AccountView } from "./organizations";
 import { Button } from "@/components/ui/button";
@@ -14,6 +10,18 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 
 const OrganizationArea = lazy(() =>
   import("@/pages/organizations/area").then((page) => ({ default: page.OrganizationArea })),
+);
+const AppShell = lazy(() =>
+  import("./AppShell").then((page) => ({ default: page.AppShell })),
+);
+const OrgExplorer = lazy(() =>
+  import("./OrgExplorer").then((page) => ({ default: page.OrgExplorer })),
+);
+const CreateOrganizationPage = lazy(() =>
+  import("@/pages/organizations/create").then((page) => ({ default: page.CreateOrganizationPage })),
+);
+const PlatformOrganizationsPage = lazy(() =>
+  import("@/pages/organizations/platform").then((page) => ({ default: page.PlatformOrganizationsPage })),
 );
 
 export function App() {
@@ -27,6 +35,12 @@ export function App() {
   const [accessStatus, setAccessStatus] = useState<"checking" | "allowed" | "denied">("checking");
   const [supportToken, setSupportToken] = useState<string | null>(null);
   const [supportOrganization, setSupportOrganization] = useState<{ id: string; name: string } | null>(null);
+  const organizationsRef = useRef(organizations);
+  const orgIdRef = useRef(orgId);
+  const supportTokenRef = useRef(supportToken);
+  organizationsRef.current = organizations;
+  orgIdRef.current = orgId;
+  supportTokenRef.current = supportToken;
   useEffect(() => {
     if (!isSignedIn) return;
     let cancelled = false;
@@ -35,10 +49,15 @@ export function App() {
       try {
         const token = await getToken();
         if (!token) throw new Error("No Clerk session token");
-        const joined = await request<OrganizationView[]>(token, "/orgs");
         const accountView = await request<AccountView>(token, "/me");
         if (!cancelled) {
-          setOrganizations(joined);
+          setOrganizations(accountView.organizations.map(({ id, name, role, registered, is_owner }) => ({
+            id,
+            name,
+            role,
+            registered,
+            is_owner,
+          })));
           setAccount(accountView);
           setOrgsError(null);
           setOrgsStatus("ready");
@@ -51,43 +70,31 @@ export function App() {
       }
     };
     void loadOrganizations();
-    window.addEventListener("focus", loadOrganizations);
-    return () => { cancelled = true; window.removeEventListener("focus", loadOrganizations); };
-  }, [getToken, isSignedIn, userId, orgId]);
+    return () => { cancelled = true; };
+  }, [getToken, isSignedIn, userId]);
   useEffect(() => {
-    if (!isSignedIn || !orgId || orgsStatus !== "ready" || !organizations.some((org) => org.id === orgId && org.registered)) {
-      setAccessStatus("denied");
+    if (!isSignedIn || orgsStatus !== "ready") {
+      setAccessStatus("checking");
       return;
     }
-    let cancelled = false;
-    setAccessStatus("checking");
-    void (async () => {
-      try {
-        const sessionToken = await getToken();
-        if (!sessionToken) throw new Error("No Clerk session token");
-        await request(sessionToken, "/auth/organization-access");
-        if (!cancelled) setAccessStatus("allowed");
-      } catch {
-        if (!cancelled) setAccessStatus("denied");
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [getToken, isSignedIn, orgId, orgsStatus, organizations]);
+    setAccessStatus(orgId && organizations.some((org) => org.id === orgId && org.registered) ? "allowed" : "denied");
+  }, [isSignedIn, orgId, orgsStatus, organizations]);
   const api = useCallback(
     async <T,>(path: string, init?: RequestInit) => {
       const sessionToken = await getToken();
       if (!sessionToken) throw new Error("Sign in required");
       const method = (init?.method ?? "GET").toUpperCase();
-      if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && !supportToken) {
-        const activeRole = organizations.find((organization) => organization.id === orgId)?.role;
+      const currentSupportToken = supportTokenRef.current;
+      if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && !currentSupportToken) {
+        const activeRole = organizationsRef.current.find((organization) => organization.id === orgIdRef.current)?.role;
         const isBrowserTestLifecycle = path === "/browser-sessions" || path.startsWith("/browser-sessions/");
         if (activeRole !== "org:admin" && !isBrowserTestLifecycle) {
           throw new Error("Organization admin access is required for this action");
         }
       }
-      return request<T>(sessionToken, path, init, supportToken);
+      return request<T>(sessionToken, path, init, currentSupportToken);
     },
-    [getToken, supportToken, organizations, orgId],
+    [getToken],
   );
   const enterSupport = useCallback(async (id: string, name: string) => {
     const sessionToken = await getToken();
@@ -136,9 +143,9 @@ export function App() {
       <ApiContext.Provider value={api}>
         <SupportSessionContext.Provider value={supportToken}>
         {pathname.startsWith("/platform/support") && supportToken && supportOrganization && account?.platform_admin
-          ? <AppShell organizations={organizations} platformAdmin supportOrganization={supportOrganization} onExitSupport={() => void exitSupport()} />
+          ? <Suspense fallback={<main className="grid min-h-svh place-items-center" role="status">Loading dashboard…</main>}><AppShell organizations={organizations} platformAdmin supportOrganization={supportOrganization} onExitSupport={() => void exitSupport()} /></Suspense>
           : pathname === "/platform/orgs" && account?.platform_admin
-          ? <PlatformOrganizationsPage onEnterSupport={enterSupport} />
+          ? <Suspense fallback={<main className="p-6" role="status">Loading platform organizations…</main>}><PlatformOrganizationsPage onEnterSupport={enterSupport} /></Suspense>
           : accessStatus === "denied" && /^\/orgs\/[^/]+(?:\/members|\/settings)?$/.test(pathname)
           ? <Suspense fallback={<main className="p-6" role="status">Loading organization…</main>}>
               <Routes>
@@ -149,11 +156,11 @@ export function App() {
             </Suspense>
           : pathname === "/orgs" || pathname.startsWith("/onboarding/") || !orgId || !organizations.some((org) => org.id === orgId && org.registered) || accessStatus === "denied"
           ? <Routes>
-              <Route path="/onboarding/create-org" element={<CreateOrganizationPage account={account} />} />
-              <Route path="*" element={<OrgExplorer organizations={organizations} loading={orgsStatus === "loading"} error={orgsError} canCreate={Boolean(account?.can_create_org && account.organization_creation_enabled)} availableOrgIds={account?.organizations.filter((org) => org.capabilities.includes("browser_test")).map((org) => org.id) ?? []} platformAdmin={account?.platform_admin ?? false} />} />
+              <Route path="/onboarding/create-org" element={<Suspense fallback={<main className="p-6" role="status">Loading organization setup…</main>}><CreateOrganizationPage account={account} /></Suspense>} />
+              <Route path="*" element={<Suspense fallback={<main className="p-6" role="status">Loading organizations…</main>}><OrgExplorer organizations={organizations} loading={orgsStatus === "loading"} error={orgsError} canCreate={Boolean(account?.can_create_org && account.organization_creation_enabled)} availableOrgIds={account?.organizations.filter((org) => org.capabilities.includes("browser_test")).map((org) => org.id) ?? []} platformAdmin={account?.platform_admin ?? false} /></Suspense>} />
             </Routes>
           : accessStatus === "allowed"
-            ? <AppShell organizations={organizations} platformAdmin={account?.platform_admin ?? false} />
+            ? <Suspense fallback={<main className="grid min-h-svh place-items-center" role="status">Loading dashboard…</main>}><AppShell organizations={organizations} platformAdmin={account?.platform_admin ?? false} /></Suspense>
             : <main className="grid min-h-svh place-items-center px-4"><div className="flex items-center gap-3"><UserButton /><p role="status">Checking organization access…</p></div></main>}
         </SupportSessionContext.Provider>
       </ApiContext.Provider>
