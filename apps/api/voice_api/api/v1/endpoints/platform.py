@@ -9,11 +9,11 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.core.clerk_auth import ClerkPrincipal, require_clerk_user
+from voice_api.core.security import require_platform_admin_user
 from voice_api.db.session import get_session
 from voice_api.models import (
     Organization,
     OrganizationAudit,
-    PlatformAdministrator,
     PlatformSupportSession,
     User,
 )
@@ -36,33 +36,13 @@ class PlatformSupportSessionView(BaseModel):
     expires_at: datetime
 
 
-async def _require_platform_admin(
-    principal: ClerkPrincipal,
-    session: AsyncSession,
-) -> User:
-    user = await session.scalar(
-        select(User).where(
-            User.clerk_user_id == principal.user_id,
-            User.disabled_at.is_(None),
-        )
-    )
-    if user is None:
-        raise HTTPException(403, "Platform administrator required")
-    assignment = await session.scalar(
-        select(PlatformAdministrator.id).where(PlatformAdministrator.user_id == user.id)
-    )
-    if assignment is None:
-        raise HTTPException(403, "Platform administrator required")
-    return user
-
-
 @router.get("/orgs", response_model=list[PlatformOrganizationView])
 async def platform_organizations(
     principal: ClerkPrincipal = Principal,
     session: AsyncSession = Session,
 ) -> list[PlatformOrganizationView]:
     """List registered customer orgs; this does not grant access to their data."""
-    await _require_platform_admin(principal, session)
+    await require_platform_admin_user(principal, session)
     rows = (
         await session.execute(
             select(Organization, User)
@@ -89,7 +69,7 @@ async def start_support_session(
     session: AsyncSession = Session,
 ) -> PlatformSupportSessionView:
     """Start a 30-minute audited support session for one registered organization."""
-    actor = await _require_platform_admin(principal, session)
+    actor = await require_platform_admin_user(principal, session)
     organization = await session.scalar(
         select(Organization).where(Organization.clerk_org_id == org_id)
     )
@@ -137,7 +117,7 @@ async def end_support_session(
     session: AsyncSession = Session,
     support_token: str | None = Header(default=None, alias="X-Platform-Support-Session"),
 ) -> None:
-    actor = await _require_platform_admin(principal, session)
+    actor = await require_platform_admin_user(principal, session)
     if not support_token or len(support_token) > 256:
         raise HTTPException(404, "Support session not found")
     token_hash = sha256(support_token.encode("utf-8")).hexdigest()

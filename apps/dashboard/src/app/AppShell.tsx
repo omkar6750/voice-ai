@@ -54,7 +54,7 @@ const navigation = [
   { title: "Settings", path: "/settings", icon: Settings2 },
 ] as const;
 
-function SideNavigation({ platformAdmin, canManageHardware, supportMode }: { platformAdmin: boolean; canManageHardware: boolean; supportMode: boolean }) {
+function SideNavigation({ platformAdmin, supportMode }: { platformAdmin: boolean; supportMode: boolean }) {
   const { signOut } = useClerk();
   const { orgId } = useAuth();
   const { pathname } = useLocation();
@@ -71,7 +71,7 @@ function SideNavigation({ platformAdmin, canManageHardware, supportMode }: { pla
           <SidebarGroupLabel>Organization</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navigation.filter((item) => (item.path !== "/endpoints" || canManageHardware) && (item.path !== "/recordings" || !supportMode)).map(({ title, path, icon: Icon }) => (
+              {navigation.filter((item) => (item.path !== "/endpoints" || platformAdmin) && (item.path !== "/recordings" || !supportMode)).map(({ title, path, icon: Icon }) => (
                 <SidebarMenuItem key={path}>
                   <SidebarMenuButton asChild tooltip={title} isActive={pathname === path || pathname.startsWith(`${path}/`)}>
                     <NavLink to={path}><Icon aria-hidden="true" /><span>{title}</span></NavLink>
@@ -148,7 +148,7 @@ export function AppShell({ organizations, platformAdmin = false, supportOrganiza
   return (
     <OrganizationAccessContext.Provider value={access}>
     <SidebarProvider>
-      <SideNavigation platformAdmin={platformAdmin} canManageHardware={canDial} supportMode={Boolean(supportOrganization)} />
+      <SideNavigation platformAdmin={platformAdmin} supportMode={Boolean(supportOrganization)} />
       <SidebarInset className="min-w-0">
         <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
           <SidebarTrigger />
@@ -166,7 +166,7 @@ export function AppShell({ organizations, platformAdmin = false, supportOrganiza
         </header>
         <main className="min-w-0 flex-1">
           {!access.canManage && <div className="border-b bg-muted/40 px-6 py-2 text-sm text-muted-foreground" role="status">Member access is read-only. You can review organization data and make browser test calls.</div>}
-          <AppRoutes />
+          <AppRoutes platformAdmin={platformAdmin} />
         </main>
       </SidebarInset>
     </SidebarProvider>

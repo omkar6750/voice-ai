@@ -76,7 +76,7 @@ const OrganizationArea = lazy(() =>
 );
 
 
-export function AppRoutes() {
+export function AppRoutes({ platformAdmin }: { platformAdmin: boolean }) {
   return (
     <Suspense
       fallback={
@@ -110,7 +110,7 @@ export function AppRoutes() {
           element={<IntegrationDetailPage />}
         />
         <Route path="/callbacks" element={<CallbacksPage />} />
-        <Route path="/endpoints" element={<EndpointsPage />} />
+        <Route path="/endpoints" element={platformAdmin ? <EndpointsPage /> : <Navigate to="/runs" replace />} />
 
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/orgs/:orgId" element={<OrganizationArea />} />

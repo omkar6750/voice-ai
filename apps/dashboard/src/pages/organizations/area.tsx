@@ -6,7 +6,7 @@ import { useApi } from "@/app/api";
 import type { OrganizationView } from "@/app/organizations";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ProviderCredentials } from "@/pages/settings/ProviderCredentials";
+const ProviderCredentials = lazy(() => import("@/pages/settings/ProviderCredentials").then((page) => ({ default: page.ProviderCredentials })));
 
 const OrganizationMembersPage = lazy(() =>
   import("./members").then((page) => ({ default: page.OrganizationMembersPage })),
@@ -48,7 +48,7 @@ export function OrganizationArea() {
   if (error) return <main className="mx-auto max-w-3xl p-6"><p role="alert" className="text-destructive">{error}</p><Button asChild variant="outline"><Link to="/orgs">Back to organizations</Link></Button></main>;
   if (!organization) return <main className="p-6" role="status">Loading organization…</main>;
 
-  if (pathname.endsWith("/members")) return <Suspense fallback={<main className="p-6" role="status">Loading members…</main>}><OrganizationMembersPage /></Suspense>;
+  if (pathname.endsWith("/members")) return <Suspense fallback={<main className="p-6" role="status">Loading members…</main>}><OrganizationMembersPage organization={organization} /></Suspense>;
 
   const settings = pathname.endsWith("/settings");
 
@@ -78,7 +78,7 @@ export function OrganizationArea() {
       <CardHeader><CardTitle>People and access</CardTitle><CardDescription>Invite teammates, manage roles, or transfer ownership.</CardDescription></CardHeader>
       <CardContent><Button asChild variant="outline"><Link to={`/orgs/${routeOrgId}/members`}>Manage members</Link></Button></CardContent>
     </Card>
-    <ProviderCredentials />
+    <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">Loading provider credentials…</p>}><ProviderCredentials /></Suspense>
     <p className="text-sm text-muted-foreground">Agent, contact, and call features are enabled only for organizations whose data access has been provisioned.</p>
   </main>;
 }

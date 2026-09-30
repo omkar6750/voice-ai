@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "generate": "openapi-typescript ../../data/openapi.json -o src/generated/api.d.ts && node scripts/generate-schema.mjs",
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "dev": "vite --configLoader runner",
+    "build": "tsc -b && vite --configLoader runner build",
     "format": "prettier --write src",
     "preview": "vite preview"
   },

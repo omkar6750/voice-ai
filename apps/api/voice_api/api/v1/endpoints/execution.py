@@ -7,10 +7,10 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from voice_api.api.deps import get_session, require_legacy_owner, require_runtime_service
+from voice_api.api.deps import get_session, require_platform_admin, require_runtime_service
 from voice_api.core.hosting import require_local_modem
 from voice_api.core.security import safe_evidence
-from voice_api.db.tenant_scope import bind_run_organization
+from voice_api.db.tenant_scope import bind_organization, bind_run_organization, platform_admin_read
 from voice_api.models import Call, Callback, Run, RuntimeEndpoint
 from voice_api.models.common import new_id
 from voice_api.schemas.execution import (
@@ -70,12 +70,18 @@ def _modem_status(status: ModemStatus) -> EndpointStatus:
 @router.get(
     "/runtime-endpoints",
     response_model=RuntimeEndpointsResponse,
-    dependencies=[Depends(require_legacy_owner)],
+    dependencies=[Depends(require_platform_admin)],
 )
 async def list_endpoints(session: AsyncSession = Session) -> dict:
     require_local_modem()
     rows = (await session.scalars(select(RuntimeEndpoint).order_by(RuntimeEndpoint.name))).all()
-    active_runs = (await session.scalars(select(Run).where(Run.status.in_(ACTIVE)))).all()
+    active_runs = (
+        await session.execute(
+            platform_admin_read(
+                select(Run.endpoint_id, Run.id).where(Run.status.in_(ACTIVE))
+            )
+        )
+    ).all()
     active_by_endpoint = {run.endpoint_id: run.id for run in active_runs if run.endpoint_id}
     now = datetime.now(UTC)
 
@@ -99,7 +105,7 @@ async def list_endpoints(session: AsyncSession = Session) -> dict:
 @router.get(
     "/runtime-endpoints/{endpoint_id}",
     response_model=RuntimeEndpointResponse,
-    dependencies=[Depends(require_legacy_owner)],
+    dependencies=[Depends(require_platform_admin)],
 )
 async def get_endpoint(endpoint_id: str, session: AsyncSession = Session) -> dict:
     require_local_modem()
@@ -107,7 +113,9 @@ async def get_endpoint(endpoint_id: str, session: AsyncSession = Session) -> dic
     if endpoint is None:
         raise HTTPException(404, "Runtime endpoint not found")
     active = await session.scalar(
-        select(Run.id).where(Run.endpoint_id == endpoint.id, Run.status.in_(ACTIVE))
+        platform_admin_read(
+            select(Run.id).where(Run.endpoint_id == endpoint.id, Run.status.in_(ACTIVE))
+        )
     )
     now = datetime.now(UTC)
     return {
@@ -141,7 +149,7 @@ async def update_endpoint_status(
 @router.post(
     "/runtime-endpoints/{endpoint_id}/probe",
     response_model=EndpointProbeResponse,
-    dependencies=[Depends(require_legacy_owner)],
+    dependencies=[Depends(require_platform_admin)],
 )
 async def probe_endpoint(endpoint_id: str, session: AsyncSession = Session) -> dict:
     require_local_modem()
@@ -152,7 +160,9 @@ async def probe_endpoint(endpoint_id: str, session: AsyncSession = Session) -> d
         raise HTTPException(404, "Runtime endpoint not found")
 
     active_run = await session.scalar(
-        select(Run.id).where(Run.endpoint_id == endpoint.id, Run.status.in_(ACTIVE)).limit(1)
+        platform_admin_read(
+            select(Run.id).where(Run.endpoint_id == endpoint.id, Run.status.in_(ACTIVE)).limit(1)
+        )
     )
     if active_run:
         raise HTTPException(409, "A call owns this modem; connection probing is paused")
@@ -192,7 +202,7 @@ async def probe_endpoint(endpoint_id: str, session: AsyncSession = Session) -> d
     return {"id": endpoint.id, "status": status}
 
 
-@router.post("/runtime-endpoints", status_code=201, dependencies=[Depends(require_legacy_owner)])
+@router.post("/runtime-endpoints", status_code=201, dependencies=[Depends(require_platform_admin)])
 async def register(body: EndpointBody, session: AsyncSession = Session) -> dict:
     require_local_modem()
     if body.config.at_port == body.config.audio_port:
@@ -314,7 +324,7 @@ async def progress(run_id: str, body: Progress, session: AsyncSession = Session)
 
 
 @router.post(
-    "/runtime-endpoints/{endpoint_id}/recover", dependencies=[Depends(require_legacy_owner)]
+    "/runtime-endpoints/{endpoint_id}/recover", dependencies=[Depends(require_platform_admin)]
 )
 async def recover(endpoint_id: str, session: AsyncSession = Session) -> dict:
     require_local_modem()
@@ -322,15 +332,18 @@ async def recover(endpoint_id: str, session: AsyncSession = Session) -> dict:
     if endpoint is None:
         raise HTTPException(404, "Runtime endpoint not found")
     run = await session.scalar(
-        select(Run)
-        .where(
-            Run.endpoint_id == endpoint_id,
-            Run.status.in_(("claimed", "running")),
-            Run.lease_expires_at <= datetime.now(UTC),
+        platform_admin_read(
+            select(Run)
+            .where(
+                Run.endpoint_id == endpoint_id,
+                Run.status.in_(("claimed", "running")),
+                Run.lease_expires_at <= datetime.now(UTC),
+            )
+            .with_for_update()
         )
-        .with_for_update()
     )
     if run:
+        bind_organization(session.sync_session, run.org_id)
         run.status = "uncertain"
         run.error = "Worker lease expired; inspect modem before explicit reconciliation"
         call = await session.scalar(select(Call).where(Call.run_id == run.id))

@@ -8,6 +8,8 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine, delete, func, insert, select, text, update
 from sqlalchemy.orm import Session
 from voice_api.db.tenant_scope import (
+    _PLATFORM_ADMIN_READ,
+    _PLATFORM_ADMIN_SCOPE,
     _SCOPE_BOOTSTRAP,
     _valid_bootstrap_query,
     bind_calendar_oauth_organization,
@@ -16,6 +18,8 @@ from voice_api.db.tenant_scope import (
     bind_knowledge_source_organization,
     bind_organization,
     bind_run_organization,
+    mark_platform_admin,
+    platform_admin_read,
 )
 from voice_api.models import (
     Agent,
@@ -76,6 +80,21 @@ def test_unscoped_tenant_orm_reads_and_bulk_writes_fail_closed() -> None:
             session.execute(delete(Agent))
         with pytest.raises(HTTPException, match="Organization context required"):
             session.execute(insert(Agent).values(id="bulk", name="Blocked", org_id="org_one"))
+
+
+def test_platform_admin_read_is_explicit_and_request_scoped() -> None:
+    with Session(_engine()) as session:
+        query = platform_admin_read(select(Agent))
+        assert query.get_execution_options()[_PLATFORM_ADMIN_READ] is True
+        with pytest.raises(HTTPException, match="Platform-admin read required"):
+            session.scalars(query).all()
+
+        mark_platform_admin(session)
+        assert session.scalars(query).all()[0].id == "own"
+        assert session.info[_PLATFORM_ADMIN_SCOPE] is True
+
+        with pytest.raises(HTTPException, match="Platform-admin read required"):
+            session.execute(platform_admin_read(update(Agent).values(name="Changed")))
 
 
 def test_scoped_core_and_text_tenant_queries_require_explicit_matching_scope() -> None:

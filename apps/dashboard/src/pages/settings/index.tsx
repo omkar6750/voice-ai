@@ -1,8 +1,7 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { lazy, Suspense, useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
 import { useOrganizationAccess } from "@/app/access";
-import { ProviderCredentials } from "./ProviderCredentials";
 import { LoadState, PageBody, PageHeader } from "@/components/record-page";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +22,7 @@ type WorkspaceConfig = {
   callback_due_window_minutes: number;
 };
 type Workspace = { revision: number; config: WorkspaceConfig };
+const ProviderCredentials = lazy(() => import("./ProviderCredentials").then((module) => ({ default: module.ProviderCredentials })));
 export function SettingsPage() {
   const api = useApi();
   const { canManage } = useOrganizationAccess();
@@ -168,7 +168,9 @@ export function SettingsPage() {
           </form>
         )}
       </LoadState>
-      <ProviderCredentials />
+      <Suspense fallback={<p role="status" className="text-sm text-muted-foreground">Loading provider credentials…</p>}>
+        <ProviderCredentials />
+      </Suspense>
     </PageBody>
   );
 }

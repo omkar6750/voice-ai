@@ -16,7 +16,7 @@ from voice_api.core.clerk_organizations import (
 )
 from voice_api.core.config import get_settings
 from voice_api.db.session import get_session
-from voice_api.db.tenant_scope import bind_organization
+from voice_api.db.tenant_scope import bind_organization, mark_platform_admin
 from voice_api.models import (
     LegacyDataTenant,
     Organization,
@@ -104,6 +104,39 @@ async def require_organization_access(
         if not getattr(endpoint, "__allow_organization_member__", False):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Organization admin required")
     bind_organization(session.sync_session, organization_id)
+    return principal
+
+
+async def require_platform_admin_user(
+    principal: ClerkPrincipal,
+    session: AsyncSession,
+) -> User:
+    """Resolve the database-backed platform administrator assignment."""
+    user = await session.scalar(
+        select(User).where(
+            User.clerk_user_id == principal.user_id,
+            User.disabled_at.is_(None),
+        )
+    )
+    assignment = (
+        await session.scalar(
+            select(PlatformAdministrator.id).where(PlatformAdministrator.user_id == user.id)
+        )
+        if user
+        else None
+    )
+    if user is None or assignment is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Platform administrator required")
+    mark_platform_admin(session.sync_session)
+    return user
+
+
+async def require_platform_admin(
+    principal: ClerkPrincipal = Principal,
+    session: AsyncSession = Session,
+) -> ClerkPrincipal:
+    """Authorize platform-only operations independently of the active org."""
+    await require_platform_admin_user(principal, session)
     return principal
 
 

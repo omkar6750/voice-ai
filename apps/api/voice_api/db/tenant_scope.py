@@ -18,6 +18,8 @@ from voice_api.models.common import Base, OrganizationOwned
 
 _SCOPE_KEY = "organization_scope_id"
 _SCOPE_BOOTSTRAP = "_scope_bootstrap"
+_PLATFORM_ADMIN_SCOPE = "platform_admin_scope"
+_PLATFORM_ADMIN_READ = "_platform_admin_read"
 
 
 def _references_tenant_table(statement) -> bool:
@@ -103,6 +105,16 @@ def bind_organization(session: Session, organization_id: str) -> None:
         if isinstance(row, OrganizationOwned) and row.org_id != organization_id:
             raise HTTPException(404, "Organization resource not found")
     session.info[_SCOPE_KEY] = organization_id
+
+
+def mark_platform_admin(session: Session) -> None:
+    """Mark a request session after the platform-admin assignment is verified."""
+    session.info[_PLATFORM_ADMIN_SCOPE] = True
+
+
+def platform_admin_read(statement):
+    """Opt a specific read into the verified platform-admin aggregate path."""
+    return statement.execution_options(**{_PLATFORM_ADMIN_READ: True})
 
 
 def required_organization(session: Session) -> str:
@@ -259,6 +271,10 @@ def _valid_bootstrap_query(statement) -> bool:
 def _scope_orm_statements(state) -> None:
     org_id = state.session.info.get(_SCOPE_KEY)
     references_tenant = _references_tenant_table(state.statement)
+    if state.execution_options.get(_PLATFORM_ADMIN_READ) and references_tenant:
+        if not state.session.info.get(_PLATFORM_ADMIN_SCOPE) or not state.is_select:
+            raise HTTPException(status_code=403, detail="Platform-admin read required")
+        return
     tenant_mappers = tuple(
         mapper for mapper in state.all_mappers if issubclass(mapper.class_, OrganizationOwned)
     )
