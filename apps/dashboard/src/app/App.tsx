@@ -2,7 +2,7 @@ import { SignIn, SignUp, useAuth, useOrganization } from "@clerk/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { ApiContext, SupportSessionContext, request, useApi } from "./api";
+import { ApiContext, ApiError, SupportSessionContext, request, useApi } from "./api";
 import { useAppContext } from "./app-context";
 import { PlatformKeepAwake } from "./PlatformKeepAwake";
 import { clerkUrls } from "./clerk-config";
@@ -19,6 +19,24 @@ const OrganizationProfilePage = lazy(() => import("@/pages/organizations/clerk")
 
 function LoadingPage({ children = "Loading dashboard…" }: { children?: string }) {
   return <main className="grid min-h-svh place-items-center" role="status">{children}</main>;
+}
+
+async function requestWithFreshToken<T>(
+  getToken: ReturnType<typeof useAuth>["getToken"],
+  path: string,
+  init?: RequestInit,
+  supportSession?: string | null,
+): Promise<T> {
+  const token = await getToken();
+  if (!token) throw new Error("Sign in required");
+  try {
+    return await request<T>(token, path, init, supportSession);
+  } catch (cause) {
+    if (!(cause instanceof ApiError) || cause.status !== 401) throw cause;
+    const freshToken = await getToken({ skipCache: true });
+    if (!freshToken || freshToken === token) throw cause;
+    return request<T>(freshToken, path, init, supportSession);
+  }
 }
 
 function SignedOutRoutes() {
@@ -79,9 +97,7 @@ function AuthenticatedApp() {
   }, [orgId, orgRole, queryClient]);
 
   const api = useCallback(async <T,>(path: string, init?: RequestInit) => {
-    const token = await getToken();
-    if (!token) throw new Error("Sign in required");
-    return request<T>(token, path, init, supportTokenRef.current);
+    return requestWithFreshToken<T>(getToken, path, init, supportTokenRef.current);
   }, [getToken]);
   const enterSupport = useCallback(async (id: string, name: string) => {
     const token = await getToken();
@@ -141,9 +157,7 @@ function AuthenticatedApp() {
 export function App() {
   const { getToken } = useAuth();
   const api = useCallback(async <T,>(path: string, init?: RequestInit) => {
-    const token = await getToken();
-    if (!token) throw new Error("Sign in required");
-    return request<T>(token, path, init);
+    return requestWithFreshToken<T>(getToken, path, init);
   }, [getToken]);
   return <ApiContext.Provider value={api}><AuthenticatedApp /></ApiContext.Provider>;
 }

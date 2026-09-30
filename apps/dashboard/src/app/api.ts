@@ -3,6 +3,13 @@ import { createContext, useContext } from "react";
 export type Api = <T>(path: string, init?: RequestInit) => Promise<T>;
 export const ApiContext = createContext<Api | null>(null);
 export const SupportSessionContext = createContext<string | null>(null);
+
+export class ApiError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 const apiOrigin = (import.meta.env.VITE_API_ORIGIN ?? "").replace(/\/$/, "");
 
 export function healthUrl(): string {
@@ -57,7 +64,7 @@ export async function request<T>(
               .map((item: { msg?: string }) => item.msg ?? "Invalid value")
               .join("; ")
           : `Request failed (${response.status})`;
-    throw new Error(message);
+    throw new ApiError(response.status, message);
   }
   return response.status === 204
     ? (undefined as T)
@@ -73,7 +80,8 @@ export async function requestBlob(token: string, path: string, supportSession?: 
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
     const detail = payload?.detail;
-    throw new Error(
+    throw new ApiError(
+      response.status,
       typeof detail === "string"
         ? detail
         : `Request failed (${response.status})`,

@@ -89,6 +89,7 @@ function PipelineDebugLog({ artifact }: { artifact: Artifact }) {
 
 export function RunDetailPage() {
   const { runId } = useParams();
+  const { isLoaded, isSignedIn } = useAuth();
   const api = useApi();
   const supportSession = useSupportSession();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -109,7 +110,7 @@ export function RunDetailPage() {
   };
   const load = useCallback(
     async (notify = false) => {
-      if (!runId) return;
+      if (!runId || !isLoaded || !isSignedIn) return;
       try {
         const [detail, evidence, catalog, files] = await Promise.all([
           api<RunDetail>("/runs/" + runId),
@@ -136,7 +137,7 @@ export function RunDetailPage() {
         if (currentRun.current === runId) setLoading(false);
       }
     },
-    [api, runId, supportSession],
+    [api, isLoaded, isSignedIn, runId, supportSession],
   );
   useEffect(() => {
     setSelection({ kind: "run" });
@@ -147,12 +148,12 @@ export function RunDetailPage() {
     void load();
   }, [runId, load]);
   useEffect(() => {
-    if (!run || !isActive(run.status)) return;
+    if (!isLoaded || !isSignedIn || !run || !isActive(run.status)) return;
     const timer = window.setInterval(() => {
       void load();
     }, 3000);
     return () => window.clearInterval(timer);
-  }, [run?.status, load]);
+  }, [isLoaded, isSignedIn, run?.status, load]);
   const recorded = artifacts.filter((item) => item.kind !== "pipeline_log");
   const pipelineLog = artifacts.find((item) => item.kind === "pipeline_log");
   const durationMs =
