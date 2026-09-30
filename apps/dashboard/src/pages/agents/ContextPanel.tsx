@@ -6,9 +6,13 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Textarea } from "@/components/ui/textarea";
 import { NumberField } from "./ConfigFields";
-import { CredentialBindingSelect, bindCredential } from "./CredentialBindingSelect";
+import {
+  CredentialBindingSelect,
+  bindCredential,
+} from "./CredentialBindingSelect";
 import { OpenRouterModelPicker } from "./OpenRouterModelPicker";
 import type { AgentConfig, ProviderCatalog, SummarizerConfig } from "./types";
 
@@ -24,20 +28,27 @@ export function ContextPanel({
   disabled: boolean;
 }) {
   const summarizer = config.context.summarizer ?? {};
-  const summaryModel: NonNullable<typeof summarizer.model> = summarizer.model ?? {
-    provider: "groq" as const,
-    model: "qwen/qwen3.8-27b",
-    temperature: 0.4,
-    max_tokens: 512,
-    top_p: null,
-    reasoning_effort: "none" as const,
-    prompt: "Summarize the supplied history faithfully; preserve decisions and facts.",
-    output_fields: {},
-    max_output_tokens: 512,
-  };
-  const llmProviders = catalog?.providers.filter((provider) => provider.slots.includes("llm")) ?? [];
-  const selectedProvider = llmProviders.find((provider) => provider.provider === summaryModel.provider);
-  const llmModels = selectedProvider?.models_by_slot?.llm ?? selectedProvider?.models ?? [];
+  const summaryModel: NonNullable<typeof summarizer.model> =
+    summarizer.model ?? {
+      provider: "groq" as const,
+      model: "qwen/qwen3.8-27b",
+      temperature: 0.4,
+      max_tokens: 512,
+      top_p: null,
+      reasoning_effort: "none" as const,
+      prompt:
+        "Summarize the supplied history faithfully; preserve decisions and facts.",
+      output_fields: {},
+      max_output_tokens: 512,
+    };
+  const llmProviders =
+    catalog?.providers.filter((provider) => provider.slots.includes("llm")) ??
+    [];
+  const selectedProvider = llmProviders.find(
+    (provider) => provider.provider === summaryModel.provider,
+  );
+  const llmModels =
+    selectedProvider?.models_by_slot?.llm ?? selectedProvider?.models ?? [];
   function updateSummarizer(partial: Partial<SummarizerConfig>) {
     change({
       ...config,
@@ -51,7 +62,9 @@ export function ContextPanel({
     });
   }
 
-  function updateSummaryModel(partial: Partial<NonNullable<SummarizerConfig["model"]>>) {
+  function updateSummaryModel(
+    partial: Partial<NonNullable<SummarizerConfig["model"]>>,
+  ) {
     updateSummarizer({ model: { ...summaryModel, ...partial } });
   }
 
@@ -75,7 +88,9 @@ export function ContextPanel({
               max={128000}
               step={1024}
               disabled={disabled}
-              onChange={(val) => updateSummarizer({ context_window_tokens: val })}
+              onChange={(val) =>
+                updateSummarizer({ context_window_tokens: val })
+              }
               hint="Total model context window"
             />
             <NumberField
@@ -98,7 +113,9 @@ export function ContextPanel({
               min={0}
               max={50}
               disabled={disabled}
-              onChange={(val) => updateSummarizer({ preserve_recent_messages: val })}
+              onChange={(val) =>
+                updateSummarizer({ preserve_recent_messages: val })
+              }
               hint="Recent messages kept uncompacted"
             />
             <NumberField
@@ -108,7 +125,9 @@ export function ContextPanel({
               min={64}
               max={2048}
               disabled={disabled}
-              onChange={(val) => updateSummarizer({ output_budget_tokens: val })}
+              onChange={(val) =>
+                updateSummarizer({ output_budget_tokens: val })
+              }
               hint="Maximum generated summary size"
             />
           </div>
@@ -124,72 +143,164 @@ export function ContextPanel({
         </div>
 
         <FieldGroup>
-          {summaryModel.provider === "openrouter" ? <OpenRouterModelPicker
-            stage="summarizer"
-            credentialId={config.credential_refs.summarizer}
-            value={summaryModel.model ?? ""}
-            disabled={disabled}
-            onChange={(model) => updateSummaryModel({ model })}
-          /> : <Field>
-            <FieldLabel htmlFor="summarizer-enabled">Summarizer status</FieldLabel>
+          <Field>
+            <FieldLabel htmlFor="summarizer-enabled">
+              Summarizer status
+            </FieldLabel>
             <NativeSelect
               id="summarizer-enabled"
               value={summarizer.enabled ? "enabled" : "disabled"}
               disabled={disabled}
-              onChange={(e) => updateSummarizer({ enabled: e.target.value === "enabled" })}
+              onChange={(e) =>
+                updateSummarizer({ enabled: e.target.value === "enabled" })
+              }
             >
               <option value="disabled">Disabled</option>
               <option value="enabled">Enabled</option>
             </NativeSelect>
-          </Field>}
-          {summarizer.enabled && <CredentialBindingSelect stage="summarizer" provider={summaryModel.provider} value={config.credential_refs.summarizer} disabled={disabled} change={(id) => change(bindCredential(config, "summarizer", id))} />}
+          </Field>
+          {summarizer.enabled && (
+            <CredentialBindingSelect
+              stage="summarizer"
+              provider={summaryModel.provider}
+              value={config.credential_refs.summarizer}
+              disabled={disabled}
+              change={(id) => change(bindCredential(config, "summarizer", id))}
+            />
+          )}
 
           <Field>
-            <FieldLabel htmlFor="summary-provider">Summary LLM provider</FieldLabel>
-            <NativeSelect id="summary-provider" className="w-full" value={summaryModel.provider}
-              disabled={disabled || !catalog} onChange={(event) => {
-                const provider = event.target.value as NonNullable<typeof summaryModel>["provider"];
-                const selected = llmProviders.find((item) => item.provider === provider);
-                const models = selected?.models_by_slot?.llm ?? selected?.models ?? [];
+            <FieldLabel htmlFor="summary-provider">
+              Summary LLM provider
+            </FieldLabel>
+            <NativeSelect
+              id="summary-provider"
+              className="w-full"
+              value={summaryModel.provider}
+              disabled={disabled || !catalog}
+              onChange={(event) => {
+                const provider = event.target.value as NonNullable<
+                  typeof summaryModel
+                >["provider"];
+                const selected = llmProviders.find(
+                  (item) => item.provider === provider,
+                );
+                const models =
+                  selected?.models_by_slot?.llm ?? selected?.models ?? [];
                 if (!models.length && provider !== "openrouter") return;
-                updateSummaryModel({ provider, model: models[0] ?? summaryModel.model, reasoning_effort: provider === "gemini" || provider === "openrouter" ? "provider_default" : "none" });
-              }}>
+                updateSummaryModel({
+                  provider,
+                  model: models[0] ?? summaryModel.model,
+                  reasoning_effort:
+                    provider === "gemini" || provider === "openrouter"
+                      ? "provider_default"
+                      : "none",
+                });
+              }}
+            >
               {llmProviders.map((item) => {
                 const models = item.models_by_slot?.llm ?? item.models ?? [];
-                return <option key={item.provider} value={item.provider} disabled={!models.length && item.provider !== "openrouter"}>
-                  {item.provider}{!models.length && item.provider !== "openrouter" ? ` (${item.status ?? "unavailable"})` : ""}
-                </option>;
+                return (
+                  <option
+                    key={item.provider}
+                    value={item.provider}
+                    disabled={!models.length && item.provider !== "openrouter"}
+                  >
+                    {item.provider}
+                    {!models.length && item.provider !== "openrouter"
+                      ? ` (${item.status ?? "unavailable"})`
+                      : ""}
+                  </option>
+                );
               })}
             </NativeSelect>
-            <FieldDescription>Uses the selected provider with server-side credentials.</FieldDescription>
+            <FieldDescription>
+              Uses the selected provider with server-side credentials.
+            </FieldDescription>
           </Field>
 
-          <Field>
-            <FieldLabel htmlFor="summary-model">Summary model</FieldLabel>
-            <NativeSelect id="summary-model" className="w-full" value={summaryModel.model}
-              disabled={disabled || !catalog || !llmModels.length}
-              onChange={(event) => updateSummaryModel({ model: event.target.value })}>
-              {!llmModels.includes(summaryModel.model ?? "") && <option value={summaryModel.model}>{summaryModel.model} (stored)</option>}
-              {llmModels.map((model) => <option key={model} value={model}>{model}</option>)}
-            </NativeSelect>
-          </Field>
+          {summaryModel.provider === "openrouter" ? (
+            <OpenRouterModelPicker
+              stage="summarizer"
+              credentialId={config.credential_refs.summarizer}
+              value={summaryModel.model ?? ""}
+              disabled={disabled}
+              onChange={(model) => updateSummaryModel({ model })}
+            />
+          ) : (
+            <Field>
+              <FieldLabel htmlFor="summary-model">Summary model</FieldLabel>
+              <SearchableSelect
+                id="summary-model"
+                value={summaryModel.model ?? ""}
+                onChange={(model) => updateSummaryModel({ model })}
+                options={[
+                  ...(!llmModels.includes(summaryModel.model ?? "")
+                    ? [
+                        {
+                          value: summaryModel.model ?? "",
+                          label: `${summaryModel.model} (saved)`,
+                        },
+                      ]
+                    : []),
+                  ...llmModels.map((model) => ({ value: model, label: model })),
+                ]}
+                selectionOnly
+                disabled={disabled || !catalog || !llmModels.length}
+                placeholder="Search models..."
+              />
+            </Field>
+          )}
           <div className="grid grid-cols-2 gap-4">
-            <NumberField id="summary-temperature" label="Temperature" value={summaryModel.temperature ?? 0.4}
-              min={0} max={2} step={0.1} disabled={disabled}
-              onChange={(temperature) => updateSummaryModel({ temperature })} />
-            <NumberField id="summary-max-tokens" label="Maximum output tokens" value={summaryModel.max_tokens ?? 512}
-              min={1} disabled={disabled} onChange={(max_tokens) => updateSummaryModel({ max_tokens })} />
+            <NumberField
+              id="summary-temperature"
+              label="Temperature"
+              value={summaryModel.temperature ?? 0.4}
+              min={0}
+              max={2}
+              step={0.1}
+              disabled={disabled}
+              onChange={(temperature) => updateSummaryModel({ temperature })}
+            />
+            <NumberField
+              id="summary-max-tokens"
+              label="Maximum output tokens"
+              value={summaryModel.max_tokens ?? 512}
+              min={1}
+              disabled={disabled}
+              onChange={(max_tokens) => updateSummaryModel({ max_tokens })}
+            />
           </div>
           <Field>
             <FieldLabel htmlFor="summary-top-p">Top-p (optional)</FieldLabel>
-            <Input id="summary-top-p" type="number" min={0.01} max={1} step={0.01}
-              value={summaryModel.top_p ?? ""} placeholder="Provider default" disabled={disabled}
-              onChange={(event) => updateSummaryModel({ top_p: event.target.value === "" ? null : Number(event.target.value) })} />
-            <FieldDescription>Reasoning: {summaryModel.reasoning_effort ?? "none"} (provider-constrained).</FieldDescription>
+            <Input
+              id="summary-top-p"
+              type="number"
+              min={0.01}
+              max={1}
+              step={0.01}
+              value={summaryModel.top_p ?? ""}
+              placeholder="Provider default"
+              disabled={disabled}
+              onChange={(event) =>
+                updateSummaryModel({
+                  top_p:
+                    event.target.value === ""
+                      ? null
+                      : Number(event.target.value),
+                })
+              }
+            />
+            <FieldDescription>
+              Reasoning: {summaryModel.reasoning_effort ?? "none"}{" "}
+              (provider-constrained).
+            </FieldDescription>
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="summarizer-prompt">Summarizer instructions</FieldLabel>
+            <FieldLabel htmlFor="summarizer-prompt">
+              Summarizer instructions
+            </FieldLabel>
             <Textarea
               id="summarizer-prompt"
               rows={4}
@@ -198,16 +309,20 @@ export function ContextPanel({
               onChange={(e) => updateSummarizer({ prompt: e.target.value })}
               placeholder="Summarize the supplied history faithfully; preserve decisions and facts."
             />
-            <FieldDescription>Instructions guiding model summary generation</FieldDescription>
+            <FieldDescription>
+              Instructions guiding model summary generation
+            </FieldDescription>
           </Field>
-
         </FieldGroup>
 
         <div className="rounded-md border p-3 text-xs text-muted-foreground">
-          <p className="font-medium text-foreground">Summary Evidence Retention</p>
+          <p className="font-medium text-foreground">
+            Summary Evidence Retention
+          </p>
           <p className="mt-1">
-            Summaries are applied asynchronously by Pipecat and preserve the configured recent
-            messages. A slow or failed summary leaves the current context unchanged.
+            Summaries are applied asynchronously by Pipecat and preserve the
+            configured recent messages. A slow or failed summary leaves the
+            current context unchanged.
           </p>
         </div>
       </div>

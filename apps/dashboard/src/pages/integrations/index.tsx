@@ -153,34 +153,34 @@ export function IntegrationsPage() {
       if (newType === "twilio_voice" && twilioCredentialId) {
         try {
           const testRes = await api<{
-            valid: boolean;
+            status: "ok" | "warning";
             account_type?: string;
-            phone_numbers_count?: number;
-            error?: string;
+            phone_numbers?: Array<{ phone_number: string; friendly_name: string; voice: boolean; sid: string }>;
+            message?: string;
           }>(`/integrations/${result.id}/test`, { method: "POST" });
 
-          if (testRes.valid) {
+          if (testRes.status === "ok") {
+            const synced = await api<{
+              phone_numbers: Array<{ phone_number: string; friendly_name: string; voice: boolean; sid: string }>;
+            }>(`/integrations/${result.id}/refresh-numbers`, { method: "POST" });
             await api<Connection>(`/integrations/${result.id}`, {
               method: "PATCH",
               body: JSON.stringify({ enabled: true }),
             });
-            if (testRes.account_type === "Trial") {
-              toast.warning(
-                "Twilio connection verified, but this is a Trial account. Media Streams are blocked on Trial accounts.",
-                { duration: 8000 },
-              );
-            } else {
-              toast.success(
-                `Twilio Voice connected! (${testRes.phone_numbers_count ?? 0} numbers found)`,
-              );
-            }
+            toast.success(
+              `Twilio Voice connected! (${synced.phone_numbers.length} voice numbers found)`,
+            );
           } else {
             toast.warning(
-              `Twilio credentials saved, but verification failed: ${testRes.error || "Unknown"}`,
+              `Twilio connection was created but remains disabled. ${testRes.message || "This account is not ready for voice calls."}`,
+              { duration: 8000 },
             );
           }
-        } catch {
-          toast.success("Twilio Voice connection and Auth Token saved");
+        } catch (cause) {
+          toast.error(
+            `Twilio connection was created but remains disabled: ${cause instanceof Error ? cause.message : "verification failed"}`,
+            { duration: 8000 },
+          );
         }
       } else {
         toast.success("Connection created, disabled until credentials are added");
@@ -264,14 +264,6 @@ export function IntegrationsPage() {
                     {newType === "twilio_voice" ? (
                       <>
                         <Field>
-                          <FieldLabel htmlFor="whatsapp-credential">Named WhatsApp credential</FieldLabel>
-                          <NativeSelect id="whatsapp-credential" value={whatsappCredentialId} required onChange={(event) => setWhatsappCredentialId(event.target.value)}>
-                            <option value="">Select an organization credential</option>
-                            {whatsappCredentials.map((item) => <option key={item.id} value={item.id}>{item.name} · v{item.version}</option>)}
-                          </NativeSelect>
-                          <FieldDescription>{whatsappCredentials.length ? "Add the Meta access token in Organization settings first." : "No active WhatsApp credential is available. Add one in Organization settings."}</FieldDescription>
-                        </Field>
-                        <Field>
                           <FieldLabel htmlFor="twilio-sid">Account SID</FieldLabel>
                           <Input
                             id="twilio-sid"
@@ -282,7 +274,7 @@ export function IntegrationsPage() {
                             required
                           />
                           <FieldDescription>
-                            Starts with AC followed by 32 hexadecimal characters.
+                            Starts with AC followed by 32 alphanumeric characters and must match the selected Twilio credential.
                           </FieldDescription>
                         </Field>
 
@@ -290,7 +282,7 @@ export function IntegrationsPage() {
                           <FieldLabel htmlFor="twilio-credential">Named Twilio credential</FieldLabel>
                           <NativeSelect id="twilio-credential" value={twilioCredentialId} required onChange={(event) => setTwilioCredentialId(event.target.value)}>
                             <option value="">Select an organization credential</option>
-                            {twilioCredentials.map((item) => <option key={item.id} value={item.id}>{item.name} · v{item.version}</option>)}
+                            {twilioCredentials.filter((item) => item.status === "stored").map((item) => <option key={item.id} value={item.id}>{item.name} · v{item.version}</option>)}
                           </NativeSelect>
                           <FieldDescription>
                             Create the Account SID, REST API key and webhook Auth Token bundle in Organization settings first. {twilioCredentials.length === 0 ? "No active Twilio credential is available." : "The selection is stored by its application credential ID."}
@@ -299,6 +291,17 @@ export function IntegrationsPage() {
                       </>
                     ) : (
                       <>
+                        <Field>
+                          <FieldLabel htmlFor="whatsapp-credential">Named WhatsApp credential</FieldLabel>
+                          <NativeSelect id="whatsapp-credential" value={whatsappCredentialId} required onChange={(event) => setWhatsappCredentialId(event.target.value)}>
+                            <option value="">Select an organization credential</option>
+                            {whatsappCredentials.filter((item) => item.status === "stored").map((item) => <option key={item.id} value={item.id}>{item.name} · v{item.version}</option>)}
+                          </NativeSelect>
+                          <FieldDescription>
+                            Select the Meta access token you added in Organization settings.
+                            {whatsappCredentials.every((item) => item.status !== "stored") && " No active WhatsApp credential is available."}
+                          </FieldDescription>
+                        </Field>
                         <Field>
                           <FieldLabel htmlFor="wa-phone-id">Phone number ID</FieldLabel>
                           <Input
@@ -370,7 +373,7 @@ export function IntegrationsPage() {
             <TableRow>
               <TableHead>Connection</TableHead>
               <TableHead>State</TableHead>
-              <TableHead>Credentials</TableHead>
+              <TableHead>Provider credential</TableHead>
               <TableHead className="text-right">Open</TableHead>
             </TableRow>
           </TableHeader>
@@ -392,7 +395,9 @@ export function IntegrationsPage() {
                   )}
                 </TableCell>
                 <TableCell className="text-muted-foreground">
-                  {connection.secret_names.join(", ") || "None"}
+                  {connection.credential_id
+                    ? [...twilioCredentials, ...whatsappCredentials].find((item) => item.id === connection.credential_id)?.name ?? "Named credential linked"
+                    : connection.secret_names.join(", ") || "None"}
                 </TableCell>
                 <TableCell className="text-right">
                   <Button asChild variant="link">

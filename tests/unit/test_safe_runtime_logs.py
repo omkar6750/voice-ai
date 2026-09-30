@@ -148,6 +148,24 @@ def test_safe_fields_reject_payloads_and_never_stringify_objects(sinks):
         assert_safe(output)
 
 
+def test_validation_diagnostic_event_accepts_only_allowlisted_locations():
+    assert safe_event_payload(
+        RuntimeEvent.API_VALIDATION_FAILED,
+        validation_scope="request_query",
+        validation_field="limit",
+        submitted_value=PRIVATE,
+    ) == {
+        "event": "api_validation_failed",
+        "validation_scope": "request_query",
+        "validation_field": "limit",
+    }
+    assert safe_event_payload(
+        RuntimeEvent.API_VALIDATION_FAILED,
+        validation_scope=PRIVATE,
+        validation_field=PRIVATE,
+    ) == {"event": "api_validation_failed"}
+
+
 def test_existing_sdk_handlers_and_late_loguru_message_patches_are_safe(sinks):
     console, path = sinks
     raw = io.StringIO()

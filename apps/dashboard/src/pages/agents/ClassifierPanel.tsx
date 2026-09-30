@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { BrainCircuit, Cpu, Plus, RotateCcw, Sparkles, Trash2 } from "lucide-react";
+import {
+  BrainCircuit,
+  Cpu,
+  Plus,
+  RotateCcw,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,16 +23,19 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@/components/ui/native-select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Textarea } from "@/components/ui/textarea";
 import { NumberField } from "./ConfigFields";
-import { CredentialBindingSelect, bindCredential } from "./CredentialBindingSelect";
+import {
+  CredentialBindingSelect,
+  bindCredential,
+} from "./CredentialBindingSelect";
 import { OpenRouterModelPicker } from "./OpenRouterModelPicker";
-import type {
-  AgentConfig,
-  JevQuestion,
-  ProviderCatalog,
-} from "./types";
+import type { AgentConfig, JevQuestion, ProviderCatalog } from "./types";
 
 const DEFAULT_JEV_QUESTIONS: Record<string, JevQuestion> = {
   lead_temperature: {
@@ -57,7 +67,8 @@ const DEFAULT_JEV_QUESTIONS: Record<string, JevQuestion> = {
     criteria: {
       receptive: "Friendly, engaged, curious, or actively answering questions.",
       hesitant: "Reserved, busy, distracted, but not hostile.",
-      resistant: "Disinterested, irritated, abusive, or explicitly asking to stop.",
+      resistant:
+        "Disinterested, irritated, abusive, or explicitly asking to stop.",
     },
   },
 };
@@ -244,7 +255,8 @@ export function ClassifierPanel({
 
   const llmProviders =
     providers?.providers.filter(
-      (p) => p.slots.includes("llm") || (p.models_by_slot?.llm?.length ?? 0) > 0,
+      (p) =>
+        p.slots.includes("llm") || (p.models_by_slot?.llm?.length ?? 0) > 0,
     ) ?? [];
 
   const currentProvider = classifier.llm?.provider || "groq";
@@ -263,7 +275,8 @@ export function ClassifierPanel({
         <div>
           <h2 className="text-base font-semibold">Classification Engine</h2>
           <p className="text-xs text-muted-foreground">
-            Select one classifier mode for this agent. Each engine operates as a distinct runtime tool with independent configuration.
+            Select one classifier mode for this agent. Each engine operates as a
+            distinct runtime tool with independent configuration.
           </p>
         </div>
 
@@ -290,15 +303,25 @@ export function ClassifierPanel({
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold">LLM Classifier</h3>
-            <p className="text-xs text-muted-foreground">Groq / Gemini / OpenRouter</p>
+                  <p className="text-xs text-muted-foreground">
+                    Groq / Gemini / OpenRouter
+                  </p>
                 </div>
               </div>
-              <Badge variant={classifierType === "llm" ? "default" : "outline"} className="text-[11px]">
+              <Badge
+                variant={classifierType === "llm" ? "default" : "outline"}
+                className="text-[11px]"
+              >
                 {classifierType === "llm" ? "Active" : "Select"}
               </Badge>
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
-              Standard LLM prompt-driven classification returning compact key-value JSON state through <code className="font-mono text-foreground font-semibold">classify_lead</code>.
+              Standard LLM prompt-driven classification returning compact
+              key-value JSON state through{" "}
+              <code className="font-mono text-foreground font-semibold">
+                classify_lead
+              </code>
+              .
             </p>
           </div>
 
@@ -324,15 +347,25 @@ export function ClassifierPanel({
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold">Classifier Model</h3>
-                  <p className="text-xs text-muted-foreground">TypeSafe AI Jev System One</p>
+                  <p className="text-xs text-muted-foreground">
+                    TypeSafe AI Jev System One
+                  </p>
                 </div>
               </div>
-              <Badge variant={classifierType === "jev" ? "default" : "outline"} className="text-[11px]">
+              <Badge
+                variant={classifierType === "jev" ? "default" : "outline"}
+                className="text-[11px]"
+              >
                 {classifierType === "jev" ? "Active" : "Select"}
               </Badge>
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
-              Dedicated multi-choice classification engine with normalized results through <code className="font-mono text-foreground font-semibold">classify_lead</code>.
+              Dedicated multi-choice classification engine with normalized
+              results through{" "}
+              <code className="font-mono text-foreground font-semibold">
+                classify_lead
+              </code>
+              .
             </p>
           </div>
         </div>
@@ -345,28 +378,36 @@ export function ClassifierPanel({
           <div>
             <h2 className="text-base font-semibold">Cadence & Triggers</h2>
             <p className="text-xs text-muted-foreground">
-              Configure when the selected classifier engine executes during calls.
+              Configure when the selected classifier engine executes during
+              calls.
             </p>
           </div>
 
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor="classifier-enabled">Classifier status</FieldLabel>
+              <FieldLabel htmlFor="classifier-enabled">
+                Classifier status
+              </FieldLabel>
               <NativeSelect
                 id="classifier-enabled"
                 value={classifier.enabled ? "enabled" : "disabled"}
                 disabled={disabled}
-                onChange={(e) => update({ enabled: e.target.value === "enabled" })}
+                onChange={(e) =>
+                  update({ enabled: e.target.value === "enabled" })
+                }
               >
                 <NativeSelectOption value="enabled">Enabled</NativeSelectOption>
-                <NativeSelectOption value="disabled">Disabled</NativeSelectOption>
+                <NativeSelectOption value="disabled">
+                  Disabled
+                </NativeSelectOption>
               </NativeSelect>
             </Field>
 
             <Field>
               <FieldLabel>Node entry triggers</FieldLabel>
               <FieldDescription>
-                Trigger evaluation immediately upon entering any selected flow node:
+                Trigger evaluation immediately upon entering any selected flow
+                node:
               </FieldDescription>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {allNodeIds.map((id) => {
@@ -376,7 +417,9 @@ export function ClassifierPanel({
                       key={id}
                       variant={active ? "default" : "outline"}
                       className="cursor-pointer select-none"
-                      onClick={() => !disabled && toggleNode("node_entries", id)}
+                      onClick={() =>
+                        !disabled && toggleNode("node_entries", id)
+                      }
                     >
                       {id}
                     </Badge>
@@ -388,7 +431,8 @@ export function ClassifierPanel({
             <Field>
               <FieldLabel>Node exit triggers</FieldLabel>
               <FieldDescription>
-                Trigger evaluation when transitioning away from any selected flow node:
+                Trigger evaluation when transitioning away from any selected
+                flow node:
               </FieldDescription>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {allNodeIds.map((id) => {
@@ -415,7 +459,9 @@ export function ClassifierPanel({
                 min={0}
                 max={50}
                 disabled={disabled}
-                onChange={(val) => update({ every_n_exchanges: val > 0 ? val : null })}
+                onChange={(val) =>
+                  update({ every_n_exchanges: val > 0 ? val : null })
+                }
                 hint="Runs after each N completed caller exchanges"
               />
             </div>
@@ -428,31 +474,41 @@ export function ClassifierPanel({
             /* LLM CLASSIFIER FORM */
             <>
               <div>
-                <h2 className="text-base font-semibold">LLM Classifier Settings</h2>
+                <h2 className="text-base font-semibold">
+                  LLM Classifier Settings
+                </h2>
                 <p className="text-xs text-muted-foreground">
-                  Custom instructions and LLM model powering the <code className="font-mono">classify_lead</code> tool.
+                  Custom instructions and LLM model powering the{" "}
+                  <code className="font-mono">classify_lead</code> tool.
                 </p>
               </div>
 
               <FieldGroup>
                 <Field>
-                  <FieldLabel htmlFor="classifier-prompt">System prompt & instructions</FieldLabel>
+                  <FieldLabel htmlFor="classifier-prompt">
+                    System prompt & instructions
+                  </FieldLabel>
                   <Textarea
                     id="classifier-prompt"
                     rows={5}
                     value={currentLlm.prompt}
                     disabled={disabled}
-                    onChange={(e) => update({ llm: { ...currentLlm, prompt: e.target.value } })}
+                    onChange={(e) =>
+                      update({ llm: { ...currentLlm, prompt: e.target.value } })
+                    }
                     placeholder="Classify the conversation according to observed caller intent..."
                   />
                   <FieldDescription>
-                    Instructions provided to the LLM. Should direct returning a compact JSON object.
+                    Instructions provided to the LLM. Should direct returning a
+                    compact JSON object.
                   </FieldDescription>
                 </Field>
 
                 <div className="grid grid-cols-2 gap-4">
                   <Field>
-                    <FieldLabel htmlFor="classifier-provider">Model provider</FieldLabel>
+                    <FieldLabel htmlFor="classifier-provider">
+                      Model provider
+                    </FieldLabel>
                     <NativeSelect
                       id="classifier-provider"
                       value={currentProvider}
@@ -461,10 +517,12 @@ export function ClassifierPanel({
                         update({
                           llm: {
                             ...currentLlm,
-                            provider: e.target.value as typeof currentLlm.provider,
+                            provider: e.target
+                              .value as typeof currentLlm.provider,
                             model:
-                              providers?.providers.find((p) => p.provider === e.target.value)
-                                ?.models_by_slot?.llm?.[0] || "",
+                              providers?.providers.find(
+                                (p) => p.provider === e.target.value,
+                              )?.models_by_slot?.llm?.[0] || "",
                           },
                         })
                       }
@@ -477,37 +535,58 @@ export function ClassifierPanel({
                     </NativeSelect>
                   </Field>
 
-                  {currentProvider === "openrouter" ? <OpenRouterModelPicker
-                    stage="classifier"
-                    credentialId={config.credential_refs.classifier}
-                    value={currentLlm.model || ""}
-                    disabled={disabled}
-                    onChange={(model) => update({ llm: { ...currentLlm, model } })}
-                  /> : <Field>
-                    <FieldLabel htmlFor="classifier-model">Model</FieldLabel>
-                    <NativeSelect
-                      id="classifier-model"
-                      value={currentLlm.model || availableModels[0] || ""}
+                  {currentProvider === "openrouter" ? (
+                    <OpenRouterModelPicker
+                      stage="classifier"
+                      credentialId={config.credential_refs.classifier}
+                      value={currentLlm.model || ""}
                       disabled={disabled}
-                      onChange={(e) =>
-                        update({
-                          llm: {
-                            ...currentLlm,
-                            model: e.target.value,
-                          },
-                        })
+                      onChange={(model) =>
+                        update({ llm: { ...currentLlm, model } })
                       }
-                    >
-                      {availableModels.map((m) => (
-                        <NativeSelectOption key={m} value={m}>
-                          {m}
-                        </NativeSelectOption>
-                      ))}
-                    </NativeSelect>
-                  </Field>}
+                    />
+                  ) : (
+                    <Field>
+                      <FieldLabel htmlFor="classifier-model">Model</FieldLabel>
+                      <SearchableSelect
+                        id="classifier-model"
+                        value={currentLlm.model || availableModels[0] || ""}
+                        onChange={(model) =>
+                          update({ llm: { ...currentLlm, model } })
+                        }
+                        options={[
+                          ...(!availableModels.includes(currentLlm.model || "")
+                            ? [
+                                {
+                                  value:
+                                    currentLlm.model ||
+                                    availableModels[0] ||
+                                    "",
+                                  label: `${currentLlm.model || availableModels[0] || ""} (saved)`,
+                                },
+                              ]
+                            : []),
+                          ...availableModels.map((model) => ({
+                            value: model,
+                            label: model,
+                          })),
+                        ]}
+                        selectionOnly
+                        disabled={disabled || !availableModels.length}
+                        placeholder="Search models..."
+                      />
+                    </Field>
+                  )}
                 </div>
-                <CredentialBindingSelect stage="classifier" provider={currentLlm.provider} value={config.credential_refs.classifier} disabled={disabled} change={(id) => change(bindCredential(config, "classifier", id))} />
-
+                <CredentialBindingSelect
+                  stage="classifier"
+                  provider={currentLlm.provider}
+                  value={config.credential_refs.classifier}
+                  disabled={disabled}
+                  change={(id) =>
+                    change(bindCredential(config, "classifier", id))
+                  }
+                />
               </FieldGroup>
             </>
           ) : (
@@ -515,9 +594,12 @@ export function ClassifierPanel({
             <>
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-base font-semibold">TypeSafe AI Jev Settings</h2>
+                  <h2 className="text-base font-semibold">
+                    TypeSafe AI Jev Settings
+                  </h2>
                   <p className="text-xs text-muted-foreground">
-                    Multi-choice questions and criteria evaluated by the <code className="font-mono">classify_lead</code> tool.
+                    Multi-choice questions and criteria evaluated by the{" "}
+                    <code className="font-mono">classify_lead</code> tool.
                   </p>
                 </div>
                 <Button
@@ -533,7 +615,15 @@ export function ClassifierPanel({
               </div>
 
               <FieldGroup>
-                <CredentialBindingSelect stage="classifier" provider="jev" value={config.credential_refs.classifier} disabled={disabled} change={(id) => change(bindCredential(config, "classifier", id))} />
+                <CredentialBindingSelect
+                  stage="classifier"
+                  provider="jev"
+                  value={config.credential_refs.classifier}
+                  disabled={disabled}
+                  change={(id) =>
+                    change(bindCredential(config, "classifier", id))
+                  }
+                />
                 <div className="grid grid-cols-2 gap-4">
                   <Field>
                     <FieldLabel htmlFor="jev-model">Jev Model</FieldLabel>
@@ -563,7 +653,9 @@ export function ClassifierPanel({
                 {/* Questions & Criteria Builder */}
                 <div className="flex flex-col gap-4">
                   <div className="flex items-center justify-between">
-                    <FieldLabel>Configured Questions ({Object.keys(questionsMap).length})</FieldLabel>
+                    <FieldLabel>
+                      Configured Questions ({Object.keys(questionsMap).length})
+                    </FieldLabel>
                     <Button
                       variant="secondary"
                       size="sm"
@@ -579,14 +671,18 @@ export function ClassifierPanel({
                   {showAddQuestion && (
                     <Card className="border-dashed bg-muted/30 p-3">
                       <div className="flex flex-col gap-3">
-                        <FieldLabel htmlFor="new-q-name">New Question Key</FieldLabel>
+                        <FieldLabel htmlFor="new-q-name">
+                          New Question Key
+                        </FieldLabel>
                         <div className="flex gap-2">
                           <Input
                             id="new-q-name"
                             placeholder="e.g. budget_status"
                             value={newQuestionKey}
                             onChange={(e) => setNewQuestionKey(e.target.value)}
-                            onKeyDown={(e) => e.key === "Enter" && handleAddQuestionSubmit()}
+                            onKeyDown={(e) =>
+                              e.key === "Enter" && handleAddQuestionSubmit()
+                            }
                             autoFocus
                           />
                           <Button size="sm" onClick={handleAddQuestionSubmit}>
@@ -613,12 +709,16 @@ export function ClassifierPanel({
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
                             <BrainCircuit className="size-4 text-primary" />
-                            <CardTitle className="font-mono text-xs font-semibold">{qKey}</CardTitle>
+                            <CardTitle className="font-mono text-xs font-semibold">
+                              {qKey}
+                            </CardTitle>
                           </div>
                           <Button
                             variant="ghost"
                             size="icon-sm"
-                            disabled={disabled || Object.keys(questionsMap).length <= 1}
+                            disabled={
+                              disabled || Object.keys(questionsMap).length <= 1
+                            }
                             onClick={() => handleRemoveQuestion(qKey)}
                             title="Remove question"
                           >
@@ -628,12 +728,20 @@ export function ClassifierPanel({
                       </CardHeader>
                       <CardContent className="flex flex-col gap-3 p-3 text-xs">
                         <div>
-                          <FieldLabel className="text-[11px]">Instructions</FieldLabel>
+                          <FieldLabel className="text-[11px]">
+                            Instructions
+                          </FieldLabel>
                           <Textarea
                             rows={2}
                             value={question.instructions}
                             disabled={disabled}
-                            onChange={(e) => handleQuestionChange(qKey, "instructions", e.target.value)}
+                            onChange={(e) =>
+                              handleQuestionChange(
+                                qKey,
+                                "instructions",
+                                e.target.value,
+                              )
+                            }
                             className="mt-1 text-xs"
                           />
                         </div>
@@ -641,7 +749,8 @@ export function ClassifierPanel({
                         <div>
                           <div className="flex items-center justify-between pb-1">
                             <span className="text-[11px] font-medium text-muted-foreground">
-                              Choices & Criteria ({Object.keys(question.criteria).length})
+                              Choices & Criteria (
+                              {Object.keys(question.criteria).length})
                             </span>
                             <Button
                               type="button"
@@ -657,32 +766,48 @@ export function ClassifierPanel({
                           </div>
 
                           <div className="flex flex-col gap-2">
-                            {Object.entries(question.criteria).map(([choiceKey, desc]) => (
-                              <div
-                                key={choiceKey}
-                                className="flex items-start gap-2 rounded border bg-background/50 p-2"
-                              >
-                                <Badge variant="outline" className="font-mono text-[10px] mt-0.5 shrink-0">
-                                  {choiceKey}
-                                </Badge>
-                                <Input
-                                  value={desc}
-                                  disabled={disabled}
-                                  onChange={(e) => handleCriteriaChange(qKey, choiceKey, e.target.value)}
-                                  className="h-7 text-xs flex-1"
-                                />
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon-xs"
-                                  disabled={disabled || Object.keys(question.criteria).length <= 1}
-                                  onClick={() => handleRemoveCriteria(qKey, choiceKey)}
-                                  className="mt-0.5"
+                            {Object.entries(question.criteria).map(
+                              ([choiceKey, desc]) => (
+                                <div
+                                  key={choiceKey}
+                                  className="flex items-start gap-2 rounded border bg-background/50 p-2"
                                 >
-                                  <Trash2 className="size-3 text-muted-foreground hover:text-destructive" />
-                                </Button>
-                              </div>
-                            ))}
+                                  <Badge
+                                    variant="outline"
+                                    className="font-mono text-[10px] mt-0.5 shrink-0"
+                                  >
+                                    {choiceKey}
+                                  </Badge>
+                                  <Input
+                                    value={desc}
+                                    disabled={disabled}
+                                    onChange={(e) =>
+                                      handleCriteriaChange(
+                                        qKey,
+                                        choiceKey,
+                                        e.target.value,
+                                      )
+                                    }
+                                    className="h-7 text-xs flex-1"
+                                  />
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon-xs"
+                                    disabled={
+                                      disabled ||
+                                      Object.keys(question.criteria).length <= 1
+                                    }
+                                    onClick={() =>
+                                      handleRemoveCriteria(qKey, choiceKey)
+                                    }
+                                    className="mt-0.5"
+                                  >
+                                    <Trash2 className="size-3 text-muted-foreground hover:text-destructive" />
+                                  </Button>
+                                </div>
+                              ),
+                            )}
                           </div>
                         </div>
                       </CardContent>
@@ -694,9 +819,16 @@ export function ClassifierPanel({
           )}
 
           <div className="rounded-md border p-3 text-xs text-muted-foreground">
-            <p className="font-medium text-foreground">Compact Runtime Output</p>
+            <p className="font-medium text-foreground">
+              Compact Runtime Output
+            </p>
             <p className="mt-1">
-              <code className="font-mono text-foreground font-semibold">classify_lead</code> and automatic node classifiers use the selected backend, extract the live transcript automatically, and return clean, compact key-value findings.
+              <code className="font-mono text-foreground font-semibold">
+                classify_lead
+              </code>{" "}
+              and automatic node classifiers use the selected backend, extract
+              the live transcript automatically, and return clean, compact
+              key-value findings.
             </p>
           </div>
         </div>

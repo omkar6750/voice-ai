@@ -42,6 +42,7 @@ class MockTransport(httpx.AsyncBaseTransport):
                         },
                     ],
                     "total_count": 2,
+                    "links": {"next": None},
                 },
             )
         raise AssertionError(request.url)
@@ -120,10 +121,13 @@ async def test_catalog_filters_account_models_without_exposing_vendor_shape():
                 },
             )()
 
-    result = await model_catalog(FakeClient(), OpenRouterModelQuery(q="qwen", free_only=True))
+    result = await model_catalog(
+        FakeClient(), OpenRouterModelQuery(q="qwen", free_only=True, limit=1000)
+    )
     assert result.total_count == 1
     assert result.items[0].id == "qwen/qwen3.8-27b:free"
     assert result.items[0].tool_calling is True
+    assert result.next_offset is None
 
 
 def test_chat_usage_preserves_openrouter_cost_and_byok_metadata():

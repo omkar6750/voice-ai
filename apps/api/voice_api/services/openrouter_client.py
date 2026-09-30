@@ -111,7 +111,6 @@ class ModelPage(BaseModel):
 
     data: list[OpenRouterModel] = Field(default_factory=list)
     total_count: int | None = None
-    links: dict[str, str] = Field(default_factory=dict)
 
 
 class Endpoint(BaseModel):

@@ -13,6 +13,7 @@ _ENV_FILES = (
 
 class Settings(BaseSettings):
     env: str = "dev"
+    debug_diagnostics: bool = False
     database_url: str = "postgresql+asyncpg://voice:voice@localhost:55432/voice"
     cartesia_api_key: str | None = None
     sarvam_api_key: str | None = None
@@ -46,8 +47,6 @@ class Settings(BaseSettings):
     organization_creation_enabled: bool = True
     public_base_url: str | None = None
     gemini_api_key: str | None = None
-    whatsapp_access_token: str | None = None
-    whatsapp_phone_number_id: str | None = None
     google_calendar_client_id: str | None = None
     google_calendar_client_secret: str | None = None
     google_calendar_redirect_uri: str = (

@@ -46,10 +46,9 @@ class NativeToolDispatch:
             from voice_api.db.tenant_scope import bind_run_organization
             from voice_api.models import (
                 IntegrationConnection,
-                IntegrationSecret,
                 ProviderCredential,
             )
-            from voice_api.services.vault_service import CredentialVault, SecretScope
+            from voice_api.services.vault_service import CredentialVault
 
             async with SessionFactory() as session:
                 await bind_run_organization(session, self.run_id)
@@ -96,24 +95,7 @@ class NativeToolDispatch:
                             scope=credential_scope(credential),
                         )
                     else:
-                        secret = await session.scalar(
-                            select(IntegrationSecret).where(
-                                IntegrationSecret.connection_id == row.id,
-                                IntegrationSecret.name == "access_token",
-                            )
-                        )
-                        if secret is not None:
-                            access_token = CredentialVault.from_env().decrypt(
-                                secret.ciphertext,
-                                secret.key_id,
-                                scope=SecretScope(
-                                    secret.org_id,
-                                    secret.id,
-                                    row.provider,
-                                    secret.name,
-                                    secret.version,
-                                ),
-                            )
+                        raise RuntimeError("WhatsApp connection has no named provider credential")
         except Exception:
             operational_event(RuntimeEvent.INTEGRATION_FAILED, level="WARNING", provider="whatsapp")
         return (

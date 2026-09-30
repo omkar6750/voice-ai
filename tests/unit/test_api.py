@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -24,6 +25,52 @@ async def test_health() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "service": "voice-api"}
+
+
+@pytest.mark.asyncio
+async def test_validation_diagnostics_are_safe_and_dev_only(monkeypatch) -> None:
+    from fastapi.exceptions import RequestValidationError
+    from voice_api import main
+
+    emitted = []
+    monkeypatch.setattr(
+        main,
+        "operational_event",
+        lambda event, **fields: emitted.append((event, fields)),
+    )
+    validation = RequestValidationError(
+        [{"loc": ("query", "limit"), "type": "int_parsing", "input": "sensitive-value"}]
+    )
+
+    monkeypatch.setattr(
+        main,
+        "get_settings",
+        lambda: SimpleNamespace(env="dev", debug_diagnostics=True),
+    )
+    response = await main.validation_error(None, validation)
+    assert response.status_code == 422
+    assert emitted == [
+        (
+            main.RuntimeEvent.API_VALIDATION_FAILED,
+            {
+                "level": "WARNING",
+                "validation_scope": "request_query",
+                "validation_field": "limit",
+                "validation_detail_state": "available",
+                "validation_error_type": "int_parsing",
+            },
+        )
+    ]
+    assert "sensitive-value" not in repr(emitted)
+
+    emitted.clear()
+    monkeypatch.setattr(
+        main,
+        "get_settings",
+        lambda: SimpleNamespace(env="production", debug_diagnostics=True),
+    )
+    await main.validation_error(None, validation)
+    assert emitted == []
 
 
 @pytest.mark.asyncio
@@ -128,6 +175,23 @@ def test_contact_and_integration_patch_schemas() -> None:
     )
     assert gen_body.template_name == "order_confirmation"
     assert gen_body.tool_name == "whatsapp_template_order_confirmation"
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_api_token_is_not_accepted_as_integration_secret(monkeypatch):
+    from fastapi import HTTPException
+    from voice_api.api.v1.endpoints.integrations import put_secret
+    from voice_api.schemas.integrations import SecretBody
+
+    session = AsyncMock()
+    monkeypatch.setattr(
+        "voice_api.api.v1.endpoints.integrations.connection_or_404",
+        AsyncMock(return_value=SimpleNamespace(provider="whatsapp")),
+    )
+    with pytest.raises(HTTPException, match="named provider credentials") as error:
+        await put_secret("connection-a", "access_token", SecretBody(value="token"), session, None)
+    assert error.value.status_code == 422
+    session.commit.assert_not_awaited()
 
 
 @pytest.mark.asyncio

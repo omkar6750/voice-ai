@@ -77,7 +77,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { useResource } from "@/lib/resources";
 import { MediaPanel } from "./MediaPanel";
 import { WhatsAppMediaPicker } from "./WhatsAppMediaPicker";
-import { SecretsPanel } from "./SecretsPanel";
 import type { Connection } from "./index";
 
 type TemplateComponent = {
@@ -128,13 +127,8 @@ function templateParameterMappings(
   );
 }
 
-const whatsappSections = [
-  "Account",
-  "Credentials",
-  "Media",
-  "Templates",
-] as const;
-const twilioSections = ["Account", "Credentials", "Phone Numbers"] as const;
+const whatsappSections = ["Account", "Media", "Templates"] as const;
+const twilioSections = ["Account", "Phone Numbers"] as const;
 
 export function IntegrationDetailPage() {
   const { connectionId = "" } = useParams();
@@ -168,20 +162,84 @@ export function IntegrationDetailPage() {
   const [apiVersion, setApiVersion] = useState("");
   const [accountSid, setAccountSid] = useState("");
   const [credentialId, setCredentialId] = useState("");
+  const [webhookSecretValues, setWebhookSecretValues] = useState({
+    app_secret: "",
+    verify_token: "",
+  });
+  const [savingWebhookSecret, setSavingWebhookSecret] = useState<
+    "app_secret" | "verify_token" | null
+  >(null);
   const [twilioCredentials, setTwilioCredentials] = useState<components["schemas"]["CredentialStatus"][]>([]);
   const [whatsappCredentials, setWhatsappCredentials] = useState<components["schemas"]["CredentialStatus"][]>([]);
+  const [linkedCredential, setLinkedCredential] = useState<components["schemas"]["CredentialStatus"] | null>(null);
+  const [linkedCredentialLoading, setLinkedCredentialLoading] = useState(false);
+  const [linkedCredentialUnavailable, setLinkedCredentialUnavailable] = useState(false);
 
   useEffect(() => {
     let active = true;
     if (!orgId) { setTwilioCredentials([]); setWhatsappCredentials([]); return () => { active = false; }; }
     void api<components["schemas"]["CredentialStatus"][]>(`/orgs/${orgId}/credentials`)
       .then((rows) => { if (active) {
-        setTwilioCredentials(rows.filter((row) => row.provider === "twilio" && row.status === "stored"));
-        setWhatsappCredentials(rows.filter((row) => row.provider === "whatsapp" && row.status === "stored"));
+        setTwilioCredentials(rows.filter((row) => row.provider === "twilio"));
+        setWhatsappCredentials(rows.filter((row) => row.provider === "whatsapp"));
       } })
       .catch(() => { if (active) { setTwilioCredentials([]); setWhatsappCredentials([]); } });
     return () => { active = false; };
   }, [api, orgId]);
+
+  useEffect(() => {
+    let active = true;
+    const credentialId = connection?.credential_id;
+    if (!orgId || !credentialId) {
+      setLinkedCredential(null);
+      setLinkedCredentialLoading(false);
+      setLinkedCredentialUnavailable(false);
+      return () => { active = false; };
+    }
+    setLinkedCredentialLoading(true);
+    setLinkedCredentialUnavailable(false);
+    void api<components["schemas"]["CredentialStatus"]>(
+      `/orgs/${orgId}/credentials/${credentialId}`,
+    )
+      .then((row) => { if (active) setLinkedCredential(row); })
+      .catch(() => { if (active) setLinkedCredentialUnavailable(true); })
+      .finally(() => { if (active) setLinkedCredentialLoading(false); });
+    return () => { active = false; };
+  }, [api, connection?.credential_id, orgId]);
+
+  const selectedCredential = linkedCredential?.id === connection?.credential_id
+    ? linkedCredential
+    : (isTwilio ? twilioCredentials : whatsappCredentials).find(
+        (item) => item.id === connection?.credential_id,
+      );
+  const compatibleCredentials = isTwilio ? twilioCredentials : whatsappCredentials;
+
+  useEffect(() => {
+    setWebhookSecretValues({ app_secret: "", verify_token: "" });
+  }, [connectionId, orgId]);
+
+  async function saveWebhookSecret(name: "app_secret" | "verify_token") {
+    const value = webhookSecretValues[name];
+    if (!value) return;
+    setSavingWebhookSecret(name);
+    try {
+      await api(`/integrations/${connectionId}/secrets/${name}`, {
+        method: "PUT",
+        body: JSON.stringify({ value }),
+      });
+      toast.success(
+        `${name === "app_secret" ? "App secret" : "Verify token"} saved. The value is never returned.`,
+      );
+      await reload();
+    } catch (cause) {
+      toast.error(
+        cause instanceof Error ? cause.message : "Could not save webhook secret",
+      );
+    } finally {
+      setWebhookSecretValues((current) => ({ ...current, [name]: "" }));
+      setSavingWebhookSecret(null);
+    }
+  }
 
   // Twilio testing & sync state
   const [testBusy, setTestBusy] = useState(false);
@@ -233,25 +291,19 @@ export function IntegrationDetailPage() {
     setTestBusy(true);
     try {
       const res = await api<{
-        valid: boolean;
+        status: "ok" | "warning";
         account_type?: string;
-        phone_numbers_count?: number;
-        error?: string;
+        phone_numbers?: Array<{ phone_number: string; friendly_name: string; voice: boolean; sid: string }>;
+        message?: string;
       }>(`/integrations/${connectionId}/test`, { method: "POST" });
-      if (res.valid) {
-        if (res.account_type === "Trial") {
-          toast.warning(
-            `Twilio connection verified, but account is Trial (${res.phone_numbers_count ?? 0} numbers). Media Streams are blocked on Trial accounts!`,
-            { duration: 8000 },
-          );
-        } else {
-          toast.success(
-            `Twilio connection verified! (${res.account_type ?? "Full"} account, ${res.phone_numbers_count ?? 0} numbers available)`,
-          );
-        }
+      if (res.status === "ok") {
+        toast.success(
+          `Twilio connection verified! (${res.account_type ?? "Full"} account, ${res.phone_numbers?.length ?? 0} voice numbers available)`,
+        );
       } else {
-        toast.error(
-          `Twilio verification failed: ${res.error || "Unknown error"}`,
+        toast.warning(
+          res.message || "Twilio is connected, but this account is not ready for voice calls.",
+          { duration: 8000 },
         );
       }
       await reload();
@@ -268,7 +320,6 @@ export function IntegrationDetailPage() {
     setSyncBusy(true);
     try {
       const res = await api<{
-        count: number;
         phone_numbers: Array<{
           phone_number: string;
           friendly_name: string;
@@ -276,7 +327,7 @@ export function IntegrationDetailPage() {
           sid: string;
         }>;
       }>(`/integrations/${connectionId}/refresh-numbers`, { method: "POST" });
-      toast.success(`Synchronized ${res.count} phone numbers from Twilio`);
+      toast.success(`Synchronized ${res.phone_numbers.length} voice numbers from Twilio`);
       await reload();
     } catch (cause) {
       toast.error(
@@ -438,8 +489,8 @@ export function IntegrationDetailPage() {
         title={connection?.label ?? "Integration"}
         description={
           isTwilio
-            ? "Twilio Voice account settings, credentials, and synchronized phone numbers. Secrets stay write-only on the server."
-            : "WhatsApp account settings, credentials, and media. Secrets stay write-only on the server."
+            ? "Twilio Voice account settings, named provider credential, and synchronized phone numbers."
+            : "WhatsApp account settings, named provider credential, and media."
         }
         action={
           <Button asChild variant="outline">
@@ -568,17 +619,17 @@ export function IntegrationDetailPage() {
                             value={connection.enabled ? "enabled" : "disabled"}
                           />
                         )}
-                        {!connection.enabled &&
-                          !connection.deleted_at &&
-                          !connection.secret_names.includes(
-                            isTwilio ? "auth_token" : "access_token",
-                          ) && (
-                            <span className="text-xs text-amber-500">
-                              (Requires{" "}
-                              {isTwilio ? "auth_token" : "access_token"}{" "}
-                              credential)
-                            </span>
-                          )}
+                        {!connection.enabled && !connection.deleted_at && (
+                          <span className="text-xs text-amber-500">
+                            {!connection.credential_id
+                              ? `Named ${isTwilio ? "Twilio" : "WhatsApp"} credential required`
+                              : linkedCredentialLoading
+                                ? "Checking named credential…"
+                                : selectedCredential?.status !== "stored"
+                                  ? `Named credential ${selectedCredential?.status ?? (linkedCredentialUnavailable ? "unavailable" : "not found")}`
+                                  : "Ready to enable"}
+                          </span>
+                        )}
                       </div>
                     }
                   />
@@ -699,28 +750,100 @@ export function IntegrationDetailPage() {
                   )}
 
                   <ReadOnlyValue
-                    label="Configured secrets"
-                    value={
-                      connection.secret_names.length > 0 ? (
-                        <div className="flex flex-wrap gap-1">
-                          {connection.secret_names.map((name) => (
-                            <Badge
-                              key={name}
-                              variant="secondary"
-                              className="text-xs"
-                            >
-                              {name}
-                            </Badge>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="text-amber-500">
-                          None configured (Add credentials)
-                        </span>
-                      )
-                    }
+                    label="Named provider credential"
+                    value={selectedCredential ? (
+                      <div className="flex items-center gap-2">
+                        <span>{selectedCredential.name}</span>
+                        <Badge variant={selectedCredential.status === "stored" ? "secondary" : "destructive"}>
+                          {selectedCredential.status}
+                        </Badge>
+                      </div>
+                    ) : connection.credential_id ? (
+                      <span className="text-amber-500">
+                        {linkedCredentialLoading ? "Loading linked credential…" : "Linked credential details unavailable"}
+                      </span>
+                    ) : (
+                      <span className="text-amber-500">
+                        None linked — select a named credential in Edit settings
+                      </span>
+                    )}
                   />
                 </div>
+
+                {!isTwilio && (
+                  <section className="rounded-lg border bg-card p-4">
+                    <div className="mb-4">
+                      <h2 className="text-sm font-semibold">
+                        Webhook verification
+                      </h2>
+                      <p className="text-xs text-muted-foreground">
+                        These are separate from the named Meta API token: the
+                        app secret verifies webhook signatures, and the verify
+                        token is used during Meta’s webhook setup challenge.
+                        Values are write-only.
+                      </p>
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {([
+                        ["app_secret", "Meta app secret"],
+                        ["verify_token", "Webhook verify token"],
+                      ] as const).map(([name, label]) => (
+                        <form
+                          key={name}
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            void saveWebhookSecret(name);
+                          }}
+                          className="flex flex-col gap-2"
+                        >
+                          <FieldLabel htmlFor={`webhook-${name}`}>
+                            {label}
+                          </FieldLabel>
+                          <Input
+                            id={`webhook-${name}`}
+                            type="password"
+                            autoComplete="new-password"
+                            value={webhookSecretValues[name]}
+                            onChange={(event) =>
+                              setWebhookSecretValues((current) => ({
+                                ...current,
+                                [name]: event.target.value,
+                              }))
+                            }
+                            disabled={!canManage || savingWebhookSecret !== null}
+                            placeholder={
+                              connection.secret_names.includes(name)
+                                ? "Configured — enter a replacement"
+                                : "Not configured"
+                            }
+                          />
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs text-muted-foreground">
+                              {connection.secret_names.includes(name)
+                                ? "Configured"
+                                : "Missing"}
+                            </span>
+                            {canManage && (
+                              <Button
+                                type="submit"
+                                size="sm"
+                                variant="outline"
+                                disabled={
+                                  !webhookSecretValues[name] ||
+                                  savingWebhookSecret !== null
+                                }
+                              >
+                                {savingWebhookSecret === name
+                                  ? "Saving…"
+                                  : "Save / replace"}
+                              </Button>
+                            )}
+                          </div>
+                        </form>
+                      ))}
+                    </div>
+                  </section>
+                )}
 
                 {/* Edit Account Sheet */}
                 <Sheet open={editOpen} onOpenChange={setEditOpen}>
@@ -766,9 +889,8 @@ export function IntegrationDetailPage() {
                             </NativeSelectOption>
                           </NativeSelect>
                           <FieldDescription>
-                            Must have `
-                            {isTwilio ? "auth_token" : "access_token"}` saved in
-                            Credentials to enable.
+                            The connection can only be enabled with an active,
+                            compatible named provider credential.
                           </FieldDescription>
                         </Field>
 
@@ -778,7 +900,8 @@ export function IntegrationDetailPage() {
                             <FieldLabel htmlFor="edit-twilio-credential">Named Twilio credential</FieldLabel>
                             <NativeSelect id="edit-twilio-credential" value={credentialId} onChange={(event) => setCredentialId(event.target.value)}>
                               <option value="">Select a credential</option>
-                              {twilioCredentials.map((item) => <option key={item.id} value={item.id}>{item.name} · v{item.version}</option>)}
+                              {credentialId && !compatibleCredentials.some((item) => item.id === credentialId) && <option value={credentialId}>{selectedCredential?.name ?? "Currently linked credential"}{selectedCredential ? ` · ${selectedCredential.status}` : ""}</option>}
+                              {twilioCredentials.map((item) => <option key={item.id} value={item.id} disabled={item.status !== "stored"}>{item.name} · v{item.version}{item.status !== "stored" ? ` · ${item.status}` : ""}</option>)}
                             </NativeSelect>
                             <FieldDescription>Choose the saved Account SID, REST API key and webhook Auth Token bundle from Organization settings.</FieldDescription>
                           </Field>
@@ -790,12 +913,12 @@ export function IntegrationDetailPage() {
                               id="edit-account-sid"
                               value={accountSid}
                               onChange={(e) => setAccountSid(e.target.value)}
-                              pattern="^AC[a-fA-F0-9]{32}$"
+                              pattern="^AC[a-zA-Z0-9]{32}$"
                               placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                               required
                             />
-                            <FieldDescription>
-                              Twilio Account SID (34 chars, starts with AC).
+                              <FieldDescription>
+                              Must match the Account SID in the selected Twilio credential.
                             </FieldDescription>
                           </Field>
                           </>
@@ -803,9 +926,10 @@ export function IntegrationDetailPage() {
                           <>
                             <Field>
                               <FieldLabel htmlFor="edit-whatsapp-credential">Named WhatsApp credential</FieldLabel>
-                              <NativeSelect id="edit-whatsapp-credential" value={credentialId} onChange={(event) => setCredentialId(event.target.value)}>
-                                <option value="">Select a credential</option>
-                                {whatsappCredentials.map((item) => <option key={item.id} value={item.id}>{item.name} · v{item.version}</option>)}
+                            <NativeSelect id="edit-whatsapp-credential" value={credentialId} onChange={(event) => setCredentialId(event.target.value)}>
+                              <option value="">Select a credential</option>
+                                {credentialId && !compatibleCredentials.some((item) => item.id === credentialId) && <option value={credentialId}>{selectedCredential?.name ?? "Currently linked credential"}{selectedCredential ? ` · ${selectedCredential.status}` : ""}</option>}
+                                {whatsappCredentials.map((item) => <option key={item.id} value={item.id} disabled={item.status !== "stored"}>{item.name} · v{item.version}{item.status !== "stored" ? ` · ${item.status}` : ""}</option>)}
                               </NativeSelect>
                               <FieldDescription>Choose the saved Meta access token from Organization settings.</FieldDescription>
                             </Field>
@@ -876,15 +1000,6 @@ export function IntegrationDetailPage() {
               </section>
             )}
 
-            {section === "Credentials" && (
-              <SecretsPanel
-                connectionId={connectionId}
-                provider={connection.provider}
-                configured={connection.secret_names}
-                reload={reload}
-              />
-            )}
-
             {section === "Phone Numbers" && isTwilio && (
               <section className="flex flex-col gap-6">
                 <div className="flex flex-wrap items-center justify-between gap-4">
@@ -919,9 +1034,8 @@ export function IntegrationDetailPage() {
                         No Phone Numbers Synchronized
                       </CardTitle>
                       <CardDescription>
-                        Configure your <code>auth_token</code> under Credentials
-                        and click "Refresh from Twilio" to fetch your voice
-                        phone numbers.
+                        Link a named Twilio credential in Account settings, then
+                        click "Refresh from Twilio" to fetch voice phone numbers.
                       </CardDescription>
                     </CardHeader>
                   </Card>

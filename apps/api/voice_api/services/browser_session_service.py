@@ -36,12 +36,22 @@ from voice_api.services.credential_lease_service import acquire, release
 from voice_api.services.credential_runtime_host import CredentialRuntimeHost as NativePipelineHost
 from voice_api.services.diagnostic_service import persist_diagnostic
 from voice_api.services.local_runtime_service import LocalEvidenceIngestor, register_local_artifacts
-from voice_api.services.provider_credentials import settings_for_snapshot
+from voice_api.services.provider_credentials import (
+    resolved_provider_secret_values,
+    settings_for_snapshot,
+)
 from voice_api.services.resolution_service import fingerprint, resolve
 
 
 class BrowserSessionContext:
-    def __init__(self, session_id: str, run_id: str, snapshot: dict, org_id: str, actor_user_id: str | None = None) -> None:
+    def __init__(
+        self,
+        session_id: str,
+        run_id: str,
+        snapshot: dict,
+        org_id: str,
+        actor_user_id: str | None = None,
+    ) -> None:
         self.session_id = session_id
         self.run_id = run_id
         self.snapshot = snapshot
@@ -120,7 +130,14 @@ class BrowserSessionManager:
         async with self._lock:
             self._sessions.pop(session_id, None)
 
-    async def issue_ticket(self, session_id: str, run_id: str, snapshot: dict, org_id: str, actor_user_id: str | None = None) -> str:
+    async def issue_ticket(
+        self,
+        session_id: str,
+        run_id: str,
+        snapshot: dict,
+        org_id: str,
+        actor_user_id: str | None = None,
+    ) -> str:
         async with self._lock:
             now_mono = time.monotonic()
             for other_id, other in list(self._sessions.items()):
@@ -131,7 +148,8 @@ class BrowserSessionManager:
                 if not other.has_connected and other.ticket_expires_at <= now_mono:
                     self._sessions.pop(other_id, None)
             ctx = self._sessions.setdefault(
-                session_id, BrowserSessionContext(session_id, run_id, snapshot, org_id, actor_user_id)
+                session_id,
+                BrowserSessionContext(session_id, run_id, snapshot, org_id, actor_user_id),
             )
             if ctx.has_connected or not ctx.is_active:
                 raise HTTPException(409, "Browser session is already connected")
@@ -286,7 +304,9 @@ async def create_browser_session(
     return run, browser_session
 
 
-async def issue_browser_ticket(session_id: str, session: AsyncSession, *, actor_user_id: str | None = None) -> dict[str, Any]:
+async def issue_browser_ticket(
+    session_id: str, session: AsyncSession, *, actor_user_id: str | None = None
+) -> dict[str, Any]:
     require_hosted_call_admission("browser")
     if not actor_user_id:
         raise HTTPException(403, "Browser ticket requires an authenticated actor")
@@ -318,7 +338,9 @@ async def verify_ticket_actor(session: AsyncSession, ctx: BrowserSessionContext)
     organization = await session.get(Organization, ctx.org_id)
     if user is None or user.disabled_at is not None or organization is None:
         raise HTTPException(403, "Browser actor access is unavailable")
-    member = await get_clerk_organization_directory().membership(organization.clerk_org_id, ctx.actor_user_id)
+    member = await get_clerk_organization_directory().membership(
+        organization.clerk_org_id, ctx.actor_user_id
+    )
     if member is None or member.role not in {"org:owner", "org:admin", "org:member"}:
         raise HTTPException(403, "Browser actor is no longer an organization member")
 
@@ -435,8 +457,7 @@ async def persist_transport_disconnect(
             run.status = ctx.termination.summary.execution_status
             run.error = (
                 run.error
-                or "Browser call ended before normal completion: "
-                f"{ctx.termination.summary.cause}"
+                or f"Browser call ended before normal completion: {ctx.termination.summary.cause}"
             )
             run.ended_at = run.ended_at or now()
             run.final_state = {
@@ -519,7 +540,9 @@ async def _run_browser_pipeline(
 ) -> None:
     try:
         async with SessionFactory() as credential_session:
-            settings = await settings_for_snapshot(credential_session, ctx.org_id, ctx.snapshot, settings, run_id=ctx.run_id)
+            settings = await settings_for_snapshot(
+                credential_session, ctx.org_id, ctx.snapshot, settings, run_id=ctx.run_id
+            )
         await _execute_browser_pipeline(ctx, transport, settings)
     except Exception:
         ctx.termination.request("pipeline_failure")
@@ -528,7 +551,11 @@ async def _run_browser_pipeline(
             run = await session.get(Run, ctx.run_id)
             browser = await session.get(BrowserSession, ctx.session_id)
             if run and run.status in {"claimed", "running"}:
-                run.status, run.error, run.ended_at = "failed", "Browser runtime credentials or startup unavailable", now()
+                run.status, run.error, run.ended_at = (
+                    "failed",
+                    "Browser runtime credentials or startup unavailable",
+                    now(),
+                )
             if browser and browser.status in {"created", "connected"}:
                 browser.status, browser.disconnected_at = "failed", now()
             await session.commit()
@@ -536,7 +563,9 @@ async def _run_browser_pipeline(
         await release(ctx.run_id)
 
 
-async def _execute_browser_pipeline(ctx: BrowserSessionContext, transport: FastAPIWebsocketTransport, settings: Settings) -> None:
+async def _execute_browser_pipeline(
+    ctx: BrowserSessionContext, transport: FastAPIWebsocketTransport, settings: Settings
+) -> None:
     run_id = ctx.run_id
     session_id = ctx.session_id
     snapshot = ctx.snapshot
@@ -552,23 +581,14 @@ async def _execute_browser_pipeline(ctx: BrowserSessionContext, transport: FastA
     spool_path = Path("data/evidence") / f"{run_id}.jsonl"
     spool_path.parent.mkdir(parents=True, exist_ok=True)
     spool = DurableSpool(spool_path)
-    secrets = tuple(
-        s
-        for s in (
-            settings.groq_api_key,
-            settings.jev_api_key,
-            settings.sarvam_api_key,
-            settings.cartesia_api_key,
-            settings.gemini_api_key,
-        )
-        if s
-    )
+    secrets = resolved_provider_secret_values(settings)
     tracker = ExchangeTracker(run_id, spool, secrets=secrets)
     ingestor = LocalEvidenceIngestor(run_id, org_id=ctx.org_id)
     delivery_task = asyncio.create_task(stream_evidence(spool, ingestor))
     final_state: dict[str, Any] = {}
 
     try:
+
         async def execute_pipeline() -> dict:
             if not ctx.is_active:
                 return {"termination": ctx.termination.snapshot()}
@@ -679,15 +699,11 @@ async def _execute_browser_pipeline(ctx: BrowserSessionContext, transport: FastA
                     **(r.final_state or {}),
                     **final_state,
                     "termination": ctx.termination.snapshot(),
-                    "evidence_incomplete": bool(
-                        (r.final_state or {}).get("evidence_incomplete")
-                    )
+                    "evidence_incomplete": bool((r.final_state or {}).get("evidence_incomplete"))
                     or finalization.incomplete
                     or not ctx.cleanup_complete
                     or bool(artifact_diagnostics),
-                    "artifacts_incomplete": bool(
-                        (r.final_state or {}).get("artifacts_incomplete")
-                    )
+                    "artifacts_incomplete": bool((r.final_state or {}).get("artifacts_incomplete"))
                     or bool(artifact_diagnostics),
                 }
             if bs and bs.status in ("created", "connecting", "connected"):

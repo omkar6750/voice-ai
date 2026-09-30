@@ -121,7 +121,9 @@ async def connection_or_404(session: AsyncSession, connection_id: str) -> Integr
 
 async def secret_value(session: AsyncSession, connection_id: str, name: str) -> str:
     connection = await connection_or_404(session, connection_id)
-    if connection.credential_id and connection.provider == "whatsapp" and name == "access_token":
+    if connection.provider == "whatsapp" and name == "access_token":
+        if not connection.credential_id:
+            raise HTTPException(422, "Select a named WhatsApp credential for this integration")
         from voice_api.services.credential_service import credential_scope, lookup
 
         credential = await lookup(session, connection.credential_id)
@@ -366,15 +368,18 @@ async def update_connection(
             if connection.provider == "twilio_voice":
                 required = {"auth_token"}
             else:
-                required = {"access_token"}
+                required = set()
             missing = required - secret_names
-            if connection.credential_id:
+            if connection.provider == "whatsapp":
+                if not connection.credential_id:
+                    raise HTTPException(422, "Cannot enable WhatsApp without a named provider credential")
+                await secret_value(session, connection_id, "access_token")
+                missing = set()
+            elif connection.credential_id:
                 if connection.provider == "twilio_voice":
                     from voice_api.services.twilio_service import resolve_twilio_credentials
 
                     await resolve_twilio_credentials(session, connection_id, require_enabled=False)
-                else:
-                    await secret_value(session, connection_id, "access_token")
                 missing = set()
             if missing:
                 raise HTTPException(
@@ -401,7 +406,9 @@ async def put_secret(
     _: None = Operator,
 ) -> None:
     connection = await connection_or_404(session, connection_id)
-    if name not in {"access_token", "app_secret", "verify_token", "auth_token", "api_key_sid", "api_key_secret"}:
+    if name == "access_token" and connection.provider == "whatsapp":
+        raise HTTPException(422, "Manage WhatsApp API tokens as named provider credentials")
+    if name not in {"app_secret", "verify_token", "auth_token", "api_key_sid", "api_key_secret"}:
         raise HTTPException(422, "Unsupported integration secret name")
     row = await session.scalar(
         select(IntegrationSecret).where(

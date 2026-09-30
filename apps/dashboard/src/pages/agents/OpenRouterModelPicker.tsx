@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@clerk/react";
 import { useApi } from "@/app/api";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import { NativeSelect } from "@/components/ui/native-select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
+import type { OptionItem } from "@/lib/geo-data";
 import type { components } from "@/generated/api";
 
 type Catalog = components["schemas"]["ModelCatalogResponse"];
@@ -23,48 +23,101 @@ export function OpenRouterModelPicker({
 }) {
   const api = useApi();
   const { orgId } = useAuth();
-  const [query, setQuery] = useState("");
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [freeOnly, setFreeOnly] = useState(false);
 
   useEffect(() => {
     if (!orgId || !credentialId) {
       setCatalog(null);
       return;
     }
-    const timer = window.setTimeout(() => {
-      const params = new URLSearchParams({ limit: "100", q: query });
-      void api<Catalog>(`/orgs/${orgId}/openrouter/${credentialId}/models?${params}`)
-        .then((result) => { setCatalog(result); setError(null); })
-        .catch((cause) => setError(cause instanceof Error ? cause.message : "Could not load OpenRouter models"));
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [api, credentialId, orgId, query]);
+    let cancelled = false;
+    setCatalog(null);
+    setError(null);
+    void (async () => {
+      try {
+        const page = await api<Catalog>(
+          `/orgs/${orgId}/openrouter/${credentialId}/models?limit=1000`,
+        );
+        if (!cancelled) {
+          setCatalog(page);
+          setError(null);
+        }
+      } catch (cause) {
+        if (!cancelled)
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : "Could not load OpenRouter models",
+          );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [api, credentialId, orgId]);
 
-  const items = catalog?.items ?? [];
-  return <Field>
-    <FieldLabel htmlFor={`openrouter-${stage}-search`}>OpenRouter model</FieldLabel>
-    <Input
-      id={`openrouter-${stage}-search`}
-      value={query}
-      placeholder="Search model name or slug"
-      disabled={disabled || !credentialId}
-      onChange={(event) => setQuery(event.target.value)}
-    />
-    <NativeSelect
-      id={`openrouter-${stage}-model`}
-      className="w-full"
-      value={value}
-      disabled={disabled || !credentialId || items.length === 0}
-      onChange={(event) => onChange(event.target.value)}
-    >
-      {!items.some((item) => item.id === value) && value && <option value={value}>{value} (stored)</option>}
-      {items.map((item) => <option key={item.id} value={item.id}>
-        {item.name} · {item.is_free ? "Free" : `$${Number(item.pricing.prompt) * 1_000_000}/M prompt`}
-      </option>)}
-    </NativeSelect>
-    <FieldDescription>
-      {error ?? (catalog ? `${catalog.total_count ?? items.length} account-accessible models · ${stage}` : "Bind an OpenRouter credential to load account-accessible models.")}
-    </FieldDescription>
-  </Field>;
+  const items = useMemo(
+    () =>
+      (catalog?.items ?? []).filter(
+        (item) =>
+          item.runtime_supported &&
+          item.slots.includes("llm") &&
+          (!freeOnly || item.is_free),
+      ),
+    [catalog, freeOnly],
+  );
+  const options = useMemo<OptionItem[]>(
+    () =>
+      items.map((item) => {
+        const prompt = Number(item.pricing.prompt) * 1_000_000;
+        const completion = Number(item.pricing.completion) * 1_000_000;
+        return {
+          value: item.id,
+          label: item.name,
+          badge: item.is_free ? "Free" : undefined,
+          sublabel: item.is_free
+            ? item.id
+            : `$${prompt.toPrecision(3)} input / $${completion.toPrecision(3)} output per 1M`,
+          keywords: [item.id, item.author ?? ""],
+        };
+      }),
+    [items],
+  );
+  return (
+    <Field>
+      <FieldLabel htmlFor={`openrouter-${stage}-model`}>
+        OpenRouter model
+      </FieldLabel>
+      <div className="flex items-center gap-2">
+        <SearchableSelect
+          id={`openrouter-${stage}-model`}
+          value={value}
+          onChange={onChange}
+          options={options}
+          selectionOnly
+          disabled={disabled || !credentialId || !catalog}
+          placeholder="Search models..."
+          emptyText="No models match this search or filter."
+          className="flex-1"
+        />
+        <button
+          type="button"
+          disabled={disabled || !catalog}
+          aria-pressed={freeOnly}
+          onClick={() => setFreeOnly((current) => !current)}
+          className={`h-9 rounded-md border px-3 text-xs ${freeOnly ? "border-primary bg-primary/10 text-primary" : "border-input text-muted-foreground"}`}
+        >
+          Free only
+        </button>
+      </div>
+      <FieldDescription>
+        {error ??
+          (catalog
+            ? `${items.length} ${freeOnly ? "free " : ""}usable models · ${stage}${catalog.stale ? " · cached catalog" : ""}`
+            : "Bind an OpenRouter credential to load its account-accessible models.")}
+      </FieldDescription>
+    </Field>
+  );
 }

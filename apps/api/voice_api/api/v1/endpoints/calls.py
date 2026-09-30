@@ -21,7 +21,10 @@ from voice_api.services.local_runtime_service import (
     local_progress,
     register_local_artifacts,
 )
-from voice_api.services.provider_credentials import settings_for_run
+from voice_api.services.provider_credentials import (
+    resolved_provider_secret_values,
+    settings_for_run,
+)
 from voice_runtime.execution.runner import execute_call
 from voice_runtime.telephony.driver import Sim7600CallDriver
 
@@ -54,17 +57,7 @@ async def _run_live_call_background(run_id: str, endpoint_id: str) -> None:
             endpoint_id,
             driver,
             Path("data/evidence") / f"{run_id}.jsonl",
-            secrets=tuple(
-                secret
-                for secret in (
-                    settings.groq_api_key,
-                    settings.jev_api_key,
-                    settings.sarvam_api_key,
-                    settings.cartesia_api_key,
-                    settings.gemini_api_key,
-                )
-                if secret
-            ),
+            secrets=resolved_provider_secret_values(settings),
             after_close=register_artifacts,
             local_post=post,
             local_ingestor=LocalEvidenceIngestor(run_id),

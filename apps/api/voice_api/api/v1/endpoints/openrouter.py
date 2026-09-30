@@ -107,7 +107,7 @@ async def openrouter_models(
     min_context: int | None = Query(default=None, ge=1),
     max_prompt_price: str | None = Query(default=None),
     offset: int = Query(default=0, ge=0),
-    limit: int = Query(default=25, ge=1, le=100),
+    limit: int = Query(default=25, ge=1, le=1000),
     principal: ClerkPrincipal = Principal,
     session: AsyncSession = Session,
     directory: ClerkOrganizationDirectory = Directory,

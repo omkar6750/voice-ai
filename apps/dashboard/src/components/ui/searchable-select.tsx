@@ -14,6 +14,7 @@ export interface SearchableSelectProps {
   disabled?: boolean;
   required?: boolean;
   emptyText?: string;
+  selectionOnly?: boolean;
 }
 
 export function SearchableSelect({
@@ -26,21 +27,22 @@ export function SearchableSelect({
   disabled = false,
   required = false,
   emptyText = "No matches found. Custom value will be kept.",
+  selectionOnly = false,
 }: SearchableSelectProps) {
   const [open, setOpen] = React.useState(false);
   const [activeIndex, setActiveIndex] = React.useState(-1);
   const [isTyping, setIsTyping] = React.useState(false);
+  const [search, setSearch] = React.useState("");
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   // Normalize query
-  const query = value.toLowerCase().trim();
+  const query = (selectionOnly ? search : value).toLowerCase().trim();
 
   // Check if current value exactly matches an option
   const isSelectedOption = React.useMemo(() => {
     return options.some(
       (opt) =>
-        opt.value.toLowerCase() === query ||
-        opt.label.toLowerCase() === query
+        opt.value.toLowerCase() === query || opt.label.toLowerCase() === query,
     );
   }, [options, query]);
 
@@ -72,6 +74,7 @@ export function SearchableSelect({
 
   const handleSelect = (val: string) => {
     onChange(val);
+    setSearch("");
     setIsTyping(false);
     setOpen(false);
     setActiveIndex(-1);
@@ -84,7 +87,7 @@ export function SearchableSelect({
         setOpen(true);
       } else {
         setActiveIndex((prev) =>
-          prev < filtered.length - 1 ? prev + 1 : prev
+          prev < filtered.length - 1 ? prev + 1 : prev,
         );
       }
     } else if (e.key === "ArrowUp") {
@@ -111,6 +114,7 @@ export function SearchableSelect({
         if (!next) {
           setIsTyping(false);
           setActiveIndex(-1);
+          setSearch("");
         }
       }}
     >
@@ -120,30 +124,51 @@ export function SearchableSelect({
             ref={inputRef}
             id={id}
             type="text"
-            value={value}
+            value={
+              selectionOnly
+                ? (options.find((option) => option.value === value)?.label ??
+                  value)
+                : value
+            }
+            readOnly={selectionOnly}
             disabled={disabled}
             required={required}
             placeholder={placeholder}
             autoComplete="off"
             onChange={(e) => {
+              if (selectionOnly) return;
               onChange(e.target.value);
               setIsTyping(true);
               if (!open) setOpen(true);
               setActiveIndex(-1);
             }}
             onFocus={(e) => {
+              if (selectionOnly) {
+                setSearch("");
+                setOpen(true);
+                return;
+              }
               e.target.select();
               setOpen(true);
             }}
-            onKeyDown={handleKeyDown}
+            onKeyDown={
+              selectionOnly
+                ? (e) => {
+                    if (e.key === "Enter" || e.key === "ArrowDown") {
+                      e.preventDefault();
+                      setOpen(true);
+                    }
+                  }
+                : handleKeyDown
+            }
             className={cn(
               "h-8.5 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm transition-colors",
               "placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40 focus-visible:outline-none",
-              "disabled:cursor-not-allowed disabled:opacity-50 pr-14"
+              "disabled:cursor-not-allowed disabled:opacity-50 pr-14",
             )}
           />
           <div className="absolute right-1.5 flex items-center gap-0.5 text-muted-foreground">
-            {value && !disabled && (
+            {value && !disabled && !selectionOnly && (
               <button
                 type="button"
                 tabIndex={-1}
@@ -184,6 +209,20 @@ export function SearchableSelect({
           onOpenAutoFocus={(e) => e.preventDefault()}
           className="z-50 w-[var(--radix-popover-anchor-width)] max-h-56 overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg outline-none"
         >
+          {selectionOnly && (
+            <input
+              autoFocus
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setIsTyping(true);
+                setActiveIndex(-1);
+              }}
+              onKeyDown={handleKeyDown}
+              placeholder="Search..."
+              className="mb-1 h-8 w-full rounded-md border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          )}
           {filtered.length === 0 ? (
             <div className="px-3 py-2 text-xs text-muted-foreground">
               {emptyText}
@@ -202,11 +241,15 @@ export function SearchableSelect({
                       "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors",
                       isHighlighted || isSelected
                         ? "bg-accent text-accent-foreground font-medium"
-                        : "hover:bg-muted/60 text-foreground"
+                        : "hover:bg-muted/60 text-foreground",
                     )}
                   >
                     <span className="truncate flex-1">
-                      {item.badge ? `${item.badge} ` : ""}
+                      {item.badge && (
+                        <span className="mr-1.5 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800">
+                          {item.badge}
+                        </span>
+                      )}
                       {item.label}
                     </span>
                     <div className="flex items-center gap-1.5 shrink-0">
@@ -215,7 +258,9 @@ export function SearchableSelect({
                           {item.sublabel}
                         </span>
                       )}
-                      {isSelected && <CheckIcon className="h-3.5 w-3.5 text-primary" />}
+                      {isSelected && (
+                        <CheckIcon className="h-3.5 w-3.5 text-primary" />
+                      )}
                     </div>
                   </button>
                 );

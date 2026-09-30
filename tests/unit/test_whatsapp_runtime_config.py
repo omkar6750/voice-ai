@@ -25,7 +25,7 @@ class _FakeSession:
 
 
 @pytest.mark.asyncio
-async def test_pinned_runtime_config_uses_connection_secret_without_global_settings(
+async def test_pinned_runtime_config_fails_closed_without_named_credential(
     monkeypatch,
 ) -> None:
     import voice_api.db.session
@@ -42,22 +42,12 @@ async def test_pinned_runtime_config_uses_connection_secret_without_global_setti
         deleted_at=None,
         config={"phone_number_id": "123456", "api_version": "v23.0"},
     )
-    secret = SimpleNamespace(
-        ciphertext="ciphertext", key_id="key-1", org_id="org-1", id="secret-1",
-        name="access_token", version=1,
-    )
+    session = _FakeSession(connection, None)
     monkeypatch.setattr(
         voice_api.db.session,
         "SessionFactory",
-        lambda: _FakeSession(connection, secret),
+        lambda: session,
     )
-
-    class _Vault:
-        def decrypt(self, ciphertext, key_id, *, scope=None):
-            assert (ciphertext, key_id) == ("ciphertext", "key-1")
-            return "connection-token"
-
-    monkeypatch.setattr(CredentialVault, "from_env", classmethod(lambda _cls: _Vault()))
     monkeypatch.delenv("VOICE_WHATSAPP_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("VOICE_WHATSAPP_PHONE_NUMBER_ID", raising=False)
 
@@ -70,12 +60,7 @@ async def test_pinned_runtime_config_uses_connection_secret_without_global_setti
     resolved = await host._whatsapp_runtime_config(connection_id="connection-1")
     bind.assert_awaited_once()
     assert bind.await_args.args[1] == "run-1"
-    assert resolved == (
-        "connection-token",
-        "123456",
-        "connection-1",
-        "v23.0",
-    )
+    assert resolved == ("", "123456", "connection-1", "v23.0")
 
 
 @pytest.mark.asyncio

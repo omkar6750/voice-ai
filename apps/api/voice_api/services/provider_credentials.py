@@ -19,6 +19,13 @@ PROVIDER_FIELDS = {
 }
 
 
+def resolved_provider_secret_values(settings: Settings) -> tuple[str, ...]:
+    """Return every in-memory provider secret for runtime redaction only."""
+    values = list((getattr(settings, "provider_stage_keys", None) or {}).values())
+    values.extend(getattr(settings, field, None) for field in PROVIDER_FIELDS.values())
+    return tuple(dict.fromkeys(value for value in values if value))
+
+
 def encrypt_provider_key(provider: str, plaintext: str, *, scope: SecretScope) -> tuple[str, str]:
     if provider not in PROVIDER_FIELDS:
         raise ValueError("Unsupported provider")
@@ -33,27 +40,43 @@ def decrypt_provider_key(provider: str, ciphertext: str, key_id: str, *, scope: 
 
 
 async def settings_for_organization(
-    session: AsyncSession, organization_id: str, base: Settings, *, credential_ids: dict[str, str] | None = None
+    session: AsyncSession,
+    organization_id: str,
+    base: Settings,
+    *,
+    credential_ids: dict[str, str] | None = None,
 ) -> Settings:
     """Catalog/ingestion compatibility: only an unambiguous stored org key is used."""
     bind_organization(session.sync_session, organization_id)
-    rows = (await session.scalars(select(ProviderCredential).where(
-        ProviderCredential.status == "stored", ProviderCredential.deleted_at.is_(None)
-    ))).all()
+    rows = (
+        await session.scalars(
+            select(ProviderCredential).where(
+                ProviderCredential.status == "stored", ProviderCredential.deleted_at.is_(None)
+            )
+        )
+    ).all()
     updates = dict.fromkeys(PROVIDER_FIELDS.values())
     for provider, field in PROVIDER_FIELDS.items():
         selected = (credential_ids or {}).get(provider)
         provider_rows = [row for row in rows if row.provider == provider]
-        matching = [row for row in provider_rows if row.id == selected] if selected else (
-            provider_rows if len(provider_rows) == 1 else [row for row in provider_rows if row.legacy_default]
+        matching = (
+            [row for row in provider_rows if row.id == selected]
+            if selected
+            else (
+                provider_rows
+                if len(provider_rows) == 1
+                else [row for row in provider_rows if row.legacy_default]
+            )
         )
         if len(matching) == 1:
             row = matching[0]
             try:
-                updates[field] = decrypt_provider_key(provider, row.ciphertext, row.key_id, scope=credential_scope(row))
+                updates[field] = decrypt_provider_key(
+                    provider, row.ciphertext, row.key_id, scope=credential_scope(row)
+                )
             except VaultError:
                 pass  # Catalog availability is safe status; execution fails closed below.
-    updates.update(whatsapp_access_token=None, whatsapp_phone_number_id=None, provider_stage_keys={})
+    updates["provider_stage_keys"] = {}
     return base.model_copy(update=updates)
 
 
@@ -66,17 +89,27 @@ async def settings_for_run(run_id: str, base: Settings | None = None) -> Setting
     async with SessionFactory() as session:
         organization_id = await bind_run_organization(session, run_id)
         run = await session.get(Run, run_id)
-        return await settings_for_snapshot(session, organization_id, run.resolved_config, base or get_settings(), run_id=run_id)
+        return await settings_for_snapshot(
+            session, organization_id, run.resolved_config, base or get_settings(), run_id=run_id
+        )
 
 
 def stage_providers(snapshot: dict) -> dict[str, str]:
-    result = {stage: snapshot[stage]["provider"] for stage in ("stt", "llm", "tts") if stage in snapshot}
+    result = {
+        stage: snapshot[stage]["provider"] for stage in ("stt", "llm", "tts") if stage in snapshot
+    }
     classifier = snapshot.get("classifier", {})
     if classifier.get("enabled", True):
-        result["classifier"] = "jev" if classifier.get("classifier_type") == "jev" else (classifier.get("llm") or {}).get("provider", "groq")
+        result["classifier"] = (
+            "jev"
+            if classifier.get("classifier_type") == "jev"
+            else (classifier.get("llm") or {}).get("provider", "groq")
+        )
     summary = snapshot.get("context", {}).get("summarizer", {})
     if summary.get("enabled"):
-        result["summarizer"] = (summary.get("model") or {}).get("provider", result.get("llm", "groq"))
+        result["summarizer"] = (summary.get("model") or {}).get(
+            "provider", result.get("llm", "groq")
+        )
     if snapshot.get("knowledge_base_ids"):
         result["embedding"] = "gemini"
     return result
@@ -87,7 +120,9 @@ def stage_reference(snapshot: dict, stage: str) -> str | None:
     return explicit or snapshot.get(stage, {}).get("credential_id")
 
 
-async def resolve_references(session: AsyncSession, snapshot: dict, *, strict: bool = True) -> dict[str, dict]:
+async def resolve_references(
+    session: AsyncSession, snapshot: dict, *, strict: bool = True
+) -> dict[str, dict]:
     """Map legacy configs without rewriting published JSON; ambiguity is an error."""
     from fastapi import HTTPException
 
@@ -97,9 +132,12 @@ async def resolve_references(session: AsyncSession, snapshot: dict, *, strict: b
     refs = {}
     for stage, provider in stage_providers(snapshot).items():
         ref = stage_reference(snapshot, stage)
-        query = select(ProviderCredential).where(ProviderCredential.org_id == org_id,
-            ProviderCredential.provider == provider, ProviderCredential.status == "stored",
-            ProviderCredential.deleted_at.is_(None))
+        query = select(ProviderCredential).where(
+            ProviderCredential.org_id == org_id,
+            ProviderCredential.provider == provider,
+            ProviderCredential.status == "stored",
+            ProviderCredential.deleted_at.is_(None),
+        )
         if ref:
             query = query.where(ProviderCredential.id == ref)
         else:
@@ -114,8 +152,9 @@ async def resolve_references(session: AsyncSession, snapshot: dict, *, strict: b
     return refs
 
 
-async def settings_for_snapshot(session: AsyncSession, organization_id: str, snapshot: dict,
-                                base: Settings, *, run_id: str) -> Settings:
+async def settings_for_snapshot(
+    session: AsyncSession, organization_id: str, snapshot: dict, base: Settings, *, run_id: str
+) -> Settings:
     from fastapi import HTTPException
 
     from voice_api.services.credential_lease_service import acquire, admit_settings, issue
@@ -131,18 +170,30 @@ async def settings_for_snapshot(session: AsyncSession, organization_id: str, sna
     stage_keys = {}
     for stage, provider in stage_providers(snapshot).items():
         ref = refs[stage]
-        row = await session.scalar(select(ProviderCredential).where(
-            ProviderCredential.id == ref["credential_id"], ProviderCredential.org_id == organization_id
-        ).with_for_update())
-        if row is None or row.status != "stored" or row.provider != provider or row.version != ref["version"]:
+        row = await session.scalar(
+            select(ProviderCredential)
+            .where(
+                ProviderCredential.id == ref["credential_id"],
+                ProviderCredential.org_id == organization_id,
+            )
+            .with_for_update()
+        )
+        if (
+            row is None
+            or row.status != "stored"
+            or row.provider != provider
+            or row.version != ref["version"]
+        ):
             raise HTTPException(422, "Run credential was replaced or revoked")
         try:
-            key = decrypt_provider_key(provider, row.ciphertext, row.key_id, scope=credential_scope(row))
+            key = decrypt_provider_key(
+                provider, row.ciphertext, row.key_id, scope=credential_scope(row)
+            )
         except VaultError as error:
             raise HTTPException(503, "Run credential is unavailable") from error
         stage_keys[stage] = key
         updates[PROVIDER_FIELDS[provider]] = key
         await issue(session, run_id, row)
-    updates.update(whatsapp_access_token=None, whatsapp_phone_number_id=None, provider_stage_keys=stage_keys)
+    updates["provider_stage_keys"] = stage_keys
     await session.commit()
     return base.model_copy(update=updates)

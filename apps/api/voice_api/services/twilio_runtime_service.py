@@ -28,6 +28,7 @@ from voice_api.schemas.diagnostics import DiagnosticInput
 from voice_api.services.call_service import TWILIO_STATUS_MAP
 from voice_api.services.credential_runtime_host import CredentialRuntimeHost as NativePipelineHost
 from voice_api.services.diagnostic_service import persist_diagnostic
+from voice_api.services.provider_credentials import resolved_provider_secret_values
 
 
 def _diagnostic(code: str, message: str, **metadata) -> dict:
@@ -90,17 +91,15 @@ async def run_twilio_pipeline(
             spool_path.parent.mkdir(parents=True, exist_ok=True)
             spool = DurableSpool(spool_path)
             secrets = tuple(
-                s
-                for s in (
-                    settings.groq_api_key,
-                    settings.jev_api_key,
-                    settings.sarvam_api_key,
-                    settings.cartesia_api_key,
-                    settings.gemini_api_key,
-                    auth_token,
-                    settings.runtime_service_token,
+                dict.fromkeys(
+                    secret
+                    for secret in (
+                        *resolved_provider_secret_values(settings),
+                        auth_token,
+                        settings.runtime_service_token,
+                    )
+                    if secret
                 )
-                if s
             )
             tracker = ExchangeTracker(run_id, spool, secrets=secrets)
             delivery_task = asyncio.create_task(stream_evidence(spool, ingestor))
