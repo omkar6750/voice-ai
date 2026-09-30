@@ -34,10 +34,18 @@ type TwilioConnection = {
 };
 type Call = { id: string; run_id: string; status: string; target_snapshot: string };
 
-export function QuickDial() {
+type QuickDialProps = {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
+};
+
+export function QuickDial({ open: controlledOpen, onOpenChange, hideTrigger = false }: QuickDialProps = {}) {
   const api = useApi();
   const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = onOpenChange ?? setInternalOpen;
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [versions, setVersions] = useState<Version[]>([]);
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
@@ -156,9 +164,9 @@ export function QuickDial() {
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>
+      {!hideTrigger && <SheetTrigger asChild>
         <Button size="sm"><PhoneCall data-icon="inline-start" />Quick dial</Button>
-      </SheetTrigger>
+      </SheetTrigger>}
       <SheetContent className="overflow-y-auto">
         <SheetHeader>
           <SheetTitle>Quick dial</SheetTitle>

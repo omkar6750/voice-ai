@@ -8,7 +8,7 @@
   # Netlify's preliminary install must not rewrite the reviewed lock or run scripts.
   # The guarded command performs the authoritative npm ci and build afterwards.
   NPM_FLAGS = "--package-lock=false --ignore-scripts"
-  # Only VITE_CLERK_PUBLISHABLE_KEY and VITE_API_ORIGIN may enter Vite.
+  # Only public Clerk routing values and VITE_API_ORIGIN may enter Vite.
   # Set their nonempty public values in Netlify; never put backend secrets there.
 
 [[redirects]]

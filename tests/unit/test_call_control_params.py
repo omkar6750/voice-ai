@@ -5,17 +5,26 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 from pipecat.frames.frames import EndFrame
+from pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy import (
+    TurnAnalyzerUserTurnStopStrategy,
+)
+from voice_runtime.execution import native_helpers
 from voice_runtime.execution.native import NativePipelineHost, build_user_aggregator_params
 
 
-def test_interruptions_and_idle_timeout_are_applied_to_turn_settings():
+def test_interruptions_and_idle_timeout_keep_explicit_smart_turn_stop(monkeypatch):
     vad = object()
+    analyzer = object()
+    monkeypatch.setattr(native_helpers, "LocalSmartTurnAnalyzerV3", lambda: analyzer)
     enabled = build_user_aggregator_params(
         {"call_limits": {"interruptions_enabled": True, "idle_timeout_secs": 35}}, vad
     )
     assert enabled.vad_analyzer is vad
     assert enabled.user_idle_timeout == 35
-    assert enabled.user_turn_strategies is None
+    enabled_stop = enabled.user_turn_strategies.stop
+    assert len(enabled_stop) == 1
+    assert isinstance(enabled_stop[0], TurnAnalyzerUserTurnStopStrategy)
+    assert enabled_stop[0]._turn_analyzer is analyzer
 
     disabled = build_user_aggregator_params(
         {"call_limits": {"interruptions_enabled": False, "idle_timeout_secs": 12}}, vad
@@ -24,6 +33,8 @@ def test_interruptions_and_idle_timeout_are_applied_to_turn_settings():
     assert all(
         not strategy._enable_interruptions for strategy in disabled.user_turn_strategies.start
     )
+    assert len(disabled.user_turn_strategies.stop) == 1
+    assert disabled.user_turn_strategies.stop[0]._turn_analyzer is analyzer
 
 
 async def test_one_idle_reprompt_then_bounded_call_end():

@@ -241,9 +241,7 @@ class OpenRouterClient:
         return KeyLimits.model_validate((await self._request("GET", "/key")).get("data", {}))
 
     async def credits(self) -> Credits:
-        return Credits.model_validate(
-            (await self._request("GET", "/credits")).get("data", {})
-        )
+        return Credits.model_validate((await self._request("GET", "/credits")).get("data", {}))
 
     async def models(self, *, user: bool = True, **params: Any) -> ModelPage:
         path = "/models/user" if user else "/models"
@@ -254,7 +252,9 @@ class OpenRouterClient:
             await self._request("GET", f"/models/{author}/{slug}/endpoints")
         )
 
-    async def chat(self, *, model: str, messages: list[dict[str, Any]], **params: Any) -> ChatCompletion:
+    async def chat(
+        self, *, model: str, messages: list[dict[str, Any]], **params: Any
+    ) -> ChatCompletion:
         body = {"model": model, "messages": messages, "stream": False, **params}
         return ChatCompletion.model_validate(
             await self._request("POST", "/chat/completions", json=body)

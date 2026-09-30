@@ -319,7 +319,7 @@ async def verify_ticket_actor(session: AsyncSession, ctx: BrowserSessionContext)
     if user is None or user.disabled_at is not None or organization is None:
         raise HTTPException(403, "Browser actor access is unavailable")
     member = await get_clerk_organization_directory().membership(organization.clerk_org_id, ctx.actor_user_id)
-    if member is None or member.role not in {"org:admin", "org:member"}:
+    if member is None or member.role not in {"org:owner", "org:admin", "org:member"}:
         raise HTTPException(403, "Browser actor is no longer an organization member")
 
 
@@ -375,18 +375,79 @@ async def handle_browser_socket(session_id: str, websocket: WebSocket, settings:
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(_transport, _client):
-            ctx.request_end("disconnect_unknown")
+            await persist_transport_disconnect(ctx, "disconnect_unknown")
 
         @transport.event_handler("on_session_timeout")
         async def on_session_timeout(_transport, _client):
-            ctx.disconnect_reason = "browser_timeout"
-            ctx.request_end("network_failure")
+            await persist_transport_disconnect(ctx, "browser_timeout", cause="network_failure")
 
         ctx.pipeline_task = asyncio.create_task(_run_browser_pipeline(ctx, transport, settings))
         await ctx.pipeline_task
     finally:
+        # A browser refresh can close the socket while startup is still in
+        # progress, or while the pipeline task is not yet able to observe the
+        # transport disconnect. Make sure the database cannot retain a
+        # claimed/running run indefinitely in either case.
+        if ctx.pipeline_task is None:
+            async with SessionFactory() as cleanup_session:
+                await end_browser_session(
+                    session_id=session_id,
+                    session=cleanup_session,
+                    reason="disconnect_unknown",
+                )
+        elif not ctx.pipeline_task.done():
+            ctx.request_end("disconnect_unknown")
+            await ctx.close_runtime()
         ctx.mark_ended()
         await browser_session_manager.remove_context(session_id)
+
+
+async def persist_transport_disconnect(
+    ctx: BrowserSessionContext,
+    reason: str,
+    *,
+    cause: TerminationCause = "disconnect_unknown",
+) -> None:
+    """Persist a terminal outcome as soon as the browser transport closes."""
+    ctx.disconnect_reason = reason
+    ctx.request_end(cause)
+    async with SessionFactory() as session:
+        bind_organization(session.sync_session, ctx.org_id)
+        browser_session = await session.get(BrowserSession, ctx.session_id)
+        run = await session.get(Run, ctx.run_id, with_for_update=True)
+        if not browser_session or not run:
+            return
+        if run.status in {"claimed", "running", "uncertain"}:
+            await persist_diagnostic(
+                session,
+                run.id,
+                DiagnosticInput(
+                    diagnostic_id=str(uuid5(NAMESPACE_URL, f"{run.id}/browser/{reason}")),
+                    occurred_at=now(),
+                    severity="warning",
+                    category="call_termination",
+                    source="transport",
+                    code=reason,
+                    message="Browser voice connection ended",
+                    uncertain=True,
+                ),
+            )
+            run.status = ctx.termination.summary.execution_status
+            run.error = (
+                run.error
+                or "Browser call ended before normal completion: "
+                f"{ctx.termination.summary.cause}"
+            )
+            run.ended_at = run.ended_at or now()
+            run.final_state = {
+                **(run.final_state or {}),
+                "termination": ctx.termination.snapshot(),
+                "evidence_incomplete": True,
+            }
+        if browser_session.status in {"created", "connecting", "connected"}:
+            browser_session.status = "disconnected"
+            browser_session.disconnected_at = browser_session.disconnected_at or now()
+        await session.commit()
 
 
 async def end_browser_session(

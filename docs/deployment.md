@@ -20,6 +20,8 @@ Older plans mentioning Supabase recordings are superseded for this hosted design
 Cloudinary owns recordings; Supabase owns private documents and sanitized diagnostics.
 No paid resource, worker, cron, scheduler, automatic cleanup/redial, or automatic spend
 is authorized. An existing free account's limits must be checked before deployment.
+The agent may book a human callback in the configured calendar, but no call is
+automatically placed at the booked time; a person must initiate any later call.
 Twilio and model APIs can incur usage charges: their credentials and an enabled
 transport do not authorize paid calls. Stop at insufficient free allowance.
 
@@ -42,10 +44,13 @@ does not implement its gate. Parent must wire and test these before public expos
 | `VOICE_DATABASE_URL` | `database_url` | Secret SQLAlchemy asyncpg URL with validated TLS; no localhost default in production |
 | `VOICE_INTEGRATION_KEYS` | `integration_keys` | Existing JSON key-ID/Fernet-key map, supplied privately; preserve decryptability |
 | `VOICE_INTEGRATION_ACTIVE_KEY` | `integration_active_key` | Existing key ID present in that map; no generated or blank fallback |
+| `VOICE_CALLBACK_SLOT_SIGNING_KEY` | `callback_slot_signing_key` | Backend-only high-entropy signing key for callback booking slots |
 | `VOICE_RUNTIME_SERVICE_TOKEN` | `runtime_service_token` | Distinct nonempty secret for `X-Voice-Runtime-Token`; never browser auth |
 | `CLERK_SECRET_KEY` | `clerk_secret_key` | Backend-only Clerk secret (explicit alias, no `VOICE_` prefix) |
-| `CLERK_PUBLISHABLE_KEY` | `clerk_publishable_key` | Matching Clerk public key, explicit alias |
 | `CLERK_WEBHOOK_SIGNING_SECRET` | `clerk_webhook_signing_secret` | Nonempty verified webhook secret, explicit alias |
+| `VOICE_GOOGLE_CALENDAR_CLIENT_ID` | `google_calendar_client_id` | Platform OAuth client used for user-authorized calendar connections |
+| `VOICE_GOOGLE_CALENDAR_CLIENT_SECRET` | `google_calendar_client_secret` | Backend-only OAuth client secret |
+| `VOICE_GOOGLE_CALENDAR_REDIRECT_URI` | `google_calendar_redirect_uri` | Exact public Render URL ending in `/api/v1/calendar-integrations/google/callback` |
 | `VOICE_CLOUDINARY_CLOUD_NAME` | `cloudinary_cloud_name` | Matching recording account |
 | `VOICE_CLOUDINARY_API_KEY` | `cloudinary_api_key` | Backend-only authenticated upload/read/delete credential |
 | `VOICE_CLOUDINARY_API_SECRET` | `cloudinary_api_secret` | Backend-only secret; no public download URL persistence |
@@ -121,8 +126,13 @@ CMD, Render startup, predeploy, Netlify build, or scheduled work. Capture the mi
 revision, pgvector availability, preservation checks and restore evidence first.
 
 Netlify reads root `netlify.toml`, builds in `apps/dashboard` with Node 24, and publishes
-only `dist`. Set exactly `VITE_CLERK_PUBLISHABLE_KEY` and `VITE_API_ORIGIN` in its build
-environment; the API origin must be HTTPS without credentials or a path. The deployment
+only `dist`. For local Vite use, copy `apps/dashboard/.env.example` to `.env.local` and
+set `VITE_CLERK_PUBLISHABLE_KEY` plus `VITE_API_ORIGIN`; optional Clerk routing variables
+control the sign-in, sign-up, organization creation, invitation, and profile paths.
+The dashboard reads only public Vite variables and never sources its publishable key from
+the backend `.env`. For hosted builds set the public Clerk variables and `VITE_API_ORIGIN`
+in Netlify's build environment; the API origin must be HTTPS
+without credentials or a path. The deployment
 guard rejects other `VITE_` names and Vite production dotenv files without reading
 them, and gives its npm/Vite processes only public keys and basic OS variables.
 Netlify's preliminary install uses `NPM_FLAGS` to preserve the reviewed lock and skip

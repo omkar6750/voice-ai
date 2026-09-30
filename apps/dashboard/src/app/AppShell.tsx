@@ -1,15 +1,13 @@
 import {
   Activity, AudioLines, CalendarClock, Database, Link2, ListTodo,
-  LogOut, Radio, Settings2, ShieldCheck, Users,
+  LogOut, PhoneCall, Radio, Settings2, ShieldCheck, Users,
 } from "lucide-react";
-import { UserButton, useAuth, useClerk } from "@clerk/react";
+import { OrganizationSwitcher, UserButton, useAuth, useClerk } from "@clerk/react";
+import { lazy, Suspense, useState } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { AppRoutes } from "./AppRoutes";
-import { QuickDial } from "./QuickDial";
-import { TestAgentModal } from "./TestAgentModal";
-import { OrgSwitcher } from "./OrgSwitcher";
+import { clerkUrls } from "./clerk-config";
 import { OrganizationAccessContext, type OrganizationAccess } from "./access";
-import type { OrganizationView } from "./organizations";
 import {
   Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList,
   BreadcrumbPage, BreadcrumbSeparator,
@@ -19,6 +17,46 @@ import {
   SidebarGroupLabel, SidebarHeader, SidebarInset, SidebarMenu,
   SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { Button } from "@/components/ui/button";
+
+const QuickDial = lazy(() => import("./QuickDial").then((module) => ({ default: module.QuickDial })));
+const TestAgentModal = lazy(() => import("./TestAgentModal").then((module) => ({ default: module.TestAgentModal })));
+
+function TestAgentLoadingDialog() {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 backdrop-blur-xs" role="status">
+      <div className="w-[calc(100%-2rem)] max-w-lg rounded-xl border border-border bg-card p-6 shadow-xl">
+        <div className="flex flex-col gap-1.5">
+          <p className="font-heading text-lg font-semibold">Test Agent</p>
+          <p className="text-sm text-muted-foreground">Loading test call controls…</p>
+        </div>
+        <div className="mt-6 flex flex-col gap-4 animate-pulse">
+          <div className="h-3 w-20 rounded bg-muted" />
+          <div className="h-8 w-full rounded-lg bg-muted" />
+          <div className="h-24 w-full rounded-lg bg-muted" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeferredQuickDial() {
+  const [loaded, setLoaded] = useState(false);
+  const [open, setOpen] = useState(false);
+  return <>
+    <Button size="sm" onClick={() => { setLoaded(true); setOpen(true); }}><PhoneCall data-icon="inline-start" />Quick dial</Button>
+    {loaded && <Suspense fallback={null}><QuickDial open={open} onOpenChange={setOpen} hideTrigger /></Suspense>}
+  </>;
+}
+
+function DeferredTestAgentModal() {
+  const [loaded, setLoaded] = useState(false);
+  const [open, setOpen] = useState(false);
+  return <>
+    <Button variant="outline" size="sm" className="gap-2" onClick={() => { setLoaded(true); setOpen(true); }}><Radio className="size-4 text-emerald-500 animate-pulse" /><span>Test Agent</span></Button>
+    {loaded && <Suspense fallback={open ? <TestAgentLoadingDialog /> : null}><TestAgentModal open={open} onOpenChange={setOpen} hideTrigger /></Suspense>}
+  </>;
+}
 
 const navigation = [
   { title: "Agents", path: "/agents", icon: AudioLines },
@@ -33,7 +71,7 @@ const navigation = [
   { title: "Settings", path: "/settings", icon: Settings2 },
 ] as const;
 
-function SideNavigation({ platformAdmin, canManageHardware, supportMode }: { platformAdmin: boolean; canManageHardware: boolean; supportMode: boolean }) {
+function SideNavigation({ platformAdmin, supportMode }: { platformAdmin: boolean; supportMode: boolean }) {
   const { signOut } = useClerk();
   const { orgId } = useAuth();
   const { pathname } = useLocation();
@@ -50,7 +88,7 @@ function SideNavigation({ platformAdmin, canManageHardware, supportMode }: { pla
           <SidebarGroupLabel>Organization</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navigation.filter((item) => (item.path !== "/endpoints" || canManageHardware) && (item.path !== "/recordings" || !supportMode)).map(({ title, path, icon: Icon }) => (
+              {navigation.filter((item) => (item.path !== "/endpoints" || platformAdmin) && (item.path !== "/recordings" || !supportMode)).map(({ title, path, icon: Icon }) => (
                 <SidebarMenuItem key={path}>
                   <SidebarMenuButton asChild tooltip={title} isActive={pathname === path || pathname.startsWith(`${path}/`)}>
                     <NavLink to={path}><Icon aria-hidden="true" /><span>{title}</span></NavLink>
@@ -58,8 +96,8 @@ function SideNavigation({ platformAdmin, canManageHardware, supportMode }: { pla
                 </SidebarMenuItem>
               ))}
               {orgId && !supportMode && <SidebarMenuItem>
-                <SidebarMenuButton asChild tooltip="Members" isActive={pathname === `/orgs/${orgId}/members`}>
-                  <NavLink to={`/orgs/${orgId}/members`}><Users aria-hidden="true" /><span>Members</span></NavLink>
+                <SidebarMenuButton asChild tooltip="Members" isActive={pathname.startsWith("/organizations/profile")}>
+                  <NavLink to="/organizations/profile"><Users aria-hidden="true" /><span>Members</span></NavLink>
                 </SidebarMenuButton>
               </SidebarMenuItem>}
               {platformAdmin && <SidebarMenuItem>
@@ -107,27 +145,26 @@ function LocationTrail() {
   );
 }
 
-export function AppShell({ organizations, platformAdmin = false, supportOrganization, onExitSupport }: { organizations: OrganizationView[]; platformAdmin?: boolean; supportOrganization?: { id: string; name: string }; onExitSupport?: () => void }) {
-  const { orgId } = useAuth();
-  const canCall = Boolean(supportOrganization) || organizations.some((org) => org.id === orgId);
-  const activeOrganization = organizations.find((org) => org.id === orgId);
-  const role: OrganizationAccess["role"] = supportOrganization || activeOrganization?.role === "org:admin"
+export function AppShell({ platformAdmin = false, supportOrganization, onExitSupport }: { platformAdmin?: boolean; supportOrganization?: { id: string; name: string }; onExitSupport?: () => void }) {
+  const { orgId, orgRole } = useAuth();
+  const canCall = Boolean(supportOrganization) || Boolean(orgId);
+  const role: OrganizationAccess["role"] = supportOrganization || orgRole === "org:owner" || orgRole === "org:admin"
     ? "org:admin"
-    : activeOrganization?.role === "org:member"
+    : orgRole === "org:member"
       ? "org:member"
       : null;
   const access = {
     role,
-    isOwner: Boolean(activeOrganization?.is_owner),
+    isOwner: orgRole === "org:owner",
     canManage: Boolean(supportOrganization) || role === "org:admin",
     canUseBrowserTest: canCall,
-    canDial: !supportOrganization && role === "org:admin",
+    canDial: !supportOrganization && (orgRole === "org:owner" || orgRole === "org:admin"),
   };
-  const canDial = !supportOrganization && activeOrganization?.role === "org:admin";
+  const canDial = !supportOrganization && (orgRole === "org:owner" || orgRole === "org:admin");
   return (
     <OrganizationAccessContext.Provider value={access}>
     <SidebarProvider>
-      <SideNavigation platformAdmin={platformAdmin} canManageHardware={canDial} supportMode={Boolean(supportOrganization)} />
+      <SideNavigation platformAdmin={platformAdmin} supportMode={Boolean(supportOrganization)} />
       <SidebarInset className="min-w-0">
         <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4">
           <SidebarTrigger />
@@ -137,15 +174,15 @@ export function AppShell({ organizations, platformAdmin = false, supportOrganiza
             <button className="font-medium underline" onClick={onExitSupport}>Exit</button>
           </div>}
           <div className="ml-auto flex items-center gap-2">
-            {!supportOrganization && <OrgSwitcher organizations={organizations} />}
-            {canCall && <TestAgentModal />}
-            {canDial && <QuickDial />}
+            {!supportOrganization && <OrganizationSwitcher hidePersonal afterSelectOrganizationUrl={clerkUrls.afterSignIn} createOrganizationMode="navigation" createOrganizationUrl={clerkUrls.createOrganization} organizationProfileMode="navigation" organizationProfileUrl={clerkUrls.organizationProfile} />}
+            {canCall && <DeferredTestAgentModal />}
+            {canDial && <DeferredQuickDial />}
             <UserButton />
           </div>
         </header>
         <main className="min-w-0 flex-1">
           {!access.canManage && <div className="border-b bg-muted/40 px-6 py-2 text-sm text-muted-foreground" role="status">Member access is read-only. You can review organization data and make browser test calls.</div>}
-          <AppRoutes />
+          <AppRoutes platformAdmin={platformAdmin} />
         </main>
       </SidebarInset>
     </SidebarProvider>

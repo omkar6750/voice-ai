@@ -35,6 +35,8 @@ services:
         sync: false
       - key: VOICE_INTEGRATION_ACTIVE_KEY
         sync: false
+      - key: VOICE_CALLBACK_SLOT_SIGNING_KEY
+        sync: false
       - key: VOICE_RUNTIME_SERVICE_TOKEN
         sync: false
       - key: VOICE_PUBLIC_BASE_URL
@@ -43,9 +45,13 @@ services:
         sync: false
       - key: CLERK_SECRET_KEY
         sync: false
-      - key: CLERK_PUBLISHABLE_KEY
-        sync: false
       - key: CLERK_WEBHOOK_SIGNING_SECRET
+        sync: false
+      - key: VOICE_GOOGLE_CALENDAR_CLIENT_ID
+        sync: false
+      - key: VOICE_GOOGLE_CALENDAR_CLIENT_SECRET
+        sync: false
+      - key: VOICE_GOOGLE_CALENDAR_REDIRECT_URI
         sync: false
       - key: VOICE_CLOUDINARY_CLOUD_NAME
         sync: false

@@ -5,6 +5,11 @@ export const ApiContext = createContext<Api | null>(null);
 export const SupportSessionContext = createContext<string | null>(null);
 const apiOrigin = (import.meta.env.VITE_API_ORIGIN ?? "").replace(/\/$/, "");
 
+export function healthUrl(): string {
+  const origin = apiOrigin || (import.meta.env.DEV ? "http://127.0.0.1:8000" : window.location.origin);
+  return new URL("/health", origin).toString();
+}
+
 export function apiUrl(path: string): string {
   return `${apiOrigin}/api/v1${path}`;
 }
@@ -31,12 +36,16 @@ export async function request<T>(
   init: RequestInit = {},
   supportSession?: string | null,
 ): Promise<T> {
+  const startedAt = performance.now();
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${sessionToken}`);
   if (supportSession) headers.set("X-Platform-Support-Session", supportSession);
   if (init.body && !(init.body instanceof FormData))
     headers.set("Content-Type", "application/json");
   const response = await fetch(apiUrl(path), { ...init, headers });
+  if (import.meta.env.VITE_DEBUG_PERF === "true") {
+    console.debug(`[voice-api] ${init.method ?? "GET"} ${path} ${response.status} ${(performance.now() - startedAt).toFixed(0)}ms`);
+  }
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
     const detail = payload?.detail;

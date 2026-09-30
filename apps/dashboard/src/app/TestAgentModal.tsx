@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { PipecatClient } from "@pipecat-ai/client-js";
 import { ProtobufFrameSerializer, WebSocketTransport } from "@pipecat-ai/websocket-transport";
@@ -72,13 +73,41 @@ type BrowserSessionResponse = {
   sample_rate: number;
 };
 
-export function TestAgentModal() {
+type TestAgentModalProps = {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
+};
+
+export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger = false }: TestAgentModalProps = {}) {
   const api = useApi();
-  const [open, setOpen] = useState(false);
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = onOpenChange ?? setInternalOpen;
+  const agentsQuery = useQuery({
+    queryKey: ["test-agent-options", "agents"],
+    queryFn: () => api<{ agents: Agent[] }>("/agents"),
+    enabled: open,
+    staleTime: 60_000,
+  });
+  const contactsQuery = useQuery({
+    queryKey: ["test-agent-options", "contacts"],
+    queryFn: () => api<{ contacts: Contact[] }>("/contacts"),
+    enabled: open,
+    staleTime: 60_000,
+  });
+  const integrationsQuery = useQuery({
+    queryKey: ["test-agent-options", "integrations"],
+    queryFn: () => api<{ connections: IntegrationConnection[] }>("/integrations"),
+    enabled: open,
+    staleTime: 60_000,
+  });
+  const agents = agentsQuery.data?.agents ?? [];
   const [selectedAgentId, setSelectedAgentId] = useState("");
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [connections, setConnections] = useState<IntegrationConnection[]>([]);
+  const contacts = contactsQuery.data?.contacts ?? [];
+  const connections = integrationsQuery.data?.connections ?? [];
+  const optionsLoading = agentsQuery.isPending || contactsQuery.isPending || integrationsQuery.isPending;
+  const optionsError = agentsQuery.error ?? contactsQuery.error ?? integrationsQuery.error;
 
   // Context Mode: contact | custom | none
   const [contextMode, setContextMode] = useState<"contact" | "custom" | "none">("contact");
@@ -106,40 +135,38 @@ export function TestAgentModal() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [duration, setDuration] = useState(0);
   const [runId, setRunId] = useState<string | null>(null);
+  const [canReconnect, setCanReconnect] = useState(false);
 
   const clientRef = useRef<PipecatClient | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const timerRef = useRef<number | null>(null);
+  const startingRef = useRef(false);
+  const userEndedRef = useRef(false);
+  const apiRef = useRef(api);
+  apiRef.current = api;
+  const callInProgress = callState === "requesting" || callState === "connecting" || callState === "connected";
+  const debugLifecycle = (event: string, details?: unknown) => {
+    if (import.meta.env.VITE_DEBUG_PERF === "true") {
+      console.debug(`[browser-test] ${event}`, details ?? "");
+    }
+  };
 
   useEffect(() => {
-    if (!open) return;
-    Promise.all([
-      api<{ agents: Agent[] }>("/agents"),
-      api<{ contacts: Contact[] }>("/contacts"),
-      api<{ connections: IntegrationConnection[] }>("/integrations"),
-    ])
-      .then(([agentsData, contactsData, integrationsData]) => {
-        setAgents(agentsData.agents);
-        setContacts(contactsData.contacts);
-        setConnections(integrationsData.connections || []);
+    if (!selectedAgentId && agents.length > 0) {
+      const preferredAgent = agents.find(
+        (a) => a.active_version_id || a.published_version_id || a.latest_version_id,
+      );
+      setSelectedAgentId(preferredAgent?.id ?? agents[0].id);
+    }
+  }, [agents, selectedAgentId]);
 
-        const preferredAgent = agentsData.agents.find(
-          (a) => a.active_version_id || a.published_version_id || a.latest_version_id
-        );
-        if (preferredAgent) {
-          setSelectedAgentId(preferredAgent.id);
-        } else if (agentsData.agents.length > 0) {
-          setSelectedAgentId(agentsData.agents[0].id);
-        }
+  useEffect(() => {
+    if (!selectedContactId && contacts.length > 0) setSelectedContactId(contacts[0].id);
+  }, [contacts, selectedContactId]);
 
-        if (contactsData.contacts.length > 0 && !selectedContactId) {
-          setSelectedContactId(contactsData.contacts[0].id);
-        }
-      })
-      .catch((err) => {
-        toast.error("Failed to load options: " + (err.message || String(err)));
-      });
-  }, [api, open]);
+  useEffect(() => {
+    if (optionsError) toast.error("Failed to load test call options: " + optionsError.message);
+  }, [optionsError]);
 
   const hasWhatsApp = connections.some(
     (c) => c.provider === "whatsapp_cloud" && c.enabled && !c.deleted_at
@@ -169,15 +196,40 @@ export function TestAgentModal() {
   }, [callState]);
 
   const cleanupCall = () => {
+    debugLifecycle("cleanup", { sessionId: sessionIdRef.current });
     const client = clientRef.current;
     clientRef.current = null;
-    if (client) void client.disconnect().catch(() => {});
+    // Pipecat may already tear down a failed transport connection internally.
+    // Calling disconnect before the client has begun a session produces a
+    // secondary "please call .begin() first" error and hides the real failure.
+    if (client?.connected) void client.disconnect().catch(() => {});
     sessionIdRef.current = null;
     setIsMuted(false);
     setIsSpeaking(false);
   };
 
+  async function finishCall(allowReconnect: boolean) {
+    const sessionId = sessionIdRef.current;
+    sessionIdRef.current = null;
+    if (sessionId) {
+      try {
+        await api(`/browser-sessions/${sessionId}`, { method: "DELETE" });
+      } catch {
+        // The WebSocket cleanup path is authoritative if the HTTP request races
+        // with a page close or an already-closed session.
+      }
+    }
+    cleanupCall();
+    setCanReconnect(allowReconnect);
+    setCallState("ended");
+  }
+
   const startTestCall = async () => {
+    if (startingRef.current || !selectedAgentId) return;
+    startingRef.current = true;
+    userEndedRef.current = false;
+    setCanReconnect(false);
+    debugLifecycle("start", { agentId: selectedAgentId, contextMode });
     try {
       setCallState("requesting");
       const agent = agents.find((a) => a.id === selectedAgentId);
@@ -239,6 +291,7 @@ export function TestAgentModal() {
         body: JSON.stringify(payload),
       });
       sessionIdRef.current = session.id;
+      debugLifecycle("session-created", { sessionId: session.id, runId: session.run_id });
       setRunId(session.run_id);
       setCallState("connecting");
 
@@ -254,44 +307,43 @@ export function TestAgentModal() {
           onBotStartedSpeaking: () => setIsSpeaking(true),
           onBotStoppedSpeaking: () => setIsSpeaking(false),
           onDisconnected: () => {
-            setCallState("ended");
+            debugLifecycle("client-disconnected", { sessionId: sessionIdRef.current });
             setIsSpeaking(false);
+            void finishCall(!userEndedRef.current);
           },
         },
       });
       clientRef.current = client;
+      debugLifecycle("initializing-devices", { sessionId: session.id });
       await client.initDevices();
       const { ticket } = await api<{ ticket: string }>(
         `/browser-sessions/${session.id}/ticket`,
         { method: "POST" },
       );
+      debugLifecycle("ticket-issued", { sessionId: session.id });
       await client.connect({
         wsUrl: websocketUrl(`/browser-sessions/${session.id}/ws?ticket=${encodeURIComponent(ticket)}`),
       });
+      debugLifecycle("connected", { sessionId: session.id });
       setCallState("connected");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
+      debugLifecycle("startup-failed", { message: msg, sessionId: sessionIdRef.current });
       toast.error("Failed to start test call: " + msg);
       if (sessionIdRef.current) {
         void api(`/browser-sessions/${sessionIdRef.current}`, { method: "DELETE" }).catch(() => {});
       }
+      userEndedRef.current = true;
       setCallState("idle");
       cleanupCall();
+    } finally {
+      startingRef.current = false;
     }
   };
 
   const endTestCall = async () => {
-    if (sessionIdRef.current) {
-      try {
-        await api(`/browser-sessions/${sessionIdRef.current}`, {
-          method: "DELETE",
-        });
-      } catch {
-        // Ignored
-      }
-    }
-    cleanupCall();
-    setCallState("ended");
+    userEndedRef.current = true;
+    await finishCall(false);
   };
 
   const toggleMute = () => {
@@ -308,26 +360,56 @@ export function TestAgentModal() {
   };
 
   const handleOpenChange = (nextOpen: boolean) => {
-    if (!nextOpen && (callState === "connected" || callState === "connecting")) {
-      endTestCall();
-    }
-    if (!nextOpen) {
-      cleanupCall();
-      setCallState("idle");
-    }
+    if (!nextOpen && callInProgress) return;
     setOpen(nextOpen);
   };
+
+  const preventCallDismiss = (event: Event) => {
+    if (callInProgress) event.preventDefault();
+  };
+
+  useEffect(() => {
+    const terminateSession = () => {
+      const sessionId = sessionIdRef.current;
+      if (!sessionId) return;
+      debugLifecycle("pagehide-delete", { sessionId });
+      // keepalive lets the browser finish the DELETE when a refresh or tab
+      // close interrupts the React tree and would otherwise leave a run active.
+      void apiRef.current(`/browser-sessions/${sessionId}`, { method: "DELETE", keepalive: true }).catch(() => {});
+    };
+    window.addEventListener("pagehide", terminateSession);
+    return () => {
+      window.removeEventListener("pagehide", terminateSession);
+      terminateSession();
+      cleanupCall();
+    };
+  }, []);
+
+  useEffect(() => {
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!callInProgress) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [callInProgress]);
 
   return (
     <>
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogTrigger asChild>
+        {!hideTrigger && <DialogTrigger asChild>
           <Button variant="outline" size="sm" className="gap-2">
             <Radio className="size-4 text-emerald-500 animate-pulse" />
             <span>Test Agent</span>
           </Button>
-        </DialogTrigger>
-        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+        </DialogTrigger>}
+        <DialogContent
+          className="sm:max-w-lg max-h-[90vh] overflow-y-auto"
+          showCloseButton={!callInProgress}
+          onInteractOutside={preventCallDismiss}
+          onEscapeKeyDown={preventCallDismiss}
+        >
           <DialogHeader>
             <DialogTitle>Test Agent</DialogTitle>
             <DialogDescription>
@@ -341,10 +423,12 @@ export function TestAgentModal() {
               <label className="flex flex-col gap-1.5">
                 <span className="text-xs font-medium text-muted-foreground">Select Agent</span>
                 <NativeSelect
+                  className="w-full"
                   value={selectedAgentId}
                   onChange={(e) => setSelectedAgentId(e.target.value)}
+                  disabled={optionsLoading || agents.length === 0}
                 >
-                  {agents.map((agent) => {
+                  {optionsLoading ? <NativeSelectOption value="">Loading agents…</NativeSelectOption> : agents.map((agent) => {
                     const status = agent.active_version_id
                       ? "Active"
                       : agent.latest_version_status === "published"
@@ -575,12 +659,12 @@ export function TestAgentModal() {
                 <Volume2 className="mx-auto mb-1.5 size-6 text-muted-foreground" />
                 <p className="text-sm font-medium">Ready to talk</p>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  WebRTC browser audio with microphone echo cancellation, VAD, and live tool
+                  WebSocket browser audio with microphone echo cancellation, VAD, and live tool
                   dispatch.
                 </p>
               </div>
 
-              <Button onClick={startTestCall} className="w-full gap-2">
+              <Button onClick={startTestCall} disabled={optionsLoading || !selectedAgentId} className="w-full gap-2">
                 <Mic className="size-4" /> Start Test Call
               </Button>
             </div>
@@ -592,7 +676,7 @@ export function TestAgentModal() {
                 <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-50" />
                 <Radio className="size-6 text-emerald-600" />
               </div>
-              <p className="text-sm font-medium">Connecting WebRTC session…</p>
+              <p className="text-sm font-medium">Connecting WebSocket session…</p>
               <p className="text-xs text-muted-foreground">
                 Initializing browser microphone and dial-in pipeline.
               </p>
@@ -683,6 +767,11 @@ export function TestAgentModal() {
                 Call recording, transcript, and tool events are being finalized.
               </p>
               <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
+                {canReconnect && (
+                  <Button variant="default" size="sm" onClick={() => { setCanReconnect(false); setCallState("idle"); }}>
+                    Reconnect
+                  </Button>
+                )}
                 {runId && (
                   <Button asChild variant="outline" size="sm">
                     <Link to={`/runs/${runId}`} onClick={() => setOpen(false)}>
@@ -704,7 +793,7 @@ export function TestAgentModal() {
           <DialogFooter className="sm:justify-between">
             <span className="text-[11px] text-muted-foreground">Pipecat WebSocket</span>
             {callState === "ended" && (
-              <Button variant="ghost" size="sm" onClick={() => setCallState("idle")}>
+              <Button variant="ghost" size="sm" onClick={() => { setCanReconnect(false); setCallState("idle"); }}>
                 Done
               </Button>
             )}

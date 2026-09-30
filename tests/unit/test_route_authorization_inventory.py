@@ -43,7 +43,7 @@ def test_every_http_route_has_reviewed_authentication_boundary():
                 route.path,
                 "Missing authentication",
             )
-            if route.path in {"/me", "/auth/me"} or route.path.startswith(("/orgs", "/platform")):
+            if route.path in {"/me", "/auth/me", "/auth/context"} or route.path.startswith(("/orgs", "/platform", "/runtime-endpoints")):
                 # These catalog routes check actor/path membership and capabilities
                 # directly, before binding the target organization.
                 continue

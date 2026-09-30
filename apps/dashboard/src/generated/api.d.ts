@@ -38,15 +38,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/auth/me": {
+    "/api/v1/auth/context": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Me */
-        get: operations["me_api_v1_auth_me_get"];
+        /**
+         * App Context
+         * @description Return only local product state for Clerk's current active org.
+         *
+         *     Clerk owns identity, memberships, and organization selection. This endpoint
+         *     deliberately does not call Clerk's Backend API or enumerate memberships.
+         *     Protected resource endpoints still perform their normal live membership
+         *     authorization checks.
+         */
+        get: operations["app_context_api_v1_auth_context_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -92,23 +100,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/me": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Account */
-        get: operations["account_api_v1_me_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/orgs": {
         parameters: {
             query?: never;
@@ -130,52 +121,20 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/orgs/{org_id}": {
+    "/api/v1/orgs/{org_id}/provision": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Organization Detail */
-        get: operations["organization_detail_api_v1_orgs__org_id__get"];
+        get?: never;
         put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/orgs/{org_id}/members": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Organization Members */
-        get: operations["organization_members_api_v1_orgs__org_id__members_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/orgs/{org_id}/invitations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Organization Invitations */
-        get: operations["organization_invitations_api_v1_orgs__org_id__invitations_get"];
-        put?: never;
-        /** Send Invitation */
-        post: operations["send_invitation_api_v1_orgs__org_id__invitations_post"];
+        /**
+         * Provision Existing Organization
+         * @description Create the local product projection for an org created by Clerk UI.
+         */
+        post: operations["provision_existing_organization_api_v1_orgs__org_id__provision_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -198,6 +157,42 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{org_id}/credentials/{credential_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Provider Credential */
+        get: operations["get_provider_credential_api_v1_orgs__org_id__credentials__credential_id__get"];
+        /** Replace Provider Credential */
+        put: operations["replace_provider_credential_api_v1_orgs__org_id__credentials__credential_id__put"];
+        post?: never;
+        /** Delete Provider Credential */
+        delete: operations["delete_provider_credential_api_v1_orgs__org_id__credentials__credential_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{org_id}/credentials/{credential_id}/name": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Rename Provider Credential */
+        patch: operations["rename_provider_credential_api_v1_orgs__org_id__credentials__credential_id__name_patch"];
         trace?: never;
     };
     "/api/v1/orgs/{org_id}/openrouter/{credential_id}/account": {
@@ -245,97 +240,6 @@ export interface paths {
         get: operations["openrouter_model_endpoints_api_v1_orgs__org_id__openrouter__credential_id__models__author___slug__endpoints_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/orgs/{org_id}/credentials/{credential_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Provider Credential */
-        get: operations["get_provider_credential_api_v1_orgs__org_id__credentials__credential_id__get"];
-        /** Replace Provider Credential */
-        put: operations["replace_provider_credential_api_v1_orgs__org_id__credentials__credential_id__put"];
-        post?: never;
-        /** Delete Provider Credential */
-        delete: operations["delete_provider_credential_api_v1_orgs__org_id__credentials__credential_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/orgs/{org_id}/credentials/{credential_id}/name": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** Rename Provider Credential */
-        patch: operations["rename_provider_credential_api_v1_orgs__org_id__credentials__credential_id__name_patch"];
-        trace?: never;
-    };
-    "/api/v1/orgs/{org_id}/invitations/{invitation_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Revoke Invitation */
-        delete: operations["revoke_invitation_api_v1_orgs__org_id__invitations__invitation_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/orgs/{org_id}/members/{user_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Remove Organization Member */
-        delete: operations["remove_organization_member_api_v1_orgs__org_id__members__user_id__delete"];
-        options?: never;
-        head?: never;
-        /** Update Member Role */
-        patch: operations["update_member_role_api_v1_orgs__org_id__members__user_id__patch"];
-        trace?: never;
-    };
-    "/api/v1/orgs/{org_id}/ownership-transfer": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Transfer Ownership
-         * @description Transfer local ownership only after verifying both live Clerk memberships.
-         */
-        post: operations["transfer_ownership_api_v1_orgs__org_id__ownership_transfer_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2060,15 +1964,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/auth/me": {
+    "/api/auth/context": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Me */
-        get: operations["me_api_auth_me_get"];
+        /**
+         * App Context
+         * @description Return only local product state for Clerk's current active org.
+         *
+         *     Clerk owns identity, memberships, and organization selection. This endpoint
+         *     deliberately does not call Clerk's Backend API or enumerate memberships.
+         *     Protected resource endpoints still perform their normal live membership
+         *     authorization checks.
+         */
+        get: operations["app_context_api_auth_context_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2114,23 +2026,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/me": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Account */
-        get: operations["account_api_me_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/orgs": {
         parameters: {
             query?: never;
@@ -2152,52 +2047,20 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/orgs/{org_id}": {
+    "/api/orgs/{org_id}/provision": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Organization Detail */
-        get: operations["organization_detail_api_orgs__org_id__get"];
+        get?: never;
         put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{org_id}/members": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Organization Members */
-        get: operations["organization_members_api_orgs__org_id__members_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{org_id}/invitations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Organization Invitations */
-        get: operations["organization_invitations_api_orgs__org_id__invitations_get"];
-        put?: never;
-        /** Send Invitation */
-        post: operations["send_invitation_api_orgs__org_id__invitations_post"];
+        /**
+         * Provision Existing Organization
+         * @description Create the local product projection for an org created by Clerk UI.
+         */
+        post: operations["provision_existing_organization_api_orgs__org_id__provision_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2220,6 +2083,42 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{org_id}/credentials/{credential_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Provider Credential */
+        get: operations["get_provider_credential_api_orgs__org_id__credentials__credential_id__get"];
+        /** Replace Provider Credential */
+        put: operations["replace_provider_credential_api_orgs__org_id__credentials__credential_id__put"];
+        post?: never;
+        /** Delete Provider Credential */
+        delete: operations["delete_provider_credential_api_orgs__org_id__credentials__credential_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{org_id}/credentials/{credential_id}/name": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Rename Provider Credential */
+        patch: operations["rename_provider_credential_api_orgs__org_id__credentials__credential_id__name_patch"];
         trace?: never;
     };
     "/api/orgs/{org_id}/openrouter/{credential_id}/account": {
@@ -2267,97 +2166,6 @@ export interface paths {
         get: operations["openrouter_model_endpoints_api_orgs__org_id__openrouter__credential_id__models__author___slug__endpoints_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{org_id}/credentials/{credential_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Provider Credential */
-        get: operations["get_provider_credential_api_orgs__org_id__credentials__credential_id__get"];
-        /** Replace Provider Credential */
-        put: operations["replace_provider_credential_api_orgs__org_id__credentials__credential_id__put"];
-        post?: never;
-        /** Delete Provider Credential */
-        delete: operations["delete_provider_credential_api_orgs__org_id__credentials__credential_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{org_id}/credentials/{credential_id}/name": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** Rename Provider Credential */
-        patch: operations["rename_provider_credential_api_orgs__org_id__credentials__credential_id__name_patch"];
-        trace?: never;
-    };
-    "/api/orgs/{org_id}/invitations/{invitation_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Revoke Invitation */
-        delete: operations["revoke_invitation_api_orgs__org_id__invitations__invitation_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/orgs/{org_id}/members/{user_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Remove Organization Member */
-        delete: operations["remove_organization_member_api_orgs__org_id__members__user_id__delete"];
-        options?: never;
-        head?: never;
-        /** Update Member Role */
-        patch: operations["update_member_role_api_orgs__org_id__members__user_id__patch"];
-        trace?: never;
-    };
-    "/api/orgs/{org_id}/ownership-transfer": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Transfer Ownership
-         * @description Transfer local ownership only after verifying both live Clerk memberships.
-         */
-        post: operations["transfer_ownership_api_orgs__org_id__ownership_transfer_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4069,36 +3877,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** AccountOrganization */
-        AccountOrganization: {
-            /** Id */
-            id: string;
-            /** Name */
-            name: string;
-            /** Role */
-            role: string;
-            /** Registered */
-            registered: boolean;
-            /** Is Owner */
-            is_owner: boolean;
-            /** Capabilities */
-            capabilities: string[];
-        };
-        /** AccountView */
-        AccountView: {
-            /** User Id */
-            user_id: string;
-            /** Active Org Id */
-            active_org_id: string | null;
-            /** Platform Admin */
-            platform_admin: boolean;
-            /** Can Create Org */
-            can_create_org: boolean;
-            /** Organization Creation Enabled */
-            organization_creation_enabled: boolean;
-            /** Organizations */
-            organizations: components["schemas"]["AccountOrganization"][];
-        };
         /** ActivateAgentBody */
         ActivateAgentBody: {
             /** Version Id */
@@ -4169,6 +3947,30 @@ export interface components {
         AgentVersionsResponse: {
             /** Versions */
             versions: components["schemas"]["AgentVersionResponse"][];
+        };
+        /**
+         * AppContextView
+         * @description Small local application projection for the active Clerk organization.
+         */
+        AppContextView: {
+            /** User Id */
+            user_id: string;
+            /** Active Org Id */
+            active_org_id: string | null;
+            /** Active Org Name */
+            active_org_name: string | null;
+            /** Active Org Registered */
+            active_org_registered: boolean;
+            /** Platform Admin */
+            platform_admin: boolean;
+            /** User Disabled */
+            user_disabled: boolean;
+            /** Can Create Org */
+            can_create_org: boolean;
+            /** Organization Creation Enabled */
+            organization_creation_enabled: boolean;
+            /** Capabilities */
+            capabilities: string[];
         };
         /** ArtifactBody */
         ArtifactBody: {
@@ -5532,27 +5334,6 @@ export interface components {
              */
             occurred_at: string;
         };
-        /** InvitationView */
-        InvitationView: {
-            /** Id */
-            id: string;
-            /** Email Address */
-            email_address: string;
-            /** Role */
-            role: string;
-            /** Status */
-            status: string;
-        };
-        /** InviteBody */
-        InviteBody: {
-            /** Email Address */
-            email_address: string;
-            /**
-             * Role
-             * @default org:member
-             */
-            role: string;
-        };
         /** JevClassifierConfig */
         JevClassifierConfig: {
             /**
@@ -5780,24 +5561,6 @@ export interface components {
             /** Display Name */
             display_name: string;
         };
-        /** MemberView */
-        MemberView: {
-            /** User Id */
-            user_id: string;
-            /** Role */
-            role: string;
-            /** Email */
-            email?: string | null;
-            /** First Name */
-            first_name?: string | null;
-            /** Last Name */
-            last_name?: string | null;
-            /**
-             * Is Owner
-             * @default false
-             */
-            is_owner: boolean;
-        };
         /** MessageRecord */
         MessageRecord: {
             /** Id */
@@ -5943,6 +5706,10 @@ export interface components {
             usage_daily?: number | null;
             /** Usage Monthly */
             usage_monthly?: number | null;
+            /** Credits Total */
+            credits_total?: number | null;
+            /** Credits Usage */
+            credits_usage?: number | null;
             /** Free Model Daily Requests */
             free_model_daily_requests?: {
                 [key: string]: number;
@@ -6148,18 +5915,6 @@ export interface components {
             is_owner: boolean;
             /** Registered */
             registered: boolean;
-        };
-        /** OwnershipTransferBody */
-        OwnershipTransferBody: {
-            /** User Id */
-            user_id: string;
-        };
-        /** OwnershipTransferView */
-        OwnershipTransferView: {
-            /** Organization Id */
-            organization_id: string;
-            /** Owner User Id */
-            owner_user_id: string;
         };
         /** PlatformOrganizationView */
         PlatformOrganizationView: {
@@ -6509,11 +6264,6 @@ export interface components {
             config: components["schemas"]["AgentConfig"];
             /** Note */
             note?: string | null;
-        };
-        /** RoleBody */
-        RoleBody: {
-            /** Role */
-            role: string;
         };
         /** RunContextEventResponse */
         RunContextEventResponse: {
@@ -7645,7 +7395,7 @@ export interface operations {
             };
         };
     };
-    me_api_v1_auth_me_get: {
+    app_context_api_v1_auth_context_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -7660,9 +7410,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AppContextView"];
                 };
             };
         };
@@ -7700,26 +7448,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-        };
-    };
-    account_api_v1_me_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountView"];
-                };
             };
         };
     };
@@ -7776,100 +7504,7 @@ export interface operations {
             };
         };
     };
-    organization_detail_api_v1_orgs__org_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                org_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrganizationView"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    organization_members_api_v1_orgs__org_id__members_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                org_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemberView"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    organization_invitations_api_v1_orgs__org_id__invitations_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                org_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InvitationView"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    send_invitation_api_v1_orgs__org_id__invitations_post: {
+    provision_existing_organization_api_v1_orgs__org_id__provision_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -7880,7 +7515,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["InviteBody"];
+                "application/json": components["schemas"]["CreateOrganizationBody"];
             };
         };
         responses: {
@@ -7890,7 +7525,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InvitationView"];
+                    "application/json": components["schemas"]["OrganizationView"];
                 };
             };
             /** @description Validation Error */
@@ -7957,115 +7592,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CredentialStatus"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    openrouter_account_api_v1_orgs__org_id__openrouter__credential_id__account_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                org_id: string;
-                credential_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OpenRouterAccountResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    openrouter_models_api_v1_orgs__org_id__openrouter__credential_id__models_get: {
-        parameters: {
-            query?: {
-                q?: string | null;
-                free_only?: boolean | null;
-                author?: string | null;
-                tool_calling?: boolean | null;
-                structured_output?: boolean | null;
-                reasoning?: boolean | null;
-                min_context?: number | null;
-                max_prompt_price?: string | null;
-                offset?: number;
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                org_id: string;
-                credential_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelCatalogResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    openrouter_model_endpoints_api_v1_orgs__org_id__openrouter__credential_id__models__author___slug__endpoints_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                org_id: string;
-                credential_id: string;
-                author: string;
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OpenRouterEndpointCatalogResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8217,114 +7743,17 @@ export interface operations {
             };
         };
     };
-    revoke_invitation_api_v1_orgs__org_id__invitations__invitation_id__delete: {
+    openrouter_account_api_v1_orgs__org_id__openrouter__credential_id__account_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 org_id: string;
-                invitation_id: string;
+                credential_id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    remove_organization_member_api_v1_orgs__org_id__members__user_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                org_id: string;
-                user_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_member_role_api_v1_orgs__org_id__members__user_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                org_id: string;
-                user_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RoleBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    transfer_ownership_api_v1_orgs__org_id__ownership_transfer_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                org_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["OwnershipTransferBody"];
-            };
-        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -8332,7 +7761,84 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OwnershipTransferView"];
+                    "application/json": components["schemas"]["OpenRouterAccountResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    openrouter_models_api_v1_orgs__org_id__openrouter__credential_id__models_get: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                free_only?: boolean | null;
+                author?: string | null;
+                tool_calling?: boolean | null;
+                structured_output?: boolean | null;
+                reasoning?: boolean | null;
+                min_context?: number | null;
+                max_prompt_price?: string | null;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                org_id: string;
+                credential_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCatalogResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    openrouter_model_endpoints_api_v1_orgs__org_id__openrouter__credential_id__models__author___slug__endpoints_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+                credential_id: string;
+                author: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenRouterEndpointCatalogResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12159,7 +11665,7 @@ export interface operations {
             };
         };
     };
-    me_api_auth_me_get: {
+    app_context_api_auth_context_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -12174,9 +11680,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["AppContextView"];
                 };
             };
         };
@@ -12214,26 +11718,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-        };
-    };
-    account_api_me_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountView"];
-                };
             };
         };
     };
@@ -12290,100 +11774,7 @@ export interface operations {
             };
         };
     };
-    organization_detail_api_orgs__org_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                org_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrganizationView"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    organization_members_api_orgs__org_id__members_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                org_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemberView"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    organization_invitations_api_orgs__org_id__invitations_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                org_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InvitationView"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    send_invitation_api_orgs__org_id__invitations_post: {
+    provision_existing_organization_api_orgs__org_id__provision_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -12394,7 +11785,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["InviteBody"];
+                "application/json": components["schemas"]["CreateOrganizationBody"];
             };
         };
         responses: {
@@ -12404,7 +11795,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InvitationView"];
+                    "application/json": components["schemas"]["OrganizationView"];
                 };
             };
             /** @description Validation Error */
@@ -12471,115 +11862,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CredentialStatus"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    openrouter_account_api_orgs__org_id__openrouter__credential_id__account_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                org_id: string;
-                credential_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OpenRouterAccountResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    openrouter_models_api_orgs__org_id__openrouter__credential_id__models_get: {
-        parameters: {
-            query?: {
-                q?: string | null;
-                free_only?: boolean | null;
-                author?: string | null;
-                tool_calling?: boolean | null;
-                structured_output?: boolean | null;
-                reasoning?: boolean | null;
-                min_context?: number | null;
-                max_prompt_price?: string | null;
-                offset?: number;
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                org_id: string;
-                credential_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelCatalogResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    openrouter_model_endpoints_api_orgs__org_id__openrouter__credential_id__models__author___slug__endpoints_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                org_id: string;
-                credential_id: string;
-                author: string;
-                slug: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OpenRouterEndpointCatalogResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12731,114 +12013,17 @@ export interface operations {
             };
         };
     };
-    revoke_invitation_api_orgs__org_id__invitations__invitation_id__delete: {
+    openrouter_account_api_orgs__org_id__openrouter__credential_id__account_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 org_id: string;
-                invitation_id: string;
+                credential_id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    remove_organization_member_api_orgs__org_id__members__user_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                org_id: string;
-                user_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_member_role_api_orgs__org_id__members__user_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                org_id: string;
-                user_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RoleBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    transfer_ownership_api_orgs__org_id__ownership_transfer_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                org_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["OwnershipTransferBody"];
-            };
-        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -12846,7 +12031,84 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OwnershipTransferView"];
+                    "application/json": components["schemas"]["OpenRouterAccountResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    openrouter_models_api_orgs__org_id__openrouter__credential_id__models_get: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                free_only?: boolean | null;
+                author?: string | null;
+                tool_calling?: boolean | null;
+                structured_output?: boolean | null;
+                reasoning?: boolean | null;
+                min_context?: number | null;
+                max_prompt_price?: string | null;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                org_id: string;
+                credential_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCatalogResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    openrouter_model_endpoints_api_orgs__org_id__openrouter__credential_id__models__author___slug__endpoints_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+                credential_id: string;
+                author: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenRouterEndpointCatalogResponse"];
                 };
             };
             /** @description Validation Error */

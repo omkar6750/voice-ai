@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@clerk/react";
 import { toast } from "sonner";
+import { useOrganizationAccess } from "@/app/access";
 import { useApi } from "@/app/api";
-import type { OrganizationView } from "@/app/organizations";
 import type { components } from "@/generated/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,6 +10,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Separator } from "@/components/ui/separator";
+import { useResource } from "@/lib/resources";
 
 type Credential = components["schemas"]["CredentialStatus"];
 type Provider = Credential["provider"];
@@ -29,32 +30,15 @@ const providers: Array<{ id: Provider; label: string; purpose: string }> = [
 export function ProviderCredentials() {
   const api = useApi();
   const { orgId } = useAuth();
-  const [role, setRole] = useState<string | null>(null);
-  const [statuses, setStatuses] = useState<Credential[]>([]);
+  const { canManage } = useOrganizationAccess();
+  const { data, loading, error, reload } = useResource<Credential[]>(
+    orgId ? `/orgs/${orgId}/credentials` : "",
+    Boolean(orgId),
+  );
   const [fields, setFields] = useState<SecretFields>(emptyFields);
   const [provider, setProvider] = useState<Provider>("groq");
   const [replacement, setReplacement] = useState<Credential | null>(null);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const reload = useCallback(async () => {
-    if (!orgId) { setStatuses([]); setRole(null); setLoading(false); return; }
-    setLoading(true);
-    try {
-      const [organization, credentials] = await Promise.all([
-        api<OrganizationView>(`/orgs/${orgId}`),
-        api<Credential[]>(`/orgs/${orgId}/credentials`),
-      ]);
-      setRole(organization.role);
-      setStatuses(credentials);
-      setError(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not load credential status");
-    } finally { setLoading(false); }
-  }, [api, orgId]);
-
-  useEffect(() => { void reload(); }, [reload]);
   useEffect(() => { setFields(emptyFields); setReplacement(null); }, [orgId]);
 
   function begin(providerId: Provider, credential?: Credential) {
@@ -111,7 +95,8 @@ export function ProviderCredentials() {
     } catch (cause) { toast.error(cause instanceof Error ? cause.message : "Could not delete credential"); }
   }
 
-  const admin = role === "org:admin";
+  const admin = canManage;
+  const statuses = data ?? [];
   return (
     <Card>
       <CardHeader>

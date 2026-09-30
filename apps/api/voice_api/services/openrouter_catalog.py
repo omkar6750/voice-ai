@@ -20,7 +20,9 @@ def _author(model_id: str) -> str | None:
 
 def _option(model: OpenRouterModel) -> ModelOptionResponse:
     params = set(model.supported_parameters)
-    text_output = not model.architecture.output_modalities or "text" in model.architecture.output_modalities
+    text_output = (
+        not model.architecture.output_modalities or "text" in model.architecture.output_modalities
+    )
     return ModelOptionResponse(
         id=model.id,
         name=model.name,
@@ -77,12 +79,16 @@ async def account_status(client: OpenRouterClient, credential_id: str) -> OpenRo
         )
 
 
-async def model_catalog(client: OpenRouterClient, query: OpenRouterModelQuery) -> ModelCatalogResponse:
+async def model_catalog(
+    client: OpenRouterClient, query: OpenRouterModelQuery
+) -> ModelCatalogResponse:
     page = await client.models(user=True, offset=0, limit=1000, output_modalities="text")
     items = [_option(model) for model in page.data]
     if query.q:
         needle = query.q.casefold()
-        items = [item for item in items if needle in item.id.casefold() or needle in item.name.casefold()]
+        items = [
+            item for item in items if needle in item.id.casefold() or needle in item.name.casefold()
+        ]
     if query.author:
         author = query.author.casefold()
         items = [item for item in items if (item.author or "").casefold() == author]
@@ -101,7 +107,7 @@ async def model_catalog(client: OpenRouterClient, query: OpenRouterModelQuery) -
     total = len(items)
     end = query.offset + query.limit
     return ModelCatalogResponse(
-        items=items[query.offset:end],
+        items=items[query.offset : end],
         total_count=total,
         next_offset=end if end < total else None,
         checked_at=datetime.now(UTC),

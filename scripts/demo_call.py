@@ -42,6 +42,8 @@ from voice_runtime.telephony.session import TelephonySession
 from voice_runtime.telephony.sim7600 import Sim7600Modem
 from voice_runtime.telephony.usb_audio import Sim7600UsbAudioBridge
 
+DEFAULT_ENV_FILE = Path(__file__).resolve().parents[1] / "apps" / "api" / ".env"
+
 
 class DemoProviderSettings(BaseSettings):
     cartesia_api_key: str = ""
@@ -53,7 +55,9 @@ class DemoProviderSettings(BaseSettings):
     whatsapp_header_media_id: str = ""
     jev_api_key: str = ""
 
-    model_config = SettingsConfigDict(env_prefix="VOICE_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="VOICE_", env_file=DEFAULT_ENV_FILE, extra="ignore"
+    )
 
 
 # ==============================================================================
@@ -1030,7 +1034,7 @@ def build_pipeline(transport: BaseTransport, stt, llm, tts, probe=False):
 
 async def run_call(
     number: str,
-    env_file: str = ".env",
+    env_file: str | Path = DEFAULT_ENV_FILE,
     check: bool = False,
     probe: bool = False,
     max_duration_secs: int | None = None,
@@ -1263,7 +1267,7 @@ def main() -> None:
         help="PCM sample rate in Hz (default: %(default)s). "
         "Use 16000 after sending AT+CPCMFRM=1 to the modem.",
     )
-    parser.add_argument("--env-file", default=".env")
+    parser.add_argument("--env-file", default=str(DEFAULT_ENV_FILE))
     parser.add_argument(
         "--probe-providers",
         action="store_true",

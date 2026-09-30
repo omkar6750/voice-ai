@@ -25,7 +25,9 @@ def _settings(config: dict[str, Any], *, system_instruction: str | None = None) 
     return values
 
 
-def build_llm_service(settings, config: dict[str, Any], *, stage: str, system_instruction: str | None = None):
+def build_llm_service(
+    settings, config: dict[str, Any], *, stage: str, system_instruction: str | None = None
+):
     """Build one Pipecat LLM service, resolving only the stage credential."""
 
     provider = config.get("provider", "groq")
@@ -47,16 +49,36 @@ def build_llm_service(settings, config: dict[str, Any], *, stage: str, system_in
             extra["models"] = config["models"]
         if preferences:
             extra["provider"] = {
-                **{key: preferences[key] for key in ("order", "only", "ignore") if preferences.get(key)},
-                **({"allow_fallbacks": preferences["allow_fallbacks"]}
-                   if preferences.get("allow_fallbacks") is not None else {}),
-                **({"data_collection": preferences["data_collection"]}
-                   if preferences.get("data_collection") else {}),
+                **{
+                    key: preferences[key]
+                    for key in ("order", "only", "ignore")
+                    if preferences.get(key)
+                },
+                **(
+                    {"allow_fallbacks": preferences["allow_fallbacks"]}
+                    if preferences.get("allow_fallbacks") is not None
+                    else {}
+                ),
+                **(
+                    {"data_collection": preferences["data_collection"]}
+                    if preferences.get("data_collection")
+                    else {}
+                ),
                 **({"zdr": preferences["zdr"]} if preferences.get("zdr") is not None else {}),
-                **({"sort": {"by": preferences["sort_by"], **(
-                    {"partition": preferences["partition"]}
-                    if preferences.get("partition") else {}
-                )}} if preferences.get("sort_by") else {}),
+                **(
+                    {
+                        "sort": {
+                            "by": preferences["sort_by"],
+                            **(
+                                {"partition": preferences["partition"]}
+                                if preferences.get("partition")
+                                else {}
+                            ),
+                        }
+                    }
+                    if preferences.get("sort_by")
+                    else {}
+                ),
             }
         try:
             from pipecat.services.openrouter.llm import OpenRouterLLMService
@@ -64,7 +86,9 @@ def build_llm_service(settings, config: dict[str, Any], *, stage: str, system_in
             values.pop("reasoning_effort", None)
             if extra:
                 values["extra"] = extra
-            return OpenRouterLLMService(api_key=api_key, settings=OpenRouterLLMService.Settings(**values))
+            return OpenRouterLLMService(
+                api_key=api_key, settings=OpenRouterLLMService.Settings(**values)
+            )
         except ImportError:
             from pipecat.services.openai.llm import OpenAILLMService
 

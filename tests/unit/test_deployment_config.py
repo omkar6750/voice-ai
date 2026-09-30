@@ -1,4 +1,4 @@
-"""Offline deployment policy checks; never import settings or read dotenv secrets."""
+"""Offline deployment policy checks; never instantiate settings or read dotenv secrets."""
 
 import os
 import shutil
@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from voice_api.core.config import _ENV_FILES
 
 ROOT = Path(__file__).resolve().parents[2]
 PUBLIC_KEYS = {"VITE_CLERK_PUBLISHABLE_KEY", "VITE_API_ORIGIN"}
@@ -15,18 +16,28 @@ PRIVATE_ENV = {
     "VOICE_DATABASE_URL",
     "VOICE_INTEGRATION_KEYS",
     "VOICE_INTEGRATION_ACTIVE_KEY",
+    "VOICE_CALLBACK_SLOT_SIGNING_KEY",
     "VOICE_RUNTIME_SERVICE_TOKEN",
     "VOICE_PUBLIC_BASE_URL",
     "VOICE_CLERK_AUTHORIZED_PARTIES",
     "CLERK_SECRET_KEY",
-    "CLERK_PUBLISHABLE_KEY",
     "CLERK_WEBHOOK_SIGNING_SECRET",
+    "VOICE_GOOGLE_CALENDAR_CLIENT_ID",
+    "VOICE_GOOGLE_CALENDAR_CLIENT_SECRET",
+    "VOICE_GOOGLE_CALENDAR_REDIRECT_URI",
     "VOICE_CLOUDINARY_CLOUD_NAME",
     "VOICE_CLOUDINARY_API_KEY",
     "VOICE_CLOUDINARY_API_SECRET",
     "VOICE_SUPABASE_URL",
     "VOICE_SUPABASE_SERVICE_KEY",
 }
+
+
+def test_backend_dotenv_search_is_confined_to_api_directory():
+    assert tuple(Path(path) for path in _ENV_FILES) == (
+        ROOT / "apps/api/.env",
+        ROOT / "apps/api/.env.local",
+    )
 
 
 def test_render_has_only_free_manual_web_service():
@@ -161,6 +172,29 @@ def test_netlify_is_static_spa_node24_without_sensitive_caching():
     assert headers["values"]["Cache-Control"] == "no-store"
     assert headers["values"]["Netlify-CDN-Cache-Control"] == "no-store"
     assert headers["values"]["Referrer-Policy"] == "no-referrer"
+
+
+def test_frontend_env_example_keeps_only_public_build_configuration():
+    env_file = ROOT / "apps/dashboard/.env.example"
+    entries = {
+        line.split("=", 1)[0]: line.split("=", 1)[1]
+        for line in env_file.read_text().splitlines()
+        if line and not line.startswith("#")
+    }
+    assert set(entries) == PUBLIC_KEYS | {
+        "VITE_DEBUG_PERF",
+        "VITE_CLERK_SIGN_IN_URL",
+        "VITE_CLERK_SIGN_UP_URL",
+        "VITE_CLERK_AFTER_SIGN_IN_URL",
+        "VITE_CLERK_AFTER_SIGN_UP_URL",
+        "VITE_CLERK_ORGANIZATION_PROFILE_URL",
+        "VITE_CLERK_CREATE_ORGANIZATION_URL",
+        "VITE_CLERK_INVITATION_REDIRECT_URL",
+    }
+    assert entries["VITE_API_ORIGIN"] == "http://localhost:8000"
+    assert entries["VITE_CLERK_PUBLISHABLE_KEY"].startswith("pk_test_")
+    vite_config = (ROOT / "apps/dashboard/vite.config.ts").read_text()
+    assert '"CLERK_PUBLISHABLE_KEY"' not in vite_config
 
 
 def run_guard(tmp_path, overrides=None):

@@ -1,163 +1,149 @@
-import { SignIn, SignUp, useAuth, UserButton } from "@clerk/react";
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { SignIn, SignUp, useAuth, useOrganization } from "@clerk/react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { ApiContext, SupportSessionContext, request } from "./api";
-import { AppShell } from "./AppShell";
-import { OrgExplorer } from "./OrgExplorer";
-import { CreateOrganizationPage } from "@/pages/organizations/create";
-import { PlatformOrganizationsPage } from "@/pages/organizations/platform";
-import type { OrganizationView } from "./organizations";
-import type { AccountView } from "./organizations";
+import { ApiContext, SupportSessionContext, request, useApi } from "./api";
+import { useAppContext } from "./app-context";
+import { PlatformKeepAwake } from "./PlatformKeepAwake";
+import { clerkUrls } from "./clerk-config";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { clearQueryCache, persistQueryCache, restoreQueryCache } from "@/lib/query-client";
 
-const OrganizationArea = lazy(() =>
-  import("@/pages/organizations/area").then((page) => ({ default: page.OrganizationArea })),
-);
+const AppShell = lazy(() => import("./AppShell").then((page) => ({ default: page.AppShell })));
+const PlatformOrganizationsPage = lazy(() => import("@/pages/organizations/platform").then((page) => ({ default: page.PlatformOrganizationsPage })));
+const OrganizationListPage = lazy(() => import("@/pages/organizations/clerk").then((page) => ({ default: page.OrganizationListPage })));
+const OrganizationCreatePage = lazy(() => import("@/pages/organizations/clerk").then((page) => ({ default: page.OrganizationCreatePage })));
+const OrganizationProfilePage = lazy(() => import("@/pages/organizations/clerk").then((page) => ({ default: page.OrganizationProfilePage })));
 
-export function App() {
-  const { getToken, isLoaded, isSignedIn, userId, orgId } = useAuth();
+function LoadingPage({ children = "Loading dashboard…" }: { children?: string }) {
+  return <main className="grid min-h-svh place-items-center" role="status">{children}</main>;
+}
+
+function SignedOutRoutes() {
+  return <Routes>
+    <Route path="/sign-in/*" element={<main className="grid min-h-svh place-items-center px-4"><SignIn routing="path" path={clerkUrls.signIn} forceRedirectUrl={clerkUrls.afterSignIn} /></main>} />
+    <Route path="/sign-up/*" element={<main className="grid min-h-svh place-items-center px-4"><SignUp routing="path" path={clerkUrls.signUp} forceRedirectUrl={clerkUrls.afterSignUp} /></main>} />
+    <Route path="*" element={<main className="mx-auto flex min-h-svh max-w-3xl flex-col justify-center gap-6 px-6"><p className="text-sm font-medium text-muted-foreground">Voice AI</p><h1 className="text-4xl font-semibold tracking-tight">Build and test voice agents with your team.</h1><p className="max-w-xl text-muted-foreground">Sign in with your email, create or join an organization, invite teammates, and securely manage voice agents together.</p><div className="flex gap-3"><Button asChild><Link to="/sign-up">Sign up</Link></Button><Button variant="outline" asChild><Link to="/sign-in">Log in</Link></Button></div></main>} />
+  </Routes>;
+}
+
+function ProvisionOrganization() {
+  const { orgId, orgRole } = useAuth();
+  const { organization } = useOrganization();
+  const api = useApi();
+  const queryClient = useQueryClient();
+  const provision = useMutation({
+    mutationFn: () => api(`/orgs/${orgId}/provision`, { method: "POST", body: JSON.stringify({ name: organization?.name }) }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["app-context"] }),
+  });
+  const { mutate, isPending, isSuccess, isError, error } = provision;
+  useEffect(() => {
+    if (orgId && (orgRole === "org:owner" || orgRole === "org:admin") && organization?.name && !isPending && !isSuccess) mutate();
+  }, [isPending, isSuccess, mutate, orgId, orgRole, organization?.name]);
+  if (isError) return <main className="mx-auto max-w-xl p-8"><p role="alert" className="text-destructive">Organization setup failed. {error.message}</p></main>;
+  return <LoadingPage>Setting up organization…</LoadingPage>;
+}
+
+function AuthenticatedApp() {
+  const { isLoaded, isSignedIn, userId, orgId, orgRole, getToken } = useAuth();
   const { pathname } = useLocation();
   const navigate = useNavigate();
-  const [organizations, setOrganizations] = useState<OrganizationView[]>([]);
-  const [account, setAccount] = useState<AccountView | null>(null);
-  const [orgsStatus, setOrgsStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [orgsError, setOrgsError] = useState<string | null>(null);
-  const [accessStatus, setAccessStatus] = useState<"checking" | "allowed" | "denied">("checking");
+  const queryClient = useQueryClient();
+  const platformRoute = pathname.startsWith("/platform");
+  // An organization-scoped context query is product state, not an auth
+  // check. It may warm the cache in the background, but normal pages render
+  // from Clerk immediately instead of waiting for this request.
+  const appContext = useAppContext(platformRoute || Boolean(orgId));
   const [supportToken, setSupportToken] = useState<string | null>(null);
   const [supportOrganization, setSupportOrganization] = useState<{ id: string; name: string } | null>(null);
+  const supportTokenRef = useRef(supportToken);
+  supportTokenRef.current = supportToken;
+
   useEffect(() => {
-    if (!isSignedIn) return;
-    let cancelled = false;
-    setOrgsStatus("loading");
-    const loadOrganizations = async () => {
-      try {
-        const token = await getToken();
-        if (!token) throw new Error("No Clerk session token");
-        const joined = await request<OrganizationView[]>(token, "/orgs");
-        const accountView = await request<AccountView>(token, "/me");
-        if (!cancelled) {
-          setOrganizations(joined);
-          setAccount(accountView);
-          setOrgsError(null);
-          setOrgsStatus("ready");
-        }
-      } catch (cause) {
-        if (!cancelled) {
-          setOrgsError(cause instanceof Error ? cause.message : "Could not load organizations");
-          setOrgsStatus("error");
-        }
-      }
-    };
-    void loadOrganizations();
-    window.addEventListener("focus", loadOrganizations);
-    return () => { cancelled = true; window.removeEventListener("focus", loadOrganizations); };
-  }, [getToken, isSignedIn, userId, orgId]);
+    if (!isLoaded || !isSignedIn || !userId) return;
+    restoreQueryCache(userId);
+    return persistQueryCache(userId);
+  }, [isLoaded, isSignedIn, userId]);
   useEffect(() => {
-    if (!isSignedIn || !orgId || orgsStatus !== "ready" || !organizations.some((org) => org.id === orgId && org.registered)) {
-      setAccessStatus("denied");
-      return;
+    if (!isSignedIn) {
+      clearQueryCache();
+      setSupportToken(null);
+      setSupportOrganization(null);
     }
-    let cancelled = false;
-    setAccessStatus("checking");
-    void (async () => {
-      try {
-        const sessionToken = await getToken();
-        if (!sessionToken) throw new Error("No Clerk session token");
-        await request(sessionToken, "/auth/organization-access");
-        if (!cancelled) setAccessStatus("allowed");
-      } catch {
-        if (!cancelled) setAccessStatus("denied");
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [getToken, isSignedIn, orgId, orgsStatus, organizations]);
-  const api = useCallback(
-    async <T,>(path: string, init?: RequestInit) => {
-      const sessionToken = await getToken();
-      if (!sessionToken) throw new Error("Sign in required");
-      const method = (init?.method ?? "GET").toUpperCase();
-      if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && !supportToken) {
-        const activeRole = organizations.find((organization) => organization.id === orgId)?.role;
-        const isBrowserTestLifecycle = path === "/browser-sessions" || path.startsWith("/browser-sessions/");
-        if (activeRole !== "org:admin" && !isBrowserTestLifecycle) {
-          throw new Error("Organization admin access is required for this action");
-        }
-      }
-      return request<T>(sessionToken, path, init, supportToken);
-    },
-    [getToken, supportToken, organizations, orgId],
-  );
+  }, [isSignedIn]);
+  useEffect(() => {
+    void queryClient.invalidateQueries({ queryKey: ["app-context"] });
+    void queryClient.cancelQueries({ predicate: (query) => query.queryKey[0] === "resource" });
+  }, [orgId, orgRole, queryClient]);
+
+  const api = useCallback(async <T,>(path: string, init?: RequestInit) => {
+    const token = await getToken();
+    if (!token) throw new Error("Sign in required");
+    return request<T>(token, path, init, supportTokenRef.current);
+  }, [getToken]);
   const enterSupport = useCallback(async (id: string, name: string) => {
-    const sessionToken = await getToken();
-    if (!sessionToken) throw new Error("Sign in required");
-    const result = await request<{ token: string }>(
-      sessionToken,
-      `/platform/orgs/${id}/support-session`,
-      { method: "POST" },
-    );
+    const token = await getToken();
+    if (!token) throw new Error("Sign in required");
+    const result = await request<{ token: string }>(token, `/platform/orgs/${id}/support-session`, { method: "POST" });
     setSupportToken(result.token);
     setSupportOrganization({ id, name });
     navigate("/platform/support");
   }, [getToken, navigate]);
   const exitSupport = useCallback(async () => {
-    const sessionToken = await getToken();
-    if (sessionToken && supportToken) {
-      await request(sessionToken, "/platform/support-session", { method: "DELETE" }, supportToken);
-    }
+    const token = await getToken();
+    if (token && supportToken) await request(token, "/platform/support-session", { method: "DELETE" }, supportToken);
     setSupportToken(null);
     setSupportOrganization(null);
     navigate("/platform/orgs");
   }, [getToken, navigate, supportToken]);
-  if (!isLoaded) return <main className="grid min-h-svh place-items-center">Loading…</main>;
-  if (!isSignedIn) {
-    return (
-      <Routes>
-        <Route path="/sign-in/*" element={<main className="grid min-h-svh place-items-center px-4"><SignIn routing="path" path="/sign-in" /></main>} />
-        <Route path="/sign-up/*" element={<main className="grid min-h-svh place-items-center px-4"><SignUp routing="path" path="/sign-up" /></main>} />
-        <Route path="*" element={
-          <main className="mx-auto flex min-h-svh max-w-3xl flex-col justify-center gap-6 px-6">
-            <p className="text-sm font-medium text-muted-foreground">Voice AI</p>
-            <h1 className="text-4xl font-semibold tracking-tight">Build and test voice agents with your team.</h1>
-            <p className="max-w-xl text-muted-foreground">Sign in with your email, create or join an organization, invite teammates, and securely manage voice agents together.</p>
-            <div className="flex gap-3">
-              <Button asChild><Link to="/sign-up">Sign up</Link></Button>
-              <Button variant="outline" asChild><Link to="/sign-in">Log in</Link></Button>
-            </div>
-          </main>
-        } />
-      </Routes>
-    );
+
+  if (!isLoaded) return <LoadingPage>Loading…</LoadingPage>;
+  if (!isSignedIn) return <SignedOutRoutes />;
+  if (pathname.startsWith("/sign-")) return <Navigate to="/runs" replace />;
+
+  const platformAdmin = Boolean(appContext.data?.platform_admin);
+  const contextResolved = appContext.isSuccess && !appContext.isFetching;
+  const registered = appContext.data?.active_org_registered === true;
+
+  // Platform access is local product authorization and must still be
+  // confirmed by the backend context endpoint. Only platform routes wait for
+  // that answer; the regular dashboard never does.
+  if (platformRoute && appContext.isPending) {
+    return <LoadingPage>Checking platform access…</LoadingPage>;
   }
-  if (pathname.startsWith("/sign-")) return <Navigate to="/" replace />;
-  return (
-    <TooltipProvider>
-      <ApiContext.Provider value={api}>
-        <SupportSessionContext.Provider value={supportToken}>
-        {pathname.startsWith("/platform/support") && supportToken && supportOrganization && account?.platform_admin
-          ? <AppShell organizations={organizations} platformAdmin supportOrganization={supportOrganization} onExitSupport={() => void exitSupport()} />
-          : pathname === "/platform/orgs" && account?.platform_admin
-          ? <PlatformOrganizationsPage onEnterSupport={enterSupport} />
-          : accessStatus === "denied" && /^\/orgs\/[^/]+(?:\/members|\/settings)?$/.test(pathname)
-          ? <Suspense fallback={<main className="p-6" role="status">Loading organization…</main>}>
-              <Routes>
-                <Route path="/orgs/:orgId" element={<OrganizationArea />} />
-                <Route path="/orgs/:orgId/members" element={<OrganizationArea />} />
-                <Route path="/orgs/:orgId/settings" element={<OrganizationArea />} />
-              </Routes>
-            </Suspense>
-          : pathname === "/orgs" || pathname.startsWith("/onboarding/") || !orgId || !organizations.some((org) => org.id === orgId && org.registered) || accessStatus === "denied"
-          ? <Routes>
-              <Route path="/onboarding/create-org" element={<CreateOrganizationPage account={account} />} />
-              <Route path="*" element={<OrgExplorer organizations={organizations} loading={orgsStatus === "loading"} error={orgsError} canCreate={Boolean(account?.can_create_org && account.organization_creation_enabled)} availableOrgIds={account?.organizations.filter((org) => org.capabilities.includes("browser_test")).map((org) => org.id) ?? []} platformAdmin={account?.platform_admin ?? false} />} />
-            </Routes>
-          : accessStatus === "allowed"
-            ? <AppShell organizations={organizations} platformAdmin={account?.platform_admin ?? false} />
-            : <main className="grid min-h-svh place-items-center px-4"><div className="flex items-center gap-3"><UserButton /><p role="status">Checking organization access…</p></div></main>}
-        </SupportSessionContext.Provider>
-      </ApiContext.Provider>
-      <Toaster position="bottom-right" />
-    </TooltipProvider>
-  );
+  if (platformRoute && (appContext.isError || !platformAdmin)) {
+    return <Navigate to="/runs" replace />;
+  }
+
+  return <TooltipProvider>
+    <ApiContext.Provider value={api}>
+      <PlatformKeepAwake enabled={platformAdmin} showControls={pathname === "/platform/orgs" && platformAdmin} />
+      <SupportSessionContext.Provider value={supportToken}>
+        {pathname.startsWith("/platform/support") && supportToken && supportOrganization && platformAdmin
+          ? <Suspense fallback={<LoadingPage />}><AppShell platformAdmin supportOrganization={supportOrganization} onExitSupport={() => void exitSupport()} /></Suspense>
+          : pathname === "/platform/orgs" && platformAdmin
+            ? <Suspense fallback={<LoadingPage>Loading platform organizations…</LoadingPage>}><PlatformOrganizationsPage onEnterSupport={enterSupport} /></Suspense>
+            : !orgId
+              ? <Suspense fallback={<LoadingPage>Loading organizations…</LoadingPage>}><Routes><Route path="/organizations/create" element={<OrganizationCreatePage />} /><Route path="*" element={<OrganizationListPage />} /></Routes></Suspense>
+              : contextResolved && !registered && (orgRole === "org:owner" || orgRole === "org:admin")
+                ? <ProvisionOrganization />
+                : pathname.startsWith("/organizations/profile")
+                  ? <Suspense fallback={<LoadingPage>Loading organization profile…</LoadingPage>}><OrganizationProfilePage /></Suspense>
+                : <Suspense fallback={<LoadingPage />}><AppShell platformAdmin={platformAdmin} /></Suspense>}
+      </SupportSessionContext.Provider>
+    </ApiContext.Provider>
+    <Toaster position="bottom-right" />
+  </TooltipProvider>;
+}
+
+export function App() {
+  const { getToken } = useAuth();
+  const api = useCallback(async <T,>(path: string, init?: RequestInit) => {
+    const token = await getToken();
+    if (!token) throw new Error("Sign in required");
+    return request<T>(token, path, init);
+  }, [getToken]);
+  return <ApiContext.Provider value={api}><AuthenticatedApp /></ApiContext.Provider>;
 }

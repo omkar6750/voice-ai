@@ -165,7 +165,7 @@ def test_existing_sdk_handlers_and_late_loguru_message_patches_are_safe(sinks):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("raises", [False, True])
 async def test_native_vendor_body_url_and_exception_remain_out_of_logs(sinks, monkeypatch, raises):
-    import voice_runtime.execution.native as native
+    import voice_runtime.execution.native_helpers as native_helpers
 
     client = AsyncMock()
     client.__aenter__.return_value = client
@@ -175,8 +175,8 @@ async def test_native_vendor_body_url_and_exception_remain_out_of_logs(sinks, mo
         client.post.return_value = httpx.Response(
             429, json={"error": {"message": PRIVATE}}, headers={"x-request-id": PRIVATE}
         )
-    monkeypatch.setattr(native.httpx, "AsyncClient", lambda **kwargs: client)
-    result = await native.run_jev_classification(
+    monkeypatch.setattr(native_helpers.httpx, "AsyncClient", lambda **kwargs: client)
+    result = await native_helpers.run_jev_classification(
         PRIVATE, PRIVATE, {"prompt": PRIVATE}, api_url=SENTINELS[-1]
     )
     assert result["status"] == "error"

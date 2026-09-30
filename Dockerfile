@@ -21,11 +21,11 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates libsndfile1 libportaudio2 libgomp1 \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --gid 10001 voice \
-    && useradd --uid 10001 --gid voice --no-create-home --home-dir /app voice \
+    && groupadd --gid 10001 voiceapp \
+    && useradd --uid 10001 --gid voiceapp --no-create-home --home-dir /app voiceapp \
     && mkdir -p /app/data/recordings /app/data/spool \
-    && chown -R voice:voice /app
-COPY --from=builder --chown=voice:voice /app/.venv /app/.venv
+    && chown -R voiceapp:voiceapp /app
+COPY --from=builder --chown=voiceapp:voiceapp /app/.venv /app/.venv
 USER 10001:10001
 EXPOSE 10000
 # One process owns in-memory leases. DB fences must also survive restart/overlap.

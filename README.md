@@ -6,8 +6,8 @@ Small voice-agent POC. FastAPI controls state, Pipecat runs the realtime pipelin
 
 ```powershell
 uv sync
-if (-not (Test-Path .env)) { Copy-Item .env.example .env }
-docker compose up -d db
+if (-not (Test-Path apps/api/.env)) { Copy-Item apps/api/.env.example apps/api/.env }
+docker compose --env-file apps/api/.env up -d db
 uv run alembic upgrade head
 uv run uvicorn voice_api.main:app --reload --port 8000
 ```
@@ -24,10 +24,10 @@ The dashboard currently builds Runs and a read-only pinned agent-version referen
 Other menu routes show explicit placeholders. Runs needs the current API with
 `GET /api/v1/runs`, its timeline and artifact routes, plus a migrated PostgreSQL
 database. If an older API already owns port 8000, start the current API on another
-port and set `VOICE_API_ORIGIN` before `npm run dev`:
+port and set the dashboard's `VITE_API_ORIGIN` in `apps/dashboard/.env.local`:
 
 ```powershell
-$env:VOICE_API_ORIGIN = "http://127.0.0.1:8001"
+$env:VITE_API_ORIGIN = "http://127.0.0.1:8001"
 npm run dev
 ```
 
@@ -41,7 +41,7 @@ uv run ruff check .
 uv run ruff format --check .
 ```
 
-Run the validated demo agent after setting `VOICE_SARVAM_API_KEY` and `VOICE_GROQ_API_KEY` in `.env`:
+Run the validated demo agent after setting `VOICE_SARVAM_API_KEY` and `VOICE_GROQ_API_KEY` in `apps/api/.env`:
 
 ```powershell
 uv run python scripts/demo_call.py --number +15551234567

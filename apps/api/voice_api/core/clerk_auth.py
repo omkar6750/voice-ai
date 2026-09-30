@@ -13,6 +13,8 @@ from voice_api.core.config import get_settings
 class ClerkPrincipal:
     user_id: str
     org_id: str | None
+    org_role: str | None = None
+    org_permissions: tuple[str, ...] = ()
 
 
 async def require_clerk_user(request: Request) -> ClerkPrincipal:
@@ -50,4 +52,17 @@ async def require_clerk_user(request: Request) -> ClerkPrincipal:
     org_id = state.payload.get("org_id") or (
         org_claim.get("id") if isinstance(org_claim, dict) else None
     )
-    return ClerkPrincipal(user_id=user_id, org_id=org_id if isinstance(org_id, str) else None)
+    role = state.payload.get("org_role")
+    permissions = state.payload.get("org_permissions")
+    if isinstance(org_claim, dict):
+        role = org_claim.get("rol", role)
+        permissions = org_claim.get("per", permissions)
+    if isinstance(role, str) and not role.startswith("org:"):
+        role = f"org:{role}"
+    normalized_permissions = tuple(item for item in permissions or () if isinstance(item, str))
+    return ClerkPrincipal(
+        user_id=user_id,
+        org_id=org_id if isinstance(org_id, str) else None,
+        org_role=role if isinstance(role, str) else None,
+        org_permissions=normalized_permissions,
+    )
