@@ -109,8 +109,8 @@ class EvidenceObserver(BaseObserver):
             self.llm_operation = self.tracker.start_operation(
                 "inference",
                 "llm",
-                provider=self.providers["llm"],
-                model=self.models["llm"],
+                provider=getattr(self.llm, "active_provider", self.providers["llm"]),
+                model=getattr(self.llm, "active_model", self.models["llm"]),
                 input_payload=payload,
                 parent_operation_id=self.last_speech_operation_id,
             )
@@ -349,10 +349,23 @@ class EvidenceObserver(BaseObserver):
         if self.llm_operation is None:
             return
         metrics = self.metrics["llm"]
+        effective_provider = getattr(self.llm, "active_provider", self.providers["llm"])
+        effective_model = getattr(self.llm, "active_model", self.models["llm"])
+        fallback_used = bool(getattr(self.llm, "_fallback_active", False))
+        self.llm_operation["provider"] = effective_provider
+        self.llm_operation["model"] = effective_model
         self.tracker.finish_operation(
             self.llm_operation,
             status,
-            output_payload={"text": "".join(self.llm_text), "tool_calls": self.function_calls},
+            output_payload={
+                "text": "".join(self.llm_text),
+                "tool_calls": self.function_calls,
+                "provider": effective_provider,
+                "model": effective_model,
+            },
+            primary_provider=self.providers["llm"] if fallback_used else None,
+            primary_model=self.models["llm"] if fallback_used else None,
+            fallback_used=fallback_used,
             output_state=(
                 "interrupted"
                 if status in {"cancelled", "interrupted"}

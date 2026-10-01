@@ -265,7 +265,6 @@ async def tool_handlers(_: None = Operator) -> ToolHandlerCatalog:
                     "properties": {
                         "timeframe": {"type": "string"},
                         "role": {"type": "string"},
-                        "duration_minutes": {"type": "integer"},
                     },
                     "required": ["timeframe", "role"],
                 },

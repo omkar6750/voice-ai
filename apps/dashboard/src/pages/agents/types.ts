@@ -21,7 +21,7 @@ export type CallbackSchedulingConfig = { enabled: boolean; slot_duration_minutes
 export function normalizeCallbackScheduling(value?: (Omit<Partial<CallbackSchedulingConfig>, "roles" | "bookable_people"> & { roles?: Array<Partial<CallbackRole> & { key: string; label: string }>; bookable_people?: Array<Partial<BookablePerson> & { key: string; name: string }> }) | null): CallbackSchedulingConfig {
   return {
     enabled: value?.enabled ?? false,
-    slot_duration_minutes: value?.slot_duration_minutes ?? 15,
+    slot_duration_minutes: 15,
     minimum_notice_minutes: value?.minimum_notice_minutes ?? 0,
     roles: (value?.roles ?? []).map((role) => ({ key: role.key, label: role.label, description: role.description ?? "", enabled: role.enabled ?? true })),
     bookable_people: (value?.bookable_people ?? []).map((person) => ({ key: person.key, name: person.name, roles: person.roles ?? [], calendar_integration_id: person.calendar_integration_id ?? "", timezone: person.timezone ?? "UTC", enabled: person.enabled ?? true })),

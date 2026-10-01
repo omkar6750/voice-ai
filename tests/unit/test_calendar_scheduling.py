@@ -136,6 +136,37 @@ def test_explicit_time_is_a_15_minute_window():
     assert (window.end - window.start).seconds == 900
 
 
+def test_after_time_allows_later_fifteen_minute_slots_that_day():
+    reference = datetime(2026, 10, 1, 15, 0, tzinfo=UTC)
+    window = resolve_timeframe("Saturday after 20:30", "Asia/Kolkata", reference=reference)
+    assert window.start.isoformat() == "2026-10-03T20:30:00+05:30"
+    assert window.end.isoformat() == "2026-10-04T00:00:00+05:30"
+    slots = generate_slots(window, [], duration_minutes=15)
+    assert slots[0][0].isoformat() == "2026-10-03T20:30:00+05:30"
+    assert len(slots) == 3
+    assert slots[-1][1].isoformat() == "2026-10-03T21:15:00+05:30"
+
+
+def test_exact_time_window_is_fifteen_minutes():
+    window = resolve_timeframe(
+        "Friday at 09:00",
+        "Asia/Kolkata",
+        reference=datetime(2026, 10, 1, 15, 0, tzinfo=UTC),
+    )
+    assert (window.end - window.start) == timedelta(minutes=15)
+    assert len(generate_slots(window, [], duration_minutes=15)) == 1
+
+
+def test_exact_time_rounds_up_to_next_fifteen_minute_slot():
+    window = resolve_timeframe(
+        "Friday at 09:07",
+        "Asia/Kolkata",
+        reference=datetime(2026, 10, 1, 15, 0, tzinfo=UTC),
+    )
+    assert window.start.isoformat() == "2026-10-02T09:15:00+05:30"
+    assert len(generate_slots(window, [], duration_minutes=15)) == 1
+
+
 def test_slot_engine_clips_overlaps_and_returns_small_set():
     window = resolve_timeframe(
         "tomorrow morning", "Asia/Kolkata", reference=datetime(2026, 9, 25, 8, tzinfo=UTC)
@@ -187,9 +218,7 @@ def test_callback_confirmation_uses_tts_safe_local_time_format():
 
 def test_callback_confirmation_speaks_whole_hours_without_timezone_identifiers():
     value = datetime(2026, 10, 2, 11, 30, tzinfo=UTC)
-    assert format_local_callback_time(value, "Asia/Kolkata") == (
-        "Friday at five in the evening"
-    )
+    assert format_local_callback_time(value, "Asia/Kolkata") == ("Friday at five in the evening")
 
 
 @pytest.mark.asyncio
@@ -312,7 +341,7 @@ async def test_availability_uses_contact_timezone_and_skips_disconnected_person(
         enabled=True,
         roles=[role],
         bookable_people=people,
-        slot_duration_minutes=15,
+        slot_duration_minutes=30,
         minimum_notice_minutes=0,
     )
     run = SimpleNamespace(
@@ -343,7 +372,7 @@ async def test_availability_uses_contact_timezone_and_skips_disconnected_person(
     result = await calendar_endpoint.availability(
         calendar_endpoint.AvailabilityRequest(
             run_id=run.id,
-            timeframe="tomorrow morning",
+            timeframe="tomorrow after 20:30",
             role="sales",
         ),
         session=session,
@@ -363,6 +392,7 @@ async def test_availability_uses_contact_timezone_and_skips_disconnected_person(
     assignment = verify_callback_slot(result["slots"][0]["slot_id"], run_id=run.id)
     assert assignment["integration"] == calendar_ids[1]
     assert assignment["role_index"] == 0
+    assert assignment["end"] - assignment["start"] == timedelta(minutes=15)
     assert len(result["slots"][0]["slot_id"]) == 58
 
 

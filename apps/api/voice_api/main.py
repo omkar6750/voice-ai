@@ -1,15 +1,17 @@
 """Control plane. The runtime owns audio; this API owns durable state."""
 
-import os
+import asyncio
+from contextlib import asynccontextmanager
 from time import perf_counter
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from loguru import logger
 from pydantic import ValidationError
 from voice_runtime.safe_logs import RuntimeEvent, configure_safe_logging, operational_event
+
+from voice_runtime import perf_diagnostics
 
 # Install before importing routes, Pipecat or SDKs: wire logs and exception
 # renderers must never acquire caller/provider data, even during startup.
@@ -18,33 +20,70 @@ configure_safe_logging()
 from voice_api.api.v1.api import api_router  # noqa: E402
 from voice_api.core.config import get_settings  # noqa: E402
 
-app = FastAPI(title="Voice AI API", version="0.2.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    settings = get_settings()
+    perf_diagnostics.configure(env=settings.env, enabled=settings.debug_perf)
+    monitor = asyncio.create_task(perf_diagnostics.loop_lag_monitor())
+    try:
+        yield
+    finally:
+        monitor.cancel()
+        await asyncio.gather(monitor, return_exceptions=True)
+
+
+app = FastAPI(title="Voice AI API", version="0.2.0", lifespan=lifespan)
 
 
 @app.middleware("http")
 async def request_timing(request, call_next):
     started_at = perf_counter()
+    status_code = 500
     try:
         response = await call_next(request)
+        status_code = response.status_code
     except Exception:
         _log_api_failure(request.method, 500, (perf_counter() - started_at) * 1000)
         raise
+    finally:
+        route = request.scope.get("route")
+        route_path = getattr(route, "path", "")
+        parts = route_path.strip("/").split("/")
+        group = (
+            parts[2]
+            if len(parts) > 2 and parts[:2] == ["api", "v1"]
+            else (parts[1] if len(parts) > 1 and parts[0] == "api" else parts[0])
+        )
+        perf_diagnostics.timing(
+            "api",
+            "request",
+            (perf_counter() - started_at) * 1000,
+            request_method=request.method,
+            http_status=status_code,
+            route_group=group
+            if group
+            in {
+                "health",
+                "auth",
+                "runs",
+                "calls",
+                "browser-sessions",
+                "agents",
+                "knowledge",
+                "integrations",
+                "tools",
+                "contacts",
+                "callbacks",
+                "settings",
+                "providers",
+                "platform",
+                "orgs",
+            }
+            else "other",
+        )
     if response.status_code >= 400:
-        _log_api_failure(
-            request.method,
-            response.status_code,
-            (perf_counter() - started_at) * 1000,
-        )
-    elif os.getenv("VOICE_DEBUG_PERF", "").lower() == "true":
-        # Kept for local performance debugging. The safe logger intentionally
-        # strips the URL because paths may contain organization/resource IDs.
-        logger.info(
-            "request {} {} {} {:.0f}ms",
-            request.method,
-            request.url.path,
-            response.status_code,
-            (perf_counter() - started_at) * 1000,
-        )
+        _log_api_failure(request.method, response.status_code, (perf_counter() - started_at) * 1000)
     return response
 
 
@@ -57,6 +96,8 @@ def _log_api_failure(method: str, status_code: int, duration_ms: float) -> None:
         http_status=status_code,
         duration_ms=duration_ms,
     )
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

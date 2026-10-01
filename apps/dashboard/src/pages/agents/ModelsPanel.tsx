@@ -8,6 +8,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { NumberField } from "./ConfigFields";
 import {
   CredentialBindingSelect,
@@ -36,6 +37,13 @@ export function ModelsPanel({
   const llmModels =
     selectedLlm?.models_by_slot?.llm ?? selectedLlm?.models ?? [];
   const modelListed = llmModels.includes(config.llm.model);
+  const fallback = config.llm.fallback;
+  const fallbackProviders = llmProviders;
+  const selectedFallback = fallbackProviders.find(
+    (item) => item.provider === fallback?.provider,
+  );
+  const fallbackModels =
+    selectedFallback?.models_by_slot?.llm ?? selectedFallback?.models ?? [];
 
   const sttProviders =
     catalog?.providers.filter((provider) => provider.slots.includes("stt")) ??
@@ -103,18 +111,20 @@ export function ModelsPanel({
                 const available =
                   choice?.models_by_slot?.llm ?? choice?.models ?? [];
                 if (!available.length && provider !== "openrouter") return;
-                change({
+                const next: AgentConfig = {
                   ...config,
                   llm: {
                     ...config.llm,
                     provider,
                     model: available[0] ?? config.llm.model,
+                    fallback: config.llm.fallback,
                     reasoning_effort:
                       provider === "gemini" || provider === "openrouter"
-                        ? "provider_default"
-                        : "none",
+                        ? ("provider_default" as const)
+                        : ("none" as const),
                   },
-                });
+                };
+                change(next);
               }}
             >
               {llmProviders.map((item) => {
@@ -234,10 +244,163 @@ export function ModelsPanel({
             />
           </Field>
         </FieldGroup>
+        <div className="rounded-md border p-4">
+          <label className="flex items-start gap-3 text-sm font-medium">
+            <Checkbox
+              checked={Boolean(fallback)}
+              disabled={disabled || !fallbackProviders.length}
+              onCheckedChange={(checked) => {
+                const choice =
+                  fallbackProviders.find(
+                    (item) => item.provider === config.llm.provider,
+                  ) ?? fallbackProviders[0];
+                const models =
+                  choice?.models_by_slot?.llm ?? choice?.models ?? [];
+                const next = checked
+                  ? {
+                      provider: (choice?.provider ??
+                        config.llm.provider) as AgentConfig["llm"]["provider"],
+                      model: models[0] ?? config.llm.model,
+                      first_token_timeout_seconds: 3,
+                    }
+                  : null;
+                const nextConfig = {
+                  ...config,
+                  llm: { ...config.llm, fallback: next },
+                };
+                change(
+                  next
+                    ? nextConfig
+                    : bindCredential(nextConfig, "llm_fallback", null),
+                );
+              }}
+            />
+            <span>Main LLM fallback</span>
+          </label>
+          <FieldDescription className="mt-2">
+            Switch before the first response only: on provider request errors
+            (including rate limits), connection failures, or if no answer/tool
+            call starts within the timeout. Once output starts, the route is
+            locked for that turn.
+          </FieldDescription>
+          {fallback && (
+            <FieldGroup className="mt-4">
+              <Field>
+                <FieldLabel htmlFor="llm-fallback-provider">
+                  Fallback provider
+                </FieldLabel>
+                <NativeSelect
+                  id="llm-fallback-provider"
+                  className="w-full"
+                  value={fallback.provider}
+                  disabled={disabled}
+                  onChange={(event) => {
+                    const provider = event.target.value as NonNullable<
+                      AgentConfig["llm"]["fallback"]
+                    >["provider"];
+                    const choice = fallbackProviders.find(
+                      (item) => item.provider === provider,
+                    );
+                    const models =
+                      choice?.models_by_slot?.llm ?? choice?.models ?? [];
+                    const next = {
+                      ...config,
+                      llm: {
+                        ...config.llm,
+                        fallback: {
+                          ...fallback,
+                          provider,
+                          model: models[0] ?? "",
+                        },
+                      },
+                    };
+                    change(bindCredential(next, "llm_fallback", null));
+                  }}
+                >
+                  {fallbackProviders.map((item) => (
+                    <option key={item.provider} value={item.provider}>
+                      {item.provider}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Field>
+              <CredentialBindingSelect
+                stage="llm_fallback"
+                provider={fallback.provider}
+                value={config.credential_refs.llm_fallback}
+                disabled={disabled}
+                change={(id) =>
+                  change(bindCredential(config, "llm_fallback", id))
+                }
+              />
+              {fallback.provider === "openrouter" ? (
+                <OpenRouterModelPicker
+                  stage="llm-fallback"
+                  credentialId={config.credential_refs.llm_fallback}
+                  value={fallback.model}
+                  disabled={disabled}
+                  onChange={(model) =>
+                    change({
+                      ...config,
+                      llm: { ...config.llm, fallback: { ...fallback, model } },
+                    })
+                  }
+                />
+              ) : (
+                <Field>
+                  <FieldLabel htmlFor="llm-fallback-model">
+                    Fallback model
+                  </FieldLabel>
+                  <SearchableSelect
+                    id="llm-fallback-model"
+                    value={fallback.model}
+                    onChange={(model) =>
+                      change({
+                        ...config,
+                        llm: {
+                          ...config.llm,
+                          fallback: { ...fallback, model },
+                        },
+                      })
+                    }
+                    options={fallbackModels.map((model) => ({
+                      value: model,
+                      label: model,
+                    }))}
+                    selectionOnly
+                    disabled={disabled || fallbackModels.length === 0}
+                    placeholder="Search fallback models..."
+                  />
+                </Field>
+              )}
+              <NumberField
+                id="llm-fallback-timeout"
+                label="Primary first-token timeout (seconds)"
+                value={fallback.first_token_timeout_seconds}
+                min={0.5}
+                max={10}
+                step={0.5}
+                disabled={disabled}
+                onChange={(seconds) =>
+                  change({
+                    ...config,
+                    llm: {
+                      ...config.llm,
+                      fallback: {
+                        ...fallback,
+                        first_token_timeout_seconds: seconds,
+                      },
+                    },
+                  })
+                }
+              />
+            </FieldGroup>
+          )}
+        </div>
         <ReadOnlyValue
           label="Reasoning"
           value={config.llm.reasoning_effort}
-          reason="Groq reasoning disabled; Gemini uses its model default. No universal off switch exists."
+          reason="Reasoning behavior is provider- and model-specific."
         />
       </div>
 

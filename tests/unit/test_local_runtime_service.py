@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 from voice_api.api.v1.endpoints import artifacts, calendar, evidence, execution
+from voice_api.models import Run
 from voice_api.services import calendar_service
 from voice_api.services import local_runtime_service as local
 from voice_runtime.execution.evidence_client import EvidenceDeliveryError
@@ -160,3 +161,70 @@ def test_callback_slot_uses_dedicated_key_not_runtime_token(monkeypatch):
     )
     with pytest.raises(calendar_service.SchedulingError):
         calendar_service.sign_slot(payload)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("env", "expected_backend"), [("dev", "local"), ("production", "cloudinary")]
+)
+async def test_artifact_registration_uses_cloudinary_only_outside_dev(
+    tmp_path, monkeypatch, env, expected_backend
+):
+    import wave
+
+    run_id = "run-1"
+    run_dir = tmp_path / run_id
+    run_dir.mkdir()
+    wav_path = run_dir / "input.wav"
+    with wave.open(str(wav_path), "wb") as audio:
+        audio.setparams((1, 2, 8000, 0, "NONE", "not compressed"))
+        audio.writeframes(b"\0\0" * 16)
+
+    run = SimpleNamespace(id=run_id, org_id="org-1", resolved_config={})
+
+    class Session:
+        artifact = None
+
+        async def get(self, model, _identity, **_kwargs):
+            return run if model is Run else self.artifact
+
+        async def scalar(self, _query):
+            return None
+
+        def add(self, artifact):
+            self.artifact = artifact
+
+        async def commit(self):
+            return None
+
+    session = Session()
+    stored = SimpleNamespace(asset_id="asset-1", version=1, format="wav")
+    upload = AsyncMock(return_value=stored)
+    storage = SimpleNamespace(upload=upload)
+    monkeypatch.setattr(artifacts, "bind_run_organization", AsyncMock())
+    monkeypatch.setattr(
+        artifacts,
+        "get_settings",
+        lambda: SimpleNamespace(env=env, supabase_url=None, recordings_dir=str(tmp_path)),
+    )
+    monkeypatch.setattr(artifacts, "get_recording_storage", lambda: storage)
+
+    result = await artifacts.register(
+        run_id,
+        artifacts.ArtifactBody(
+            id="00000000-0000-0000-0000-000000000001",
+            kind="input",
+            path=f"{run_id}/input.wav",
+        ),
+        session,
+    )
+
+    assert result["id"] == "00000000-0000-0000-0000-000000000001"
+    assert session.artifact.storage_backend == expected_backend
+    assert upload.await_count == (1 if expected_backend == "cloudinary" else 0)
+    if expected_backend == "cloudinary":
+        assert session.artifact.storage_status == "available"
+        assert session.artifact.vendor_asset_id == "asset-1"
+    else:
+        assert session.artifact.storage_status == "available"
+        assert session.artifact.vendor_asset_id is None

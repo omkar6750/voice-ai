@@ -244,6 +244,15 @@ class NativePipelineHost(
         required_credentials.append(
             (f"llm:{llm_provider}", stage_api_key(self.settings, "llm", llm_provider))
         )
+        fallback = snapshot["llm"].get("fallback")
+        if fallback:
+            fallback_provider = fallback["provider"]
+            required_credentials.append(
+                (
+                    f"llm_fallback:{fallback_provider}",
+                    stage_api_key(self.settings, "llm_fallback", fallback_provider),
+                )
+            )
         classifier_cfg = snapshot.get("classifier", {})
         if classifier_cfg.get("classifier_type") == "jev":
             required_credentials.append(

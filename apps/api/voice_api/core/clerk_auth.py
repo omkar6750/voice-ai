@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from clerk_backend_api import Clerk
 from clerk_backend_api.security.types import AuthenticateRequestOptions
 from fastapi import HTTPException, Request
+from voice_runtime.perf_diagnostics import measure
 
 from voice_api.core.config import get_settings
 
@@ -32,15 +33,16 @@ async def require_clerk_user(request: Request) -> ClerkPrincipal:
         raise HTTPException(503, "Clerk authorized parties are not configured")
 
     try:
-        async with Clerk(bearer_auth=settings.clerk_secret_key) as clerk:
-            state = await clerk.authenticate_request_async(
-                request,
-                AuthenticateRequestOptions(
-                    secret_key=settings.clerk_secret_key,
-                    authorized_parties=parties,
-                    accepts_token=["session_token"],
-                ),
-            )
+        with measure("clerk", "verify"):
+            async with Clerk(bearer_auth=settings.clerk_secret_key) as clerk:
+                state = await clerk.authenticate_request_async(
+                    request,
+                    AuthenticateRequestOptions(
+                        secret_key=settings.clerk_secret_key,
+                        authorized_parties=parties,
+                        accepts_token=["session_token"],
+                    ),
+                )
     except Exception as exc:
         raise HTTPException(503, "Clerk verification unavailable") from exc
     if not state.is_signed_in or not state.payload:

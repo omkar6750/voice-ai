@@ -3982,7 +3982,7 @@ export interface components {
             credential_refs?: {
                 [key: string]: string;
             };
-            llm?: components["schemas"]["LLMConfig"];
+            llm?: components["schemas"]["MainLLMConfig"];
             tts?: components["schemas"]["TTSConfig"];
             audio?: components["schemas"]["AudioConfig"];
             vad?: components["schemas"]["VADConfig"];
@@ -4087,8 +4087,6 @@ export interface components {
             timeframe: string;
             /** Role */
             role: string;
-            /** Duration Minutes */
-            duration_minutes?: number | null;
         };
         /** BaseCreate */
         BaseCreate: {
@@ -4530,7 +4528,7 @@ export interface components {
              * @default groq
              * @enum {string}
              */
-            provider: "groq" | "gemini" | "openrouter";
+            provider: "groq" | "gemini" | "openrouter" | "sarvam";
             /**
              * Model
              * @default qwen/qwen3.8-27b
@@ -4553,7 +4551,7 @@ export interface components {
              * @default none
              * @enum {string}
              */
-            reasoning_effort: "none" | "provider_default";
+            reasoning_effort: "none" | "provider_default" | "low" | "medium" | "high";
             /** Models */
             models?: string[];
             provider_preferences?: components["schemas"]["OpenRouterProviderPreferences"] | null;
@@ -5552,7 +5550,7 @@ export interface components {
              * @default groq
              * @enum {string}
              */
-            provider: "groq" | "gemini" | "openrouter";
+            provider: "groq" | "gemini" | "openrouter" | "sarvam";
             /**
              * Model
              * @default qwen/qwen3.8-27b
@@ -5575,10 +5573,28 @@ export interface components {
              * @default none
              * @enum {string}
              */
-            reasoning_effort: "none" | "provider_default";
+            reasoning_effort: "none" | "provider_default" | "low" | "medium" | "high";
             /** Models */
             models?: string[];
             provider_preferences?: components["schemas"]["OpenRouterProviderPreferences"] | null;
+        };
+        /**
+         * LLMFallbackConfig
+         * @description Optional first-response failover target for the main conversational LLM.
+         */
+        LLMFallbackConfig: {
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "groq" | "gemini" | "openrouter" | "sarvam";
+            /** Model */
+            model: string;
+            /**
+             * First Token Timeout Seconds
+             * @default 3
+             */
+            first_token_timeout_seconds: number;
         };
         /** LanguageConfig */
         LanguageConfig: {
@@ -5600,6 +5616,45 @@ export interface components {
              * @enum {string}
              */
             mode: "manual" | "automatic";
+        };
+        /**
+         * MainLLMConfig
+         * @description Conversational LLM settings; fallback intentionally excludes other LLM stages.
+         */
+        MainLLMConfig: {
+            /**
+             * Provider
+             * @default groq
+             * @enum {string}
+             */
+            provider: "groq" | "gemini" | "openrouter" | "sarvam";
+            /**
+             * Model
+             * @default qwen/qwen3.8-27b
+             */
+            model: string;
+            /**
+             * Temperature
+             * @default 0.4
+             */
+            temperature: number;
+            /**
+             * Max Tokens
+             * @default 180
+             */
+            max_tokens: number;
+            /** Top P */
+            top_p?: number | null;
+            /**
+             * Reasoning Effort
+             * @default none
+             * @enum {string}
+             */
+            reasoning_effort: "none" | "provider_default" | "low" | "medium" | "high";
+            /** Models */
+            models?: string[];
+            provider_preferences?: components["schemas"]["OpenRouterProviderPreferences"] | null;
+            fallback?: components["schemas"]["LLMFallbackConfig"] | null;
         };
         /** MediaImportBody */
         MediaImportBody: {

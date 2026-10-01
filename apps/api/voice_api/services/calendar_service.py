@@ -87,7 +87,10 @@ def _zone(name: str) -> ZoneInfo:
 
 
 def resolve_timeframe(
-    phrase: str, timezone: str, *, reference: datetime | None = None
+    phrase: str,
+    timezone: str,
+    *,
+    reference: datetime | None = None,
 ) -> TimeWindow:
     """Resolve caller language into one bounded, timezone-aware window."""
     text = " ".join(phrase.lower().strip().split())
@@ -121,8 +124,9 @@ def resolve_timeframe(
             raise SchedulingError("Could not understand the requested callback timeframe")
     date = (current + timedelta(days=day_offset)).date()
     remainder = text.strip()
-    if match := re.search(r"(?:(?:at|after)\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", remainder):
-        hour, minute, meridiem = int(match.group(1)), int(match.group(2) or 0), match.group(3)
+    if match := re.search(r"(?:(at|after)\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", remainder):
+        qualifier = match.group(1)
+        hour, minute, meridiem = int(match.group(2)), int(match.group(3) or 0), match.group(4)
         if minute > 59 or (meridiem and not 1 <= hour <= 12):
             raise SchedulingError("The requested callback time is invalid")
         if meridiem == "pm" and hour < 12:
@@ -132,7 +136,13 @@ def resolve_timeframe(
         if hour > 23:
             raise SchedulingError("The requested callback time is invalid")
         start = datetime(date.year, date.month, date.day, hour, minute, tzinfo=zone)
-        end = start + timedelta(minutes=15)
+        if qualifier != "after" and minute % 15:
+            start += timedelta(minutes=15 - minute % 15)
+        end = (
+            datetime(date.year, date.month, date.day, tzinfo=zone) + timedelta(days=1)
+            if qualifier == "after"
+            else start + timedelta(minutes=15)
+        )
     else:
         part = next((key for key in DAYPARTS if key in remainder), None)
         if part:

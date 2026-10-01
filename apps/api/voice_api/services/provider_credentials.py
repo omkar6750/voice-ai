@@ -98,6 +98,9 @@ def stage_providers(snapshot: dict) -> dict[str, str]:
     result = {
         stage: snapshot[stage]["provider"] for stage in ("stt", "llm", "tts") if stage in snapshot
     }
+    fallback = snapshot.get("llm", {}).get("fallback")
+    if fallback:
+        result["llm_fallback"] = fallback["provider"]
     classifier = snapshot.get("classifier", {})
     if classifier.get("enabled", True):
         result["classifier"] = (

@@ -19,10 +19,12 @@ from loguru import logger
 
 
 class RuntimeEvent(StrEnum):
+    PERF_TIMING = "perf_timing"
     API_REQUEST_FAILED = "api_request_failed"
     API_VALIDATION_FAILED = "api_validation_failed"
     CREDENTIALS_MISSING = "credentials_missing"
     PROVIDER_FAILED = "provider_failed"
+    LLM_FALLBACK_ACTIVATED = "llm_fallback_activated"
     CLASSIFIER_FAILED = "classifier_failed"
     CLASSIFIER_INVALID = "classifier_invalid"
     INTEGRATION_FAILED = "integration_failed"
@@ -115,6 +117,50 @@ def safe_event_payload(event: RuntimeEvent | str, **fields) -> dict:
     if name == "untrusted_log":
         return result
     choices = {
+        "component": {
+            "api",
+            "clerk",
+            "membership",
+            "db",
+            "loop",
+            "sim_rx",
+            "sim_tx",
+            "capture",
+            "browser_audio",
+            "evidence",
+        },
+        "phase": {
+            "request",
+            "verify",
+            "lookup",
+            "query",
+            "lag",
+            "read",
+            "write",
+            "flush",
+            "gap",
+            "frame",
+            "batch",
+        },
+        "transport": {"none", "browser", "sim7600"},
+        "route_group": {
+            "health",
+            "auth",
+            "runs",
+            "calls",
+            "browser-sessions",
+            "agents",
+            "knowledge",
+            "integrations",
+            "tools",
+            "contacts",
+            "callbacks",
+            "settings",
+            "providers",
+            "platform",
+            "orgs",
+            "other",
+        },
         "provider": {"groq", "gemini", "cartesia", "sarvam", "jev", "whatsapp"},
         "operation": {"llm", "stt", "tts"},
         "status": {
@@ -222,7 +268,7 @@ def safe_event_payload(event: RuntimeEvent | str, **fields) -> dict:
         value = fields.get(key)
         if type(value) is str and value in allowed:
             result[key] = value
-    for key in ("bytes", "samples", "count", "sample_rate", "http_status"):
+    for key in ("bytes", "samples", "count", "sample_rate", "http_status", "at_ms"):
         value = fields.get(key)
         if type(value) is int and 0 <= value <= 2**53:
             if key != "http_status" or 100 <= value <= 599:

@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 
+from voice_runtime.perf_diagnostics import is_enabled, timing
 from voice_runtime.safe_logs import RuntimeEvent, operational_event
 
 
@@ -25,6 +26,7 @@ class CallCapture(BaseObserver):
         self.files = {}
         self.closed = False
         self._has_direct_pcm = False
+        self._last_pcm_at = {"input": None, "output": None}
         for name in self.positions:
             wav = wave.open(str(directory / f"{name}.wav"), "wb")
             wav.setparams((1, 2, sample_rate, 0, "NONE", "not compressed"))
@@ -33,6 +35,15 @@ class CallCapture(BaseObserver):
 
     def pcm(self, direction: str, audio: bytes, *, direct: bool = True):
         """RX is timestamped at read completion; TX at successful write completion."""
+        started = time.perf_counter() if is_enabled() else 0
+        if started:
+            previous = self._last_pcm_at[direction]
+            if previous is not None:
+                gap_ms = (started - previous) * 1000
+                expected_ms = len(audio) / (self.sample_rate * 2) * 1000
+                if gap_ms >= expected_ms + 40:
+                    timing("capture" if direct else "browser_audio", "gap", gap_ms)
+            self._last_pcm_at[direction] = started
         if direct:
             self._has_direct_pcm = True
         if len(audio) % 2:
@@ -44,6 +55,10 @@ class CallCapture(BaseObserver):
         start = max(self.positions[direction], observed, 0)
         gap = start - self.positions[direction]
         self.files[direction].writeframes(b"\0\0" * gap + audio)
+        if started:
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            if elapsed_ms >= 10:
+                timing("capture", "frame", elapsed_ms)
         self.positions[direction] = start + samples
         self.pcm_bytes[direction] += len(audio)
         count = self.pcm_bytes[direction]

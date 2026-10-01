@@ -16,6 +16,7 @@ MAX_CALL_DURATION_SECONDS = 600
 class Settings(BaseSettings):
     env: str = "dev"
     debug_diagnostics: bool = False
+    debug_perf: bool = False
     database_url: str = "postgresql+asyncpg://voice:voice@localhost:55432/voice"
     cartesia_api_key: str | None = None
     sarvam_api_key: str | None = None

@@ -7,6 +7,8 @@ from pydantic import Field, model_validator
 
 from .base import ConfigModel
 
+SARVAM_LLM_MODELS = ("sarvam-105b", "sarvam-105b-conversations")
+
 
 class AudioConfig(ConfigModel):
     sample_rate: Literal[8000, 16000] = 16000
@@ -40,13 +42,27 @@ class OpenRouterProviderPreferences(ConfigModel):
     partition: Literal["none"] | None = None
 
 
+class LLMFallbackConfig(ConfigModel):
+    """Optional first-response failover target for the main conversational LLM."""
+
+    provider: Literal["groq", "gemini", "openrouter", "sarvam"]
+    model: str = Field(min_length=1)
+    first_token_timeout_seconds: float = Field(default=3.0, ge=0.5, le=10)
+
+    @model_validator(mode="after")
+    def validate_sarvam_model(self):
+        if self.provider == "sarvam" and self.model not in SARVAM_LLM_MODELS:
+            raise ValueError("Select a stable Sarvam chat model supported by the runtime")
+        return self
+
+
 class LLMConfig(ConfigModel):
-    provider: Literal["groq", "gemini", "openrouter"] = "groq"
+    provider: Literal["groq", "gemini", "openrouter", "sarvam"] = "groq"
     model: str = Field(default="qwen/qwen3.8-27b", min_length=1)
     temperature: float = Field(default=0.4, ge=0, le=2)
     max_tokens: int = Field(default=180, gt=0)
     top_p: float | None = Field(default=None, gt=0, le=1)
-    reasoning_effort: Literal["none", "provider_default"] = "none"
+    reasoning_effort: Literal["none", "provider_default", "low", "medium", "high"] = "none"
     models: list[str] = Field(default_factory=list)
     provider_preferences: "OpenRouterProviderPreferences | None" = None
 
@@ -59,9 +75,27 @@ class LLMConfig(ConfigModel):
             "provider_default",
         }:
             raise ValueError("This provider uses provider-default reasoning or no reasoning")
+        if self.provider == "sarvam" and self.reasoning_effort not in {
+            "none",
+            "provider_default",
+            "low",
+            "medium",
+            "high",
+        }:
+            raise ValueError(
+                "Sarvam reasoning effort must be none, provider_default, low, medium, or high"
+            )
+        if self.provider == "sarvam" and self.model not in SARVAM_LLM_MODELS:
+            raise ValueError("Select a stable Sarvam chat model supported by the runtime")
         if self.provider != "openrouter" and (self.models or self.provider_preferences):
             raise ValueError("OpenRouter routing settings require the openrouter provider")
         return self
+
+
+class MainLLMConfig(LLMConfig):
+    """Conversational LLM settings; fallback intentionally excludes other LLM stages."""
+
+    fallback: LLMFallbackConfig | None = None
 
 
 class CartesiaGenerationConfig(ConfigModel):
@@ -105,8 +139,12 @@ class TTSConfig(ConfigModel):
 # credential/catalog status without importing provider SDKs into the dashboard contract.
 RUNTIME_PROVIDER_CAPABILITIES: dict[str, dict] = {
     "sarvam": {
-        "slots": ["stt", "tts"],
-        "models_by_slot": {"stt": ["saaras:v3"], "tts": ["bulbul:v3"]},
+        "slots": ["llm", "stt", "tts"],
+        "models_by_slot": {
+            "llm": list(SARVAM_LLM_MODELS),
+            "stt": ["saaras:v3"],
+            "tts": ["bulbul:v3"],
+        },
         "languages": ["en-IN", "hi-IN", "mr-IN", "te-IN"],
         "voices": [],
         "fields": {

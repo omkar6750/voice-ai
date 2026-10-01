@@ -119,7 +119,6 @@ _HANDLER_SPECS: tuple[RegisteredHandlerSpec, ...] = (
             "properties": {
                 "timeframe": {"type": "string"},
                 "role": {"type": "string"},
-                "duration_minutes": {"type": "integer"},
             },
             "required": ["timeframe", "role"],
         },

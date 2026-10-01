@@ -17,7 +17,7 @@ type Provider = Credential["provider"];
 type SecretFields = { name: string; api_key: string; account_sid: string; api_key_sid: string; api_key_secret: string; auth_token: string };
 const emptyFields: SecretFields = { name: "", api_key: "", account_sid: "", api_key_sid: "", api_key_secret: "", auth_token: "" };
 const providers: Array<{ id: Provider; label: string; purpose: string }> = [
-  { id: "sarvam", label: "Sarvam", purpose: "Speech recognition and speech synthesis" },
+  { id: "sarvam", label: "Sarvam", purpose: "Chat models, speech recognition and speech synthesis" },
   { id: "groq", label: "Groq", purpose: "Voice agent, classifier and summarizer" },
   { id: "openrouter", label: "OpenRouter", purpose: "Account-specific models for LLM, classifier and summarizer" },
   { id: "gemini", label: "Google Gemini", purpose: "Voice agent, classifier and knowledge search" },

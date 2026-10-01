@@ -525,8 +525,6 @@ class NativeToolDispatch:
                     payload.update(
                         {"timeframe": args.get("timeframe", ""), "role": args.get("role", "")}
                     )
-                    if args.get("duration_minutes") is not None:
-                        payload["duration_minutes"] = args["duration_minutes"]
                 else:
                     payload.update(
                         {

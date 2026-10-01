@@ -43,9 +43,7 @@ async def test_live_models_cached_and_filtered(monkeypatch):
         "AsyncClient",
         lambda **kwargs: real_client(transport=httpx.MockTransport(respond)),
     )
-    settings = Settings(
-        _env_file=None, groq_api_key="fake", gemini_api_key="fake"
-    )
+    settings = Settings(_env_file=None, groq_api_key="fake", gemini_api_key="fake")
     first = await provider_registry.get_provider_registry(settings)
     second = await provider_registry.get_provider_registry(settings)
     assert len(calls) == 2
@@ -53,7 +51,11 @@ async def test_live_models_cached_and_filtered(monkeypatch):
     providers = {item.provider: item for item in first.providers}
     assert providers["groq"].models == ["llama-3.1-8b-instant"]
     assert providers["gemini"].models == ["gemini-2.5-flash"]
-    assert providers["sarvam"].slots == ["stt", "tts"]
+    assert providers["sarvam"].slots == ["llm", "stt", "tts"]
+    assert providers["sarvam"].models_by_slot["llm"] == [
+        "sarvam-105b",
+        "sarvam-105b-conversations",
+    ]
     assert providers["cartesia"].fields["pace"].runtime_supported is False
 
 
@@ -65,3 +67,4 @@ async def test_unconfigured_models_are_not_invented():
     providers = {item.provider: item for item in registry.providers}
     assert providers["groq"].models == []
     assert providers["gemini"].models == []
+    assert providers["sarvam"].status == "configured"

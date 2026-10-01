@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from time import perf_counter
 
 import serial
 from pipecat.frames.frames import InputAudioRawFrame, OutputAudioRawFrame, StartFrame
@@ -10,6 +11,7 @@ from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pydantic import Field
 
+from voice_runtime.perf_diagnostics import is_enabled, timing
 from voice_runtime.safe_logs import RuntimeEvent, error_category, operational_event
 
 
@@ -49,15 +51,31 @@ class _SerialPcmOwner:
     async def read(self, size: int) -> bytes:
         if self._serial is None:
             raise RuntimeError("SIM7600 USB audio port is not open")
-        return await asyncio.to_thread(self._serial.read, size)
+        started = perf_counter() if is_enabled() else 0
+        payload = await asyncio.to_thread(self._serial.read, size)
+        if started and payload:
+            elapsed_ms = (perf_counter() - started) * 1000
+            if elapsed_ms >= 30:
+                timing("sim_rx", "read", elapsed_ms)
+        return payload
 
     async def write(self, payload: bytes) -> None:
         if self._serial is None:
             raise RuntimeError("SIM7600 USB audio port is not open")
+        started = perf_counter() if is_enabled() else 0
         written = await asyncio.to_thread(self._serial.write, payload)
+        if started:
+            elapsed_ms = (perf_counter() - started) * 1000
+            if elapsed_ms >= 20:
+                timing("sim_tx", "write", elapsed_ms)
         if written != len(payload):
             raise OSError(f"Short PCM write: {written}/{len(payload)} bytes")
+        started = perf_counter() if is_enabled() else 0
         await asyncio.to_thread(self._serial.flush)
+        if started:
+            elapsed_ms = (perf_counter() - started) * 1000
+            if elapsed_ms >= 20:
+                timing("sim_tx", "flush", elapsed_ms)
         if self.capture:
             self.capture.pcm("output", payload)
 
@@ -70,6 +88,7 @@ class _Sim7600AudioInput(BaseInputTransport):
         self._sample_rate = params.audio_in_sample_rate
         self._task: asyncio.Task[None] | None = None
         self._frame_bytes = 0
+        self._last_frame_at: float | None = None
 
     async def setup(self, setup: FrameProcessorSetup) -> None:
         await super().setup(setup)
@@ -108,6 +127,13 @@ class _Sim7600AudioInput(BaseInputTransport):
                     num_channels=1,
                 )
                 buffer = buffer[self._frame_bytes :]
+                if is_enabled():
+                    now = perf_counter()
+                    if self._last_frame_at is not None:
+                        gap_ms = (now - self._last_frame_at) * 1000
+                        if gap_ms >= self._params.audio_frame_ms + 40:
+                            timing("sim_rx", "gap", gap_ms)
+                    self._last_frame_at = now
                 if self._owner.capture:
                     self._owner.capture.pcm("input", frame.audio)
                 await self.push_audio_frame(frame)
@@ -126,6 +152,7 @@ class _Sim7600AudioOutput(BaseOutputTransport):
         self._owner = owner
         self._params = params
         self._sample_rate = params.audio_out_sample_rate
+        self._last_chunk_at: float | None = None
 
     async def setup(self, setup: FrameProcessorSetup) -> None:
         await super().setup(setup)
@@ -154,6 +181,12 @@ class _Sim7600AudioOutput(BaseOutputTransport):
         for offset in range(0, len(frame.audio), chunk_bytes):
             chunk = frame.audio[offset : offset + chunk_bytes]
             started = asyncio.get_running_loop().time()
+            if is_enabled():
+                if self._last_chunk_at is not None:
+                    gap_ms = (started - self._last_chunk_at) * 1000
+                    if gap_ms >= self._params.audio_frame_ms + 40:
+                        timing("sim_tx", "gap", gap_ms)
+                self._last_chunk_at = started
             try:
                 await self._owner.write(chunk)
             except Exception as exc:

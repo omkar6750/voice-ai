@@ -23,6 +23,7 @@ from voice_runtime.execution.evidence_client import EvidenceDeliveryError
 from voice_runtime.execution.exchange import ExchangeTracker
 from voice_runtime.execution.spool import DurableSpool
 from voice_runtime.execution.termination import CallTermination, TerminationCause
+from voice_runtime.perf_diagnostics import call_scope
 
 from voice_api.core.clerk_organizations import get_clerk_organization_directory
 from voice_api.core.config import Settings
@@ -403,8 +404,9 @@ async def handle_browser_socket(session_id: str, websocket: WebSocket, settings:
         async def on_session_timeout(_transport, _client):
             await persist_transport_disconnect(ctx, "browser_timeout", cause="network_failure")
 
-        ctx.pipeline_task = asyncio.create_task(_run_browser_pipeline(ctx, transport, settings))
-        await ctx.pipeline_task
+        with call_scope(ctx.run_id, "browser"):
+            ctx.pipeline_task = asyncio.create_task(_run_browser_pipeline(ctx, transport, settings))
+            await ctx.pipeline_task
     finally:
         # A browser refresh can close the socket while startup is still in
         # progress, or while the pipeline task is not yet able to observe the

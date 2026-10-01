@@ -5,6 +5,7 @@ from functools import lru_cache
 
 from clerk_backend_api import Clerk
 from fastapi import HTTPException
+from voice_runtime.perf_diagnostics import measure
 
 from voice_api.core.config import get_settings
 
@@ -71,10 +72,11 @@ class ClerkOrganizationDirectory:
 
     async def membership(self, org_id: str, user_id: str) -> OrganizationMember | None:
         try:
-            async with Clerk(bearer_auth=self.secret_key) as clerk:
-                page = await clerk.organization_memberships.list_async(
-                    organization_id=org_id, user_id=[user_id], limit=1
-                )
+            with measure("membership", "lookup"):
+                async with Clerk(bearer_auth=self.secret_key) as clerk:
+                    page = await clerk.organization_memberships.list_async(
+                        organization_id=org_id, user_id=[user_id], limit=1
+                    )
         except Exception as exc:
             raise HTTPException(503, "Clerk membership lookup unavailable") from exc
         for item in page.data:
@@ -88,6 +90,7 @@ class ClerkOrganizationDirectory:
                     last_name=self._text(getattr(public, "last_name", None)),
                 )
         return None
+
 
 @lru_cache(maxsize=1)
 def get_clerk_organization_directory() -> ClerkOrganizationDirectory:

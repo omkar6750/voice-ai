@@ -65,6 +65,7 @@ async def register(run_id: str, body: ArtifactBody, session: AsyncSession = Sess
             return {"id": existing.id, "deleted_at": existing.deleted_at}
     resolved = run.resolved_config.get("_resolved", {})
     settings = get_settings()
+    cloud_recording = body.kind != "pipeline_log" and settings.env != "dev"
     private_log = body.kind == "pipeline_log" and (
         settings.env != "dev" or bool(settings.supabase_url)
     )
@@ -108,13 +109,23 @@ async def register(run_id: str, body: ArtifactBody, session: AsyncSession = Sess
         row.storage_backend = "supabase"
         row.storage_status = "uploading"
         row.vendor_public_id = object_identity(run.org_id, row.id, "diagnostics", row.sha256)
-    elif body.kind != "pipeline_log":
+    elif cloud_recording:
         row.storage_backend = "cloudinary"
         row.storage_status = "uploading"
         row.vendor_public_id = recording_identity(run.org_id, run_id, body.id)
+    elif body.kind != "pipeline_log":
+        # Local development keeps recordings in VOICE_RECORDINGS_DIR; it must not
+        # depend on hosted Cloudinary credentials or leave a failed cloud state.
+        row.storage_backend = "local"
+        row.storage_status = "available"
+        row.storage_error = None
+        row.vendor_public_id = None
+        row.vendor_asset_id = None
+        row.vendor_version = None
+        row.vendor_format = None
     session.add(row)
     await session.commit()
-    if private_log or body.kind != "pipeline_log":
+    if private_log or cloud_recording:
         # Row lock serializes registration retries, deletion and serving. Persistent uploading
         # state survives process loss; replay verifies the same remote object before exposing it.
         row = await session.get(RunArtifact, body.id, with_for_update=True, populate_existing=True)
@@ -124,7 +135,7 @@ async def register(run_id: str, body: ArtifactBody, session: AsyncSession = Sess
             if private_log:
                 check_identity(row.vendor_public_id, row.org_id, row.id, "diagnostics")
                 await get_private_storage().upload(row.vendor_public_id, log_data)
-            else:
+            elif cloud_recording:
                 stored = await get_recording_storage().upload(
                     path, row.vendor_public_id, row.sha256, row.size_bytes
                 )

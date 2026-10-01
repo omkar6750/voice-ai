@@ -9,7 +9,7 @@ from .base import ConfigModel, Identifier
 from .cadence import ClassifierConfig, SummarizerConfig
 from .knowledge import RetrievalConfig
 from .prompt_references import tool_references
-from .providers import AudioConfig, CallLimits, LLMConfig, STTConfig, TTSConfig, VADConfig
+from .providers import AudioConfig, CallLimits, MainLLMConfig, STTConfig, TTSConfig, VADConfig
 from .tools import ToolBinding
 
 
@@ -141,8 +141,11 @@ class AgentConfig(ConfigModel):
     knowledge_base_ids: list[Identifier] = Field(default_factory=list)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     stt: STTConfig = Field(default_factory=STTConfig)
-    credential_refs: dict[Literal["stt", "llm", "tts", "classifier", "summarizer", "embedding"], Identifier] = Field(default_factory=dict)
-    llm: LLMConfig = Field(default_factory=LLMConfig)
+    credential_refs: dict[
+        Literal["stt", "llm", "llm_fallback", "tts", "classifier", "summarizer", "embedding"],
+        Identifier,
+    ] = Field(default_factory=dict)
+    llm: MainLLMConfig = Field(default_factory=MainLLMConfig)
     tts: TTSConfig = Field(default_factory=TTSConfig)
     audio: AudioConfig = Field(default_factory=AudioConfig)
     vad: VADConfig = Field(default_factory=VADConfig)

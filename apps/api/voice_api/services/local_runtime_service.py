@@ -2,12 +2,14 @@
 
 import asyncio
 from pathlib import Path
+from time import perf_counter
 from uuid import NAMESPACE_URL, uuid5
 
 from fastapi import HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from voice_runtime.contracts.evidence import EvidenceBatch
 from voice_runtime.execution.evidence_client import EvidenceDeliveryError
+from voice_runtime.perf_diagnostics import is_enabled, timing
 
 from voice_api.db.session import SessionFactory
 from voice_api.db.tenant_scope import bind_run_organization
@@ -26,6 +28,7 @@ class LocalEvidenceIngestor:
         batch = EvidenceBatch(records=records)
         if any(record.run_id != self.run_id for record in batch.records):
             raise ValueError("Spool contains a different run")
+        started = perf_counter() if is_enabled() else 0
         try:
             async with SessionFactory() as session:
                 await bind_run_organization(session, self.run_id, expected_org_id=self.org_id)
@@ -38,6 +41,9 @@ class LocalEvidenceIngestor:
             ) from None
         except SQLAlchemyError:
             raise EvidenceDeliveryError(retryable=True) from None
+        finally:
+            if started:
+                timing("evidence", "batch", (perf_counter() - started) * 1000, count=len(records))
 
 
 async def register_local_artifacts(

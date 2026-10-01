@@ -69,7 +69,6 @@ class AvailabilityRequest(BaseModel):
     run_id: str
     timeframe: str
     role: str
-    duration_minutes: int | None = Field(default=None, ge=5, le=120)
 
 
 class BookRequest(BaseModel):
@@ -517,7 +516,7 @@ async def availability(
         for start, end in generate_slots(
             window,
             busy,
-            duration_minutes=body.duration_minutes or config.slot_duration_minutes,
+            duration_minutes=15,
             minimum_notice_minutes=config.minimum_notice_minutes,
             limit=3,
         ):

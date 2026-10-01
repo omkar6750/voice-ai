@@ -108,13 +108,18 @@ async def get_provider_registry(settings: Settings) -> ProviderCatalogResponse:
     )
     for name, key in (("sarvam", settings.sarvam_api_key), ("cartesia", settings.cartesia_api_key)):
         capability = runtime_provider_capability(name)
+        catalog_ready = any(capability["models_by_slot"].values())
         providers.append(
             {
                 "provider": name,
                 "models": sorted(
                     {model for models in capability["models_by_slot"].values() for model in models}
                 ),
-                "status": "configured" if key else "unconfigured",
+                # Sarvam's model list is static; organization credential binding
+                # is validated separately from this public capability list.
+                "status": "configured"
+                if (catalog_ready if name == "sarvam" else key)
+                else "unconfigured",
                 **capability,
             }
         )

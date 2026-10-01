@@ -26,6 +26,7 @@ from voice_api.services.provider_credentials import (
     settings_for_run,
 )
 from voice_runtime.execution.runner import execute_call
+from voice_runtime.perf_diagnostics import call_scope
 from voice_runtime.telephony.driver import Sim7600CallDriver
 
 router = APIRouter(tags=["calls"])
@@ -50,18 +51,19 @@ async def _run_live_call_background(run_id: str, endpoint_id: str) -> None:
         await register_local_artifacts(run_id, host.directory, strict=True)
 
     try:
-        await execute_call(
-            None,
-            "",
-            run_id,
-            endpoint_id,
-            driver,
-            Path("data/evidence") / f"{run_id}.jsonl",
-            secrets=resolved_provider_secret_values(settings),
-            after_close=register_artifacts,
-            local_post=post,
-            local_ingestor=LocalEvidenceIngestor(run_id),
-        )
+        with call_scope(run_id, "sim7600"):
+            await execute_call(
+                None,
+                "",
+                run_id,
+                endpoint_id,
+                driver,
+                Path("data/evidence") / f"{run_id}.jsonl",
+                secrets=resolved_provider_secret_values(settings),
+                after_close=register_artifacts,
+                local_post=post,
+                local_ingestor=LocalEvidenceIngestor(run_id),
+            )
     except Exception:
         logger.error("Live call {} stopped; inspect claim and evidence status", run_id)
 
