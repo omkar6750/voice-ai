@@ -1,0 +1,94 @@
+# Illustrative target for an Elevated Box-style lead qualification call.
+# This is NOT an export of the Elevated Box agent or the format currently saved
+# by this application. It requires matching Python handlers and tool bindings.
+initial_node: greeting
+global_functions:
+  - name: collect_lead_fact
+nodes:
+  greeting:
+    role_message: >
+      You are a concise, courteous voice assistant for Elevated Box.
+      Ask one question at a time. Do not invent availability or booking results.
+      At this node, greet the caller, explain the purpose, and ask whether now is a good time.
+    task_messages: []
+    functions:
+      - name: start_discovery
+        transition_only: true
+        description: The caller is ready to discuss their needs.
+        transition_to: discovery
+      - name: request_callback
+        transition_only: true
+        description: The caller is busy and prefers a callback.
+        transition_to: book_callback
+      - name: close_greeting
+        transition_only: true
+        description: The caller declines and wants to end the call.
+        transition_to: closing
+  discovery:
+    role_message: >
+      You are a concise, courteous voice assistant for Elevated Box.
+      Ask focused discovery questions. Use collect_lead_fact for useful answers.
+      Do not invent availability or booking results.
+    task_messages: []
+    functions:
+      - name: finish_discovery
+        transition_only: true
+        description: Enough information is available to assess qualification.
+        transition_to: qualify
+      - name: request_callback
+        transition_only: true
+        description: The caller prefers to continue later.
+        transition_to: book_callback
+      - name: close_discovery
+        transition_only: true
+        description: The caller wants to end the call.
+        transition_to: closing
+  qualify:
+    role_message: >
+      You are a concise, courteous voice assistant for Elevated Box.
+      Assess fit using recorded facts; state uncertainty when facts are missing.
+      Do not invent availability or booking results.
+    task_messages: []
+    functions:
+      - name: assess_qualification
+        transition_to:
+          field: status
+          cases:
+            qualified: book_callback
+            unqualified: closing
+            needs_more_information: discovery
+          default: closing
+      - name: request_callback
+        transition_only: true
+        description: The caller requests a callback before assessment is complete.
+        transition_to: book_callback
+      - name: close_qualification
+        transition_only: true
+        description: The caller wants to end the call.
+        transition_to: closing
+  book_callback:
+    role_message: >
+      You are a concise, courteous voice assistant for Elevated Box.
+      Collect a preferred callback time and confirm a booking only after the booking tool succeeds.
+      Do not invent availability or booking results.
+    task_messages: []
+    functions:
+      - name: book_callback
+        transition_to:
+          field: status
+          cases:
+            booked: closing
+            unavailable: book_callback
+            failed: book_callback
+      - name: close_callback
+        transition_only: true
+        description: The caller no longer wants a callback and wants to end.
+        transition_to: closing
+  closing:
+    role_message: >
+      You are a concise, courteous voice assistant for Elevated Box.
+      Briefly summarize any confirmed outcome, thank the caller, and say goodbye.
+      Do not invent availability or booking results.
+    task_messages: []
+    post_actions:
+      - type: end_conversation

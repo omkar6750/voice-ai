@@ -13,26 +13,37 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner, require_runtime_service
-from voice_api.db.tenant_scope import bind_calendar_oauth_organization
+from voice_api.db.tenant_scope import bind_calendar_oauth_organization, required_organization
 from voice_api.models import (
     AgentVersion,
     CalendarIntegration,
     CalendarOAuthState,
     Callback,
     Contact,
+    Run,
 )
 from voice_api.models.common import new_id, now
-from voice_api.schemas.calendar import CallbackAvailabilityResult, CallbackBookingResponse
+from voice_api.schemas.calendar import (
+    CalendarTestAvailabilityRequest,
+    CalendarTestAvailabilityResponse,
+    CalendarTestBookingRequest,
+    CalendarTestBookingResponse,
+    CallbackAvailabilityResult,
+    CallbackBookingResponse,
+)
 from voice_api.services.calendar_service import (
     SCOPES,
     SchedulingError,
+    TimeWindow,
     _put_secret,
     calendar_call,
     format_local_callback_time,
     generate_slots,
     google_flow,
     resolve_timeframe,
+    sign_callback_slot,
     sign_slot,
+    verify_callback_slot,
     verify_slot,
 )
 from voice_api.services.vault_service import CredentialVault, SecretScope
@@ -55,16 +66,14 @@ class UpdateCalendar(BaseModel):
 
 
 class AvailabilityRequest(BaseModel):
-    agent_version_id: str
-    contact_id: str | None = None
+    run_id: str
     timeframe: str
     role: str
     duration_minutes: int | None = Field(default=None, ge=5, le=120)
 
 
 class BookRequest(BaseModel):
-    agent_version_id: str
-    contact_id: str
+    run_id: str
     slot_id: str
     reason: str = Field(min_length=1, max_length=2000)
 
@@ -114,8 +123,9 @@ async def connect_calendar(
     raw_state = token_urlsafe(32)
     code_verifier = token_urlsafe(64)
     state_id = new_id()
-    encrypted_verifier = CredentialVault.from_env().encrypt(code_verifier,
-        scope=SecretScope(row.org_id, state_id, "google_calendar", "pkce_verifier"))
+    encrypted_verifier = CredentialVault.from_env().encrypt(
+        code_verifier, scope=SecretScope(row.org_id, state_id, "google_calendar", "pkce_verifier")
+    )
     session.add(
         CalendarOAuthState(
             id=state_id,
@@ -167,8 +177,9 @@ async def oauth_callback(
         )
     try:
         code_verifier = CredentialVault.from_env().decrypt(
-            state_row.pkce_verifier_ciphertext, state_row.pkce_verifier_key_id,
-            scope=SecretScope(state_row.org_id, state_row.id, "google_calendar", "pkce_verifier")
+            state_row.pkce_verifier_ciphertext,
+            state_row.pkce_verifier_key_id,
+            scope=SecretScope(state_row.org_id, state_row.id, "google_calendar", "pkce_verifier"),
         )
         flow = google_flow(state, code_verifier=code_verifier)
         flow.fetch_token(code=code)
@@ -211,8 +222,10 @@ async def reconnect(
     raw_state = token_urlsafe(32)
     code_verifier = token_urlsafe(64)
     state_id = new_id()
-    encrypted_verifier = CredentialVault.from_env().encrypt(code_verifier,
-        scope=SecretScope(integration.org_id, state_id, "google_calendar", "pkce_verifier"))
+    encrypted_verifier = CredentialVault.from_env().encrypt(
+        code_verifier,
+        scope=SecretScope(integration.org_id, state_id, "google_calendar", "pkce_verifier"),
+    )
     session.add(
         CalendarOAuthState(
             id=state_id,
@@ -264,22 +277,169 @@ async def disconnect(
 
 
 @router.post(
-    "/callback-scheduling/availability", response_model=CallbackAvailabilityResult
+    "/calendar-integrations/{integration_id}/test/availability",
+    response_model=CalendarTestAvailabilityResponse,
 )
+async def test_calendar_availability(
+    integration_id: str,
+    body: CalendarTestAvailabilityRequest,
+    session: AsyncSession = Session,
+    _: None = Operator,
+) -> dict:
+    integration = await session.get(CalendarIntegration, integration_id)
+    if integration is None:
+        raise HTTPException(404, "Calendar integration not found")
+    if integration.status != "connected":
+        raise HTTPException(409, "Connect this calendar before testing availability")
+
+    current = datetime.now(UTC)
+    window = TimeWindow(
+        original="calendar integration test",
+        start=current,
+        end=current + timedelta(days=7),
+        timezone=integration.timezone,
+    )
+    try:
+        busy = await calendar_call(
+            session,
+            integration,
+            "freebusy",
+            start=window.start,
+            end=window.end,
+            timezone=window.timezone,
+        )
+        slots = generate_slots(window, busy, duration_minutes=15, limit=body.limit)
+    except SchedulingError as exc:
+        raise HTTPException(502, "Google Calendar availability could not be checked") from exc
+
+    organization_id = required_organization(session.sync_session)
+    expires_at = current + timedelta(minutes=5)
+    try:
+        signed_slots = [
+            {
+                "slot_id": sign_slot(
+                    {
+                        "purpose": "calendar_integration_test",
+                        "organization_id": organization_id,
+                        "integration": integration.id,
+                        "start": start.isoformat(),
+                        "end": end.isoformat(),
+                        "timezone": integration.timezone,
+                        "expires_at": expires_at.isoformat(),
+                    }
+                ),
+                "display": format_local_callback_time(start, integration.timezone),
+                "start_at": start,
+                "end_at": end,
+            }
+            for start, end in slots
+        ]
+    except SchedulingError as exc:
+        raise HTTPException(503, "Calendar slot signing is not configured") from exc
+    return {
+        "timezone": integration.timezone,
+        "slots": signed_slots,
+    }
+
+
+@router.post(
+    "/calendar-integrations/{integration_id}/test/book",
+    response_model=CalendarTestBookingResponse,
+)
+async def test_calendar_booking(
+    integration_id: str,
+    body: CalendarTestBookingRequest,
+    session: AsyncSession = Session,
+    _: None = Operator,
+) -> dict:
+    try:
+        payload = verify_slot(body.slot_id)
+    except (KeyError, TypeError, ValueError, SchedulingError) as exc:
+        raise HTTPException(422, "Invalid or expired calendar test slot") from exc
+
+    organization_id = required_organization(session.sync_session)
+    if (
+        payload.get("purpose") != "calendar_integration_test"
+        or payload.get("organization_id") != organization_id
+        or payload.get("integration") != integration_id
+    ):
+        raise HTTPException(409, "Calendar test slot does not belong to this integration")
+
+    integration = await session.get(CalendarIntegration, integration_id)
+    if integration is None:
+        raise HTTPException(404, "Calendar integration not found")
+    if integration.status != "connected":
+        raise HTTPException(409, "Connect this calendar before booking a test event")
+    if payload.get("timezone") != integration.timezone:
+        raise HTTPException(409, "Calendar timezone changed; fetch availability again")
+
+    try:
+        start = datetime.fromisoformat(payload["start"])
+        end = datetime.fromisoformat(payload["end"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(422, "Invalid calendar test slot") from exc
+    if end - start != timedelta(minutes=15):
+        raise HTTPException(422, "Calendar test slots must be 15 minutes")
+    summary = body.summary.strip()
+    if not summary:
+        raise HTTPException(422, "Calendar test event title is required")
+
+    try:
+        busy = await calendar_call(
+            session,
+            integration,
+            "freebusy",
+            start=start,
+            end=end,
+            timezone=integration.timezone,
+        )
+    except SchedulingError as exc:
+        raise HTTPException(502, "Google Calendar availability could not be checked") from exc
+    if busy:
+        raise HTTPException(409, "That slot is no longer available; fetch availability again")
+
+    event = {
+        "summary": summary,
+        "description": body.description.strip(),
+        "start": {"dateTime": start.isoformat(), "timeZone": integration.timezone},
+        "end": {"dateTime": end.isoformat(), "timeZone": integration.timezone},
+        "transparency": "opaque",
+        "extendedProperties": {"private": {"voice_ai_integration_test": "true"}},
+    }
+    try:
+        created = await calendar_call(session, integration, "insert", event=event)
+    except Exception as exc:
+        raise HTTPException(502, "Google Calendar test event could not be created") from exc
+    event_id = created.get("id") if isinstance(created, dict) else None
+    if not event_id:
+        raise HTTPException(502, "Google Calendar did not return a test event ID")
+    await session.commit()
+    return {
+        "status": "confirmed",
+        "event_id": event_id,
+        "scheduled_time": format_local_callback_time(start, integration.timezone),
+        "duration_minutes": 15,
+    }
+
+
+@router.post("/callback-scheduling/availability", response_model=CallbackAvailabilityResult)
 async def availability(
     body: AvailabilityRequest, session: AsyncSession = Session, _: None = Runtime
 ) -> dict:
-    version = await session.get(AgentVersion, body.agent_version_id)
+    run = await session.get(Run, body.run_id)
+    if run is None:
+        raise HTTPException(404, "Run not found")
+    version = await session.get(AgentVersion, run.agent_version_id)
     if version is None:
         raise HTTPException(404, "Agent version not found")
     requested_timeframe = body.timeframe
-    if not body.contact_id:
+    if not run.contact_id:
         return {
             "status": "timezone_required",
             "requested_timeframe": requested_timeframe,
             "message": "The caller's timezone is unknown. Ask for their timezone before checking callback availability.",
         }
-    contact = await session.get(Contact, body.contact_id)
+    contact = await session.get(Contact, run.contact_id)
     if contact is None:
         return {
             "status": "contact_unavailable",
@@ -293,7 +453,10 @@ async def availability(
             "message": "The caller's timezone is unknown. Ask for their timezone before checking callback availability.",
         }
     config = AgentConfig.model_validate(version.config).callback_scheduling
-    role = next((r for r in config.roles if r.key == body.role), None)
+    role_index = next(
+        (index for index, item in enumerate(config.roles) if item.key == body.role), -1
+    )
+    role = config.roles[role_index] if role_index >= 0 else None
     if not config.enabled or role is None or not role.enabled:
         return {
             "status": "configuration_error",
@@ -345,7 +508,9 @@ async def availability(
             failures.append("A configured calendar's availability could not be checked.")
             continue
         except Exception:
-            logger.exception("Unexpected callback availability failure for calendar {}", integration.id)
+            logger.exception(
+                "Unexpected callback availability failure for calendar {}", integration.id
+            )
             failures.append("A configured calendar's availability could not be checked.")
             continue
         checked_calendars += 1
@@ -356,27 +521,20 @@ async def availability(
             minimum_notice_minutes=config.minimum_notice_minutes,
             limit=3,
         ):
-            payload = {
-                "person": person.key,
-                "integration": integration.id,
-                "role": body.role,
-                "start": start.isoformat(),
-                "end": end.isoformat(),
-                "timezone": contact.timezone,
-                "window_start": window.start.isoformat(),
-                "window_end": window.end.isoformat(),
-                "timeframe": body.timeframe,
-                "expires_at": (datetime.now(UTC) + timedelta(minutes=10)).isoformat(),
-                "agent_version_id": body.agent_version_id,
-                "contact_id": body.contact_id,
-            }
             candidate_slots.append(
                 (
                     start.astimezone(UTC),
                     person_order,
                     end.astimezone(UTC),
                     {
-                        "slot_id": sign_slot(payload),
+                        "slot_id": sign_callback_slot(
+                            run_id=run.id,
+                            calendar_integration_id=integration.id,
+                            start=start,
+                            duration_minutes=int((end - start).total_seconds() // 60),
+                            expires_at=datetime.now(UTC) + timedelta(minutes=10),
+                            role_index=role_index,
+                        ),
                         "display": format_local_callback_time(start, contact.timezone),
                     },
                 )
@@ -402,11 +560,7 @@ async def availability(
     partial = bool(failures)
     return {
         "status": (
-            "partial_availability"
-            if partial
-            else "available"
-            if slots
-            else "no_availability"
+            "partial_availability" if partial else "available" if slots else "no_availability"
         ),
         "requested_timeframe": requested_timeframe,
         "slots": slots,
@@ -423,25 +577,43 @@ async def availability(
 
 @router.post("/callback-scheduling/book", response_model=CallbackBookingResponse)
 async def book(body: BookRequest, session: AsyncSession = Session, _: None = Runtime) -> dict:
+    run = await session.get(Run, body.run_id)
+    if run is None:
+        raise HTTPException(404, "Run not found")
+    version = await session.get(AgentVersion, run.agent_version_id)
+    if version is None:
+        raise HTTPException(404, "Agent version not found")
+    if not run.contact_id:
+        raise HTTPException(409, "This run has no callback contact")
+    contact = await session.get(Contact, run.contact_id)
+    if contact is None or not contact.timezone:
+        raise HTTPException(409, "Calendar or contact is unavailable")
     try:
-        payload = verify_slot(body.slot_id)
+        payload = verify_callback_slot(body.slot_id, run_id=run.id)
     except SchedulingError as exc:
         raise _error(exc) from exc
-    if (
-        payload.get("agent_version_id") != body.agent_version_id
-        or payload.get("contact_id") != body.contact_id
-    ):
-        raise HTTPException(409, "Callback slot does not belong to this conversation")
+    config = AgentConfig.model_validate(version.config).callback_scheduling
+    role_index = payload["role_index"]
+    if role_index >= len(config.roles) or not config.roles[role_index].enabled:
+        raise HTTPException(409, "Callback configuration changed; check availability again")
+    role = config.roles[role_index]
+    people = [
+        person
+        for person in config.bookable_people
+        if person.enabled
+        and person.calendar_integration_id == payload["integration"]
+        and role.key in person.roles
+    ]
+    if len(people) != 1:
+        raise HTTPException(409, "Callback configuration changed; check availability again")
+    person = people[0]
     integration = await session.get(CalendarIntegration, payload["integration"])
-    contact = await session.get(Contact, body.contact_id)
-    if integration is None or integration.status != "connected" or contact is None:
+    if integration is None or integration.status != "connected":
         raise HTTPException(409, "Calendar or contact is unavailable")
-    if not contact.timezone or contact.timezone != payload.get("timezone"):
-        raise HTTPException(409, "Contact timezone changed; check callback availability again")
-    start, end = datetime.fromisoformat(payload["start"]), datetime.fromisoformat(payload["end"])
+    start, end = payload["start"], payload["end"]
     try:
         busy = await calendar_call(
-            session, integration, "freebusy", start=start, end=end, timezone=payload["timezone"]
+            session, integration, "freebusy", start=start, end=end, timezone=contact.timezone
         )
     except SchedulingError as exc:
         raise HTTPException(502, "Google Calendar availability could not be checked") from exc
@@ -453,19 +625,19 @@ async def book(body: BookRequest, session: AsyncSession = Session, _: None = Run
     callback = Callback(
         id=new_id(),
         request_key=f"human:{new_id()}",
-        contact_id=body.contact_id,
-        agent_version_id=body.agent_version_id,
+        contact_id=run.contact_id,
+        agent_version_id=run.agent_version_id,
         due_at=start,
-        timezone=payload["timezone"],
-        original_phrase=payload.get("timeframe", "callback"),
+        timezone=contact.timezone,
+        original_phrase="selected callback slot",
         status="scheduled",
         callback_mode="human",
-        requested_window_start=datetime.fromisoformat(payload["window_start"]),
-        requested_window_end=datetime.fromisoformat(payload["window_end"]),
+        requested_window_start=None,
+        requested_window_end=None,
         scheduled_start=start,
         scheduled_end=end,
-        role_key=payload["role"],
-        bookable_person_key=payload["person"],
+        role_key=role.key,
+        bookable_person_key=person.key,
         calendar_integration_id=integration.id,
         reason=body.reason,
     )
@@ -474,8 +646,8 @@ async def book(body: BookRequest, session: AsyncSession = Session, _: None = Run
     event = {
         "summary": f"Callback — {contact.name}",
         "description": f"Scheduled by Voice AI\nReason: {body.reason}\nContact: {contact.name}\nPhone: {contact.phone_number}\nCallback ID: {callback.id}",
-        "start": {"dateTime": start.isoformat(), "timeZone": payload["timezone"]},
-        "end": {"dateTime": end.isoformat(), "timeZone": payload["timezone"]},
+        "start": {"dateTime": start.isoformat(), "timeZone": contact.timezone},
+        "end": {"dateTime": end.isoformat(), "timeZone": contact.timezone},
         "transparency": "opaque",
         "extendedProperties": {"private": {"voice_ai_callback_id": callback.id}},
     }
@@ -501,6 +673,6 @@ async def book(body: BookRequest, session: AsyncSession = Session, _: None = Run
     return {
         "status": "confirmed",
         "callback_id": callback.id,
-        "scheduled_time": format_local_callback_time(start, payload["timezone"]),
+        "scheduled_time": format_local_callback_time(start, contact.timezone),
         "duration_minutes": int((end - start).total_seconds() / 60),
     }

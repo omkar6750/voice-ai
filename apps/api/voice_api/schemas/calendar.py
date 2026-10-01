@@ -1,5 +1,6 @@
 """Strict response contracts for human callback scheduling."""
 
+from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -63,3 +64,42 @@ CallbackBookingResponse = Annotated[
     CallbackBookingConfirmedResponse | CallbackSlotConflictResponse,
     Field(discriminator="status"),
 ]
+
+
+class CalendarTestAvailabilityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    limit: int = Field(default=5, ge=1, le=5)
+
+
+class CalendarTestSlotResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    slot_id: str
+    display: str
+    start_at: datetime
+    end_at: datetime
+
+
+class CalendarTestAvailabilityResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    timezone: str
+    slots: list[CalendarTestSlotResponse]
+
+
+class CalendarTestBookingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    slot_id: str
+    summary: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=2000)
+
+
+class CalendarTestBookingResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["confirmed"]
+    event_id: str
+    scheduled_time: str
+    duration_minutes: Literal[15]

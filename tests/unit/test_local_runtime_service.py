@@ -120,11 +120,27 @@ async def test_local_callback_invokes_calendar_without_service_token(monkeypatch
     result = await local.local_callback(
         "check_callback_availability",
         "run-1",
-        {"agent_version_id": "version-1", "timeframe": "tomorrow", "role": "sales"},
+        {"run_id": "another-run", "timeframe": "tomorrow", "role": "sales"},
     )
 
     assert result == {"status": "no_availability"}
+    assert available.await_args.args[0].run_id == "run-1"
     assert available.await_args.args[2] is None
+
+
+@pytest.mark.asyncio
+async def test_local_callback_returns_safe_client_error_to_agent(monkeypatch):
+    booking = AsyncMock(side_effect=HTTPException(422, "Invalid callback slot"))
+    monkeypatch.setattr(local, "SessionFactory", fake_session)
+    monkeypatch.setattr(calendar, "book", booking)
+
+    result = await local.local_callback(
+        "book_callback",
+        "run-1",
+        {"run_id": "run-1", "slot_id": "invalid", "reason": "Caller request"},
+    )
+
+    assert result == {"status": "error", "error": "Invalid callback slot"}
 
 
 def test_callback_slot_uses_dedicated_key_not_runtime_token(monkeypatch):

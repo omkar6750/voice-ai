@@ -1,8 +1,9 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 from voice_api.api.v1.endpoints import calendar as calendar_endpoint
 from voice_api.models import CalendarIntegration
 from voice_api.services import calendar_service
@@ -13,7 +14,112 @@ from voice_api.services.calendar_service import (
     format_local_callback_time,
     generate_slots,
     resolve_timeframe,
+    sign_callback_slot,
+    verify_callback_slot,
 )
+
+
+def test_compact_callback_slot_round_trip_is_bound_to_run(monkeypatch):
+    monkeypatch.setattr(
+        calendar_service,
+        "get_settings",
+        lambda: SimpleNamespace(callback_slot_signing_key="test-key"),
+    )
+    start = datetime(2026, 10, 2, 11, 30, tzinfo=UTC)
+    expires_at = datetime(2026, 10, 1, 10, 24, tzinfo=UTC)
+
+    token = sign_callback_slot(
+        run_id="c530384e-c237-4f7b-82bb-4bebad84827d",
+        calendar_integration_id="6db92f26-467b-4237-bceb-cb6dd980391d",
+        start=start,
+        duration_minutes=30,
+        expires_at=expires_at,
+        role_index=2,
+    )
+
+    assert len(token) == 58
+    claims = verify_callback_slot(
+        token,
+        run_id="c530384e-c237-4f7b-82bb-4bebad84827d",
+        reference=datetime(2026, 10, 1, 10, 20, tzinfo=UTC),
+    )
+    assert claims == {
+        "integration": "6db92f26-467b-4237-bceb-cb6dd980391d",
+        "start": start,
+        "end": start + timedelta(minutes=30),
+        "expires_at": expires_at,
+        "role_index": 2,
+    }
+
+
+def test_compact_callback_slot_rejects_another_run(monkeypatch):
+    monkeypatch.setattr(
+        calendar_service,
+        "get_settings",
+        lambda: SimpleNamespace(callback_slot_signing_key="test-key"),
+    )
+    token = sign_callback_slot(
+        run_id="c530384e-c237-4f7b-82bb-4bebad84827d",
+        calendar_integration_id="6db92f26-467b-4237-bceb-cb6dd980391d",
+        start=datetime(2026, 10, 2, 11, 30, tzinfo=UTC),
+        duration_minutes=30,
+        expires_at=datetime(2026, 10, 1, 10, 24, tzinfo=UTC),
+        role_index=0,
+    )
+
+    with pytest.raises(SchedulingError, match="Invalid callback slot"):
+        verify_callback_slot(
+            token,
+            run_id="b56de66c-9046-4699-9f9a-8a3b4088d84f",
+            reference=datetime(2026, 10, 1, 10, 20, tzinfo=UTC),
+        )
+
+
+def test_compact_callback_slot_rejects_tampering(monkeypatch):
+    monkeypatch.setattr(
+        calendar_service,
+        "get_settings",
+        lambda: SimpleNamespace(callback_slot_signing_key="test-key"),
+    )
+    token = sign_callback_slot(
+        run_id="c530384e-c237-4f7b-82bb-4bebad84827d",
+        calendar_integration_id="6db92f26-467b-4237-bceb-cb6dd980391d",
+        start=datetime(2026, 10, 2, 11, 30, tzinfo=UTC),
+        duration_minutes=30,
+        expires_at=datetime(2026, 10, 1, 10, 24, tzinfo=UTC),
+        role_index=0,
+    )
+    replacement = "A" if token[-1] != "A" else "B"
+
+    with pytest.raises(SchedulingError, match="Invalid callback slot"):
+        verify_callback_slot(
+            token[:-1] + replacement,
+            run_id="c530384e-c237-4f7b-82bb-4bebad84827d",
+            reference=datetime(2026, 10, 1, 10, 20, tzinfo=UTC),
+        )
+
+
+def test_compact_callback_slot_rejects_expired_token(monkeypatch):
+    monkeypatch.setattr(
+        calendar_service,
+        "get_settings",
+        lambda: SimpleNamespace(callback_slot_signing_key="test-key"),
+    )
+    token = sign_callback_slot(
+        run_id="c530384e-c237-4f7b-82bb-4bebad84827d",
+        calendar_integration_id="6db92f26-467b-4237-bceb-cb6dd980391d",
+        start=datetime(2026, 10, 2, 11, 30, tzinfo=UTC),
+        duration_minutes=30,
+        expires_at=datetime(2026, 10, 1, 10, 24, tzinfo=UTC),
+        role_index=0,
+    )
+
+    with pytest.raises(SchedulingError, match="expired"):
+        verify_callback_slot(
+            token,
+            run_id="c530384e-c237-4f7b-82bb-4bebad84827d",
+            reference=datetime(2026, 10, 1, 10, 25, tzinfo=UTC),
+        )
 
 
 def test_tomorrow_morning_is_bounded_and_timezone_aware():
@@ -109,7 +215,9 @@ async def test_freebusy_calendar_errors_are_not_reported_as_free(monkeypatch):
         return object()
 
     monkeypatch.setattr("voice_api.services.calendar_service.credentials_for", credentials)
-    monkeypatch.setattr("voice_api.services.calendar_service.build", lambda *_args, **_kwargs: Service())
+    monkeypatch.setattr(
+        "voice_api.services.calendar_service.build", lambda *_args, **_kwargs: Service()
+    )
     with pytest.raises(SchedulingError, match="could not verify calendar availability"):
         await calendar_call(
             None,
@@ -138,10 +246,15 @@ async def test_availability_provider_failure_is_not_reported_as_empty_slots(monk
         slot_duration_minutes=15,
         minimum_notice_minutes=0,
     )
+    run = SimpleNamespace(
+        id="c530384e-c237-4f7b-82bb-4bebad84827d",
+        agent_version_id="agent-version",
+        contact_id="contact-1",
+    )
     version = SimpleNamespace(config={})
     contact = SimpleNamespace(timezone="Asia/Kolkata")
     integration = SimpleNamespace(status="connected", timezone="UTC")
-    session = SimpleNamespace(get=AsyncMock(side_effect=[version, contact, integration]))
+    session = SimpleNamespace(get=AsyncMock(side_effect=[run, version, contact, integration]))
 
     async def failed_freebusy(*_args, **_kwargs):
         raise SchedulingError("Google Calendar could not verify calendar availability")
@@ -154,8 +267,7 @@ async def test_availability_provider_failure_is_not_reported_as_empty_slots(monk
     monkeypatch.setattr(calendar_endpoint, "calendar_call", failed_freebusy)
     result = await calendar_endpoint.availability(
         calendar_endpoint.AvailabilityRequest(
-            agent_version_id="agent-version",
-            contact_id="contact-1",
+            run_id=run.id,
             timeframe="tomorrow morning",
             role="sales",
         ),
@@ -174,12 +286,17 @@ async def test_availability_uses_contact_timezone_and_skips_disconnected_person(
         lambda: SimpleNamespace(callback_slot_signing_key="test-key"),
     )
     role = SimpleNamespace(key="sales", enabled=True)
+    calendar_ids = [
+        "6db92f26-467b-4237-bceb-cb6dd980391d",
+        "2863afc7-956c-4822-84b0-33f465e524cc",
+        "0b4e927f-8d55-4cb2-a559-1b113a657bc3",
+    ]
     people = [
         SimpleNamespace(
             key=f"employee-{index}",
             roles=["sales"],
             enabled=True,
-            calendar_integration_id=f"calendar-{index}",
+            calendar_integration_id=calendar_ids[index - 1],
             timezone="America/Los_Angeles",
         )
         for index in (1, 2, 3)
@@ -191,14 +308,19 @@ async def test_availability_uses_contact_timezone_and_skips_disconnected_person(
         slot_duration_minutes=15,
         minimum_notice_minutes=0,
     )
+    run = SimpleNamespace(
+        id="c530384e-c237-4f7b-82bb-4bebad84827d",
+        agent_version_id="agent-version",
+        contact_id="contact-1",
+    )
     version = SimpleNamespace(config={})
     contact = SimpleNamespace(timezone="Asia/Kolkata")
     calendars = [
         None,
-        SimpleNamespace(id="calendar-2", status="connected", timezone="UTC"),
-        SimpleNamespace(id="calendar-3", status="connected", timezone="UTC"),
+        SimpleNamespace(id=calendar_ids[1], status="connected", timezone="UTC"),
+        SimpleNamespace(id=calendar_ids[2], status="connected", timezone="UTC"),
     ]
-    session = SimpleNamespace(get=AsyncMock(side_effect=[version, contact, *calendars]))
+    session = SimpleNamespace(get=AsyncMock(side_effect=[run, version, contact, *calendars]))
     monkeypatch.setattr(
         calendar_endpoint.AgentConfig,
         "model_validate",
@@ -213,8 +335,7 @@ async def test_availability_uses_contact_timezone_and_skips_disconnected_person(
     monkeypatch.setattr(calendar_endpoint, "calendar_call", freebusy)
     result = await calendar_endpoint.availability(
         calendar_endpoint.AvailabilityRequest(
-            agent_version_id="agent-version",
-            contact_id="contact-1",
+            run_id=run.id,
             timeframe="tomorrow morning",
             role="sales",
         ),
@@ -224,26 +345,29 @@ async def test_availability_uses_contact_timezone_and_skips_disconnected_person(
 
     assert result["status"] == "partial_availability"
     assert len(result["slots"]) == 3
-    assert [call[0] for call in calls] == ["calendar-2", "calendar-3"]
+    assert [call[0] for call in calls] == calendar_ids[1:]
     assert [call[1] for call in calls] == ["Asia/Kolkata", "Asia/Kolkata"]
     assert calls[0][2].key == "Asia/Kolkata"
     assert calls[1][2].key == "Asia/Kolkata"
-    from voice_api.services.calendar_service import verify_slot
-
-    assignment = verify_slot(result["slots"][0]["slot_id"])
-    assert assignment["person"] == "employee-2"
-    assert assignment["timezone"] == "Asia/Kolkata"
+    assignment = verify_callback_slot(result["slots"][0]["slot_id"], run_id=run.id)
+    assert assignment["integration"] == calendar_ids[1]
+    assert assignment["role_index"] == 0
+    assert len(result["slots"][0]["slot_id"]) == 58
 
 
 @pytest.mark.asyncio
 async def test_availability_requires_contact_timezone_before_calendar_queries(monkeypatch):
+    run = SimpleNamespace(
+        id="c530384e-c237-4f7b-82bb-4bebad84827d",
+        agent_version_id="agent-version",
+        contact_id="contact-1",
+    )
     version = SimpleNamespace(config={})
     contact = SimpleNamespace(timezone=None)
-    session = SimpleNamespace(get=AsyncMock(side_effect=[version, contact]))
+    session = SimpleNamespace(get=AsyncMock(side_effect=[run, version, contact]))
     result = await calendar_endpoint.availability(
         calendar_endpoint.AvailabilityRequest(
-            agent_version_id="agent-version",
-            contact_id="contact-1",
+            run_id=run.id,
             timeframe="tomorrow morning",
             role="sales",
         ),
@@ -251,7 +375,7 @@ async def test_availability_requires_contact_timezone_before_calendar_queries(mo
         _=None,
     )
     assert result["status"] == "timezone_required"
-    assert session.get.await_count == 2
+    assert session.get.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -270,10 +394,15 @@ async def test_availability_with_only_disconnected_calendars_is_not_no_availabil
         slot_duration_minutes=15,
         minimum_notice_minutes=0,
     )
+    run = SimpleNamespace(
+        id="c530384e-c237-4f7b-82bb-4bebad84827d",
+        agent_version_id="agent-version",
+        contact_id="contact-1",
+    )
     version = SimpleNamespace(config={})
     contact = SimpleNamespace(timezone="Asia/Kolkata")
     disconnected = SimpleNamespace(status="disconnected")
-    session = SimpleNamespace(get=AsyncMock(side_effect=[version, contact, disconnected]))
+    session = SimpleNamespace(get=AsyncMock(side_effect=[run, version, contact, disconnected]))
     monkeypatch.setattr(
         calendar_endpoint.AgentConfig,
         "model_validate",
@@ -282,8 +411,7 @@ async def test_availability_with_only_disconnected_calendars_is_not_no_availabil
 
     result = await calendar_endpoint.availability(
         calendar_endpoint.AvailabilityRequest(
-            agent_version_id="agent-version",
-            contact_id="contact-1",
+            run_id=run.id,
             timeframe="tomorrow morning",
             role="sales",
         ),
@@ -295,28 +423,37 @@ async def test_availability_with_only_disconnected_calendars_is_not_no_availabil
 
 
 @pytest.mark.asyncio
-async def test_booking_rejects_slot_when_contact_timezone_has_changed(monkeypatch):
-    from fastapi import HTTPException
-
+async def test_booking_rejects_slot_when_callback_configuration_has_changed(monkeypatch):
+    run = SimpleNamespace(
+        id="c530384e-c237-4f7b-82bb-4bebad84827d",
+        agent_version_id="agent-version",
+        contact_id="contact-1",
+    )
+    version = SimpleNamespace(config={})
+    contact = SimpleNamespace(timezone="Asia/Dubai")
     monkeypatch.setattr(
         calendar_endpoint,
-        "verify_slot",
-        lambda _slot: {
-            "agent_version_id": "agent-version",
-            "contact_id": "contact-1",
+        "verify_callback_slot",
+        lambda _slot, *, run_id: {
             "integration": "calendar-integration",
-            "timezone": "Asia/Kolkata",
+            "start": datetime(2026, 10, 1, 4, 30, tzinfo=UTC),
+            "end": datetime(2026, 10, 1, 4, 45, tzinfo=UTC),
+            "role_index": 1,
         },
     )
-    integration = SimpleNamespace(status="connected")
-    contact = SimpleNamespace(timezone="Asia/Dubai")
-    session = SimpleNamespace(get=AsyncMock(side_effect=[integration, contact]))
+    monkeypatch.setattr(
+        calendar_endpoint.AgentConfig,
+        "model_validate",
+        lambda _config: SimpleNamespace(
+            callback_scheduling=SimpleNamespace(roles=[], bookable_people=[])
+        ),
+    )
+    session = SimpleNamespace(get=AsyncMock(side_effect=[run, version, contact]))
 
     with pytest.raises(HTTPException) as error:
         await calendar_endpoint.book(
             calendar_endpoint.BookRequest(
-                agent_version_id="agent-version",
-                contact_id="contact-1",
+                run_id=run.id,
                 slot_id="signed-slot",
                 reason="Caller request",
             ),
@@ -325,30 +462,42 @@ async def test_booking_rejects_slot_when_contact_timezone_has_changed(monkeypatc
         )
 
     assert error.value.status_code == 409
-    assert "timezone changed" in error.value.detail
+    assert "configuration changed" in error.value.detail
 
 
 @pytest.mark.asyncio
 async def test_booking_uses_signed_person_calendar_and_persists_confirmed_callback(monkeypatch):
+    run = SimpleNamespace(
+        id="c530384e-c237-4f7b-82bb-4bebad84827d",
+        agent_version_id="agent-version",
+        contact_id="contact-1",
+    )
     slot = {
-        "agent_version_id": "agent-version",
-        "contact_id": "contact-1",
         "integration": "calendar-integration",
-        "timezone": "Asia/Kolkata",
-        "start": "2026-10-01T10:00:00+05:30",
-        "end": "2026-10-01T10:15:00+05:30",
-        "window_start": "2026-10-01T09:00:00+05:30",
-        "window_end": "2026-10-01T12:00:00+05:30",
-        "timeframe": "tomorrow morning",
-        "role": "sales",
-        "person": "employee-2",
+        "start": datetime(2026, 10, 1, 4, 30, tzinfo=UTC),
+        "end": datetime(2026, 10, 1, 4, 45, tzinfo=UTC),
+        "role_index": 0,
     }
-    monkeypatch.setattr(calendar_endpoint, "verify_slot", lambda _slot: slot)
+    role = SimpleNamespace(key="sales", enabled=True)
+    person = SimpleNamespace(
+        key="employee-2",
+        roles=["sales"],
+        enabled=True,
+        calendar_integration_id="calendar-integration",
+    )
+    scheduling = SimpleNamespace(roles=[role], bookable_people=[person])
+    version = SimpleNamespace(config={})
+    monkeypatch.setattr(calendar_endpoint, "verify_callback_slot", lambda _slot, *, run_id: slot)
+    monkeypatch.setattr(
+        calendar_endpoint.AgentConfig,
+        "model_validate",
+        lambda _config: SimpleNamespace(callback_scheduling=scheduling),
+    )
     integration = SimpleNamespace(id="calendar-integration", status="connected")
     contact = SimpleNamespace(timezone="Asia/Kolkata", name="Caller", phone_number="+15551234567")
     callbacks = []
     session = SimpleNamespace(
-        get=AsyncMock(side_effect=[integration, contact]),
+        get=AsyncMock(side_effect=[run, version, contact, integration]),
         add=callbacks.append,
         flush=AsyncMock(),
         commit=AsyncMock(),
@@ -363,8 +512,7 @@ async def test_booking_uses_signed_person_calendar_and_persists_confirmed_callba
     monkeypatch.setattr(calendar_endpoint, "calendar_call", calendar_operation)
     result = await calendar_endpoint.book(
         calendar_endpoint.BookRequest(
-            agent_version_id="agent-version",
-            contact_id="contact-1",
+            run_id=run.id,
             slot_id="signed-slot",
             reason="Caller requested a callback",
         ),
@@ -384,10 +532,16 @@ async def test_booking_uses_signed_person_calendar_and_persists_confirmed_callba
 
 @pytest.mark.asyncio
 async def test_availability_with_no_contact_id_requires_timezone():
-    session = SimpleNamespace(get=AsyncMock(return_value=SimpleNamespace(config={})))
+    run = SimpleNamespace(
+        id="c530384e-c237-4f7b-82bb-4bebad84827d",
+        agent_version_id="agent-version",
+        contact_id=None,
+    )
+    version = SimpleNamespace(config={})
+    session = SimpleNamespace(get=AsyncMock(side_effect=[run, version]))
     result = await calendar_endpoint.availability(
         calendar_endpoint.AvailabilityRequest(
-            agent_version_id="agent-version",
+            run_id=run.id,
             timeframe="tomorrow morning",
             role="sales",
         ),
@@ -395,7 +549,7 @@ async def test_availability_with_no_contact_id_requires_timezone():
         _=None,
     )
     assert result["status"] == "timezone_required"
-    assert session.get.await_count == 1
+    assert session.get.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -432,7 +586,167 @@ async def test_calendar_writes_use_configured_calendar_id(monkeypatch, operation
         return object()
 
     monkeypatch.setattr("voice_api.services.calendar_service.credentials_for", credentials)
-    monkeypatch.setattr("voice_api.services.calendar_service.build", lambda *_args, **_kwargs: Service())
+    monkeypatch.setattr(
+        "voice_api.services.calendar_service.build", lambda *_args, **_kwargs: Service()
+    )
     kwargs = {"event": {"summary": "Test"}} if operation == "insert" else {"event_id": "event-123"}
     await calendar_call(None, integration, operation, **kwargs)
     assert calls[0][1] == integration.calendar_id
+
+
+@pytest.mark.asyncio
+async def test_calendar_test_availability_returns_five_signed_org_slots(monkeypatch):
+    integration = SimpleNamespace(
+        id="calendar-integration",
+        status="connected",
+        timezone="Asia/Kolkata",
+    )
+    session = SimpleNamespace(
+        get=AsyncMock(return_value=integration),
+        sync_session=object(),
+    )
+    start = datetime(2026, 10, 2, 10, 0, tzinfo=UTC)
+    generated = [
+        (start + timedelta(minutes=index * 15), start + timedelta(minutes=(index + 1) * 15))
+        for index in range(5)
+    ]
+
+    async def freebusy(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(calendar_endpoint, "calendar_call", freebusy)
+    monkeypatch.setattr(calendar_endpoint, "generate_slots", lambda *_args, **_kwargs: generated)
+    monkeypatch.setattr(calendar_endpoint, "required_organization", lambda _session: "org-1")
+    monkeypatch.setattr(
+        calendar_endpoint, "sign_slot", lambda payload: f"signed:{payload['start']}"
+    )
+
+    result = await calendar_endpoint.test_calendar_availability(
+        "calendar-integration",
+        calendar_endpoint.CalendarTestAvailabilityRequest(limit=5),
+        session=session,
+        _=None,
+    )
+
+    assert result["timezone"] == "Asia/Kolkata"
+    assert len(result["slots"]) == 5
+    assert result["slots"][0]["slot_id"].startswith("signed:")
+
+
+@pytest.mark.asyncio
+async def test_calendar_test_availability_reports_missing_signing_configuration(monkeypatch):
+    integration = SimpleNamespace(
+        id="calendar-integration",
+        status="connected",
+        timezone="UTC",
+    )
+    session = SimpleNamespace(
+        get=AsyncMock(return_value=integration),
+        sync_session=object(),
+    )
+    start = datetime(2026, 10, 2, 10, 0, tzinfo=UTC)
+
+    async def freebusy(*_args, **_kwargs):
+        return []
+
+    def missing_signing_key(_payload):
+        raise SchedulingError("Callback slot signing is not configured")
+
+    monkeypatch.setattr(calendar_endpoint, "calendar_call", freebusy)
+    monkeypatch.setattr(
+        calendar_endpoint,
+        "generate_slots",
+        lambda *_args, **_kwargs: [(start, start + timedelta(minutes=15))],
+    )
+    monkeypatch.setattr(calendar_endpoint, "required_organization", lambda _session: "org-1")
+    monkeypatch.setattr(calendar_endpoint, "sign_slot", missing_signing_key)
+
+    with pytest.raises(HTTPException) as error:
+        await calendar_endpoint.test_calendar_availability(
+            "calendar-integration",
+            calendar_endpoint.CalendarTestAvailabilityRequest(limit=5),
+            session=session,
+            _=None,
+        )
+
+    assert error.value.status_code == 503
+    assert error.value.detail == "Calendar slot signing is not configured"
+
+
+@pytest.mark.asyncio
+async def test_calendar_test_booking_rechecks_and_inserts_test_event(monkeypatch):
+    slot = {
+        "purpose": "calendar_integration_test",
+        "organization_id": "org-1",
+        "integration": "calendar-integration",
+        "timezone": "UTC",
+        "start": "2026-10-02T10:00:00+00:00",
+        "end": "2026-10-02T10:15:00+00:00",
+    }
+    integration = SimpleNamespace(
+        id="calendar-integration",
+        status="connected",
+        timezone="UTC",
+    )
+    session = SimpleNamespace(
+        get=AsyncMock(return_value=integration),
+        commit=AsyncMock(),
+        sync_session=object(),
+    )
+    calls = []
+
+    async def calendar_operation(_session, _integration, operation, **kwargs):
+        calls.append((operation, kwargs))
+        return [] if operation == "freebusy" else {"id": "event-test-1"}
+
+    monkeypatch.setattr(calendar_endpoint, "verify_slot", lambda _value: slot)
+    monkeypatch.setattr(calendar_endpoint, "required_organization", lambda _session: "org-1")
+    monkeypatch.setattr(calendar_endpoint, "calendar_call", calendar_operation)
+
+    result = await calendar_endpoint.test_calendar_booking(
+        "calendar-integration",
+        calendar_endpoint.CalendarTestBookingRequest(
+            slot_id="signed-slot",
+            summary="Calendar test",
+            description="Created before a demo call",
+        ),
+        session=session,
+        _=None,
+    )
+
+    assert result["status"] == "confirmed"
+    assert result["event_id"] == "event-test-1"
+    assert [operation for operation, _kwargs in calls] == ["freebusy", "insert"]
+    assert calls[1][1]["event"]["extendedProperties"]["private"] == {
+        "voice_ai_integration_test": "true"
+    }
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_calendar_test_booking_rejects_slot_from_another_integration(monkeypatch):
+    monkeypatch.setattr(
+        calendar_endpoint,
+        "verify_slot",
+        lambda _value: {
+            "purpose": "calendar_integration_test",
+            "organization_id": "org-1",
+            "integration": "another-calendar",
+        },
+    )
+    monkeypatch.setattr(calendar_endpoint, "required_organization", lambda _session: "org-1")
+    session = SimpleNamespace(sync_session=object(), get=AsyncMock())
+
+    with pytest.raises(HTTPException) as error:
+        await calendar_endpoint.test_calendar_booking(
+            "calendar-integration",
+            calendar_endpoint.CalendarTestBookingRequest(
+                slot_id="signed-slot",
+                summary="Calendar test",
+            ),
+            session=session,
+            _=None,
+        )
+
+    assert error.value.status_code == 409
+    assert session.get.await_count == 0

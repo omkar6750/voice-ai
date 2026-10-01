@@ -97,10 +97,18 @@ async def local_callback(name: str, run_id: str, payload: dict) -> dict:
         book,
     )
 
+    payload = {**payload, "run_id": run_id}
     async with SessionFactory() as session:
         await bind_run_organization(session, run_id)
-        if name == "check_callback_availability":
-            return await availability(AvailabilityRequest.model_validate(payload), session, None)
-        if name == "book_callback":
-            return await book(BookRequest.model_validate(payload), session, None)
+        try:
+            if name == "check_callback_availability":
+                return await availability(
+                    AvailabilityRequest.model_validate(payload), session, None
+                )
+            if name == "book_callback":
+                return await book(BookRequest.model_validate(payload), session, None)
+        except HTTPException as exc:
+            if 400 <= exc.status_code < 500:
+                return {"status": "error", "error": str(exc.detail)}
+            raise
     raise ValueError("Unsupported local callback operation")

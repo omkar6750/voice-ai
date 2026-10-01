@@ -1,0 +1,187 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.pipecat.ai/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Actions
+
+> Run custom functionality at set points in a Pipecat Flows node: built-in tts_say, end_conversation, function, and custom actions.
+
+Actions allow you to execute custom functionality at specific points in your conversation flow, giving you precise control over timing and sequencing.
+
+## Action Types
+
+* `pre_actions` execute immediately when transitioning to a new node, *before* the LLM inference begins.
+* `post_actions` execute after the LLM inference completes and any TTS has finished speaking.
+
+## Built-in Actions
+
+Pipecat Flows includes several ready-to-use actions for common scenarios.
+
+| Action type | Python required |
+| - | - |
+| `tts_say` | None. A `handler` is not allowed. |
+| `end_conversation` | None. A `handler` is not allowed. |
+| `function` | A handler, named in the config. |
+| A custom type | A handler, named in the config or registered in code. |
+
+### tts\_say
+
+Speak a phrase immediately (useful for "please wait" messages):
+
+<Tabs>
+  <Tab title="Declarative">
+    ```yaml theme={null}
+    pre_actions:
+      - type: tts_say
+        text: Please hold while I process your request...
+    ```
+  </Tab>
+
+  <Tab title="Programmatic">
+    ```python theme={null}
+    "pre_actions": [
+        {
+            "type": "tts_say",
+            "text": "Please hold while I process your request..."
+        }
+    ]
+    ```
+  </Tab>
+</Tabs>
+
+The spoken text is appended to the LLM context by default. To prevent the text from being added to the context, set `append_text_to_context` to false:
+
+<Tabs>
+  <Tab title="Declarative">
+    ```yaml theme={null}
+    pre_actions:
+      - type: tts_say
+        text: Processing...
+        append_text_to_context: false
+    ```
+  </Tab>
+
+  <Tab title="Programmatic">
+    ```python theme={null}
+    "pre_actions": [
+        {
+            "type": "tts_say",
+            "text": "Processing...",
+            "append_text_to_context": False
+        }
+    ]
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+  A `tts_say` action's `text` may contain `{{ key }}` placeholders, filled from
+  the manager's state when the node is entered. See
+  [Placeholders](/pipecat/flows/state-management#placeholders).
+</Tip>
+
+### end\_conversation
+
+Gracefully terminate the conversation:
+
+<Tabs>
+  <Tab title="Declarative">
+    ```yaml theme={null}
+    post_actions:
+      - type: end_conversation
+        text: Thank you for your time!
+    ```
+  </Tab>
+
+  <Tab title="Programmatic">
+    ```python theme={null}
+    "post_actions": [
+        {
+            "type": "end_conversation",
+            "text": "Thank you for your time!"
+        }
+    ]
+    ```
+  </Tab>
+</Tabs>
+
+The goodbye text is appended to the LLM context by default. Set `append_text_to_context` to false to prevent that, the same way as for `tts_say`.
+
+### function
+
+Execute a custom function at the specified timing. In a config, `handler` is the *name* of a callable in the handlers the `Flow` was constructed with; in code it is the callable itself:
+
+<Tabs>
+  <Tab title="Declarative">
+    ```yaml theme={null}
+    pre_actions:
+      - type: function
+        handler: check_kitchen_status
+    ```
+
+    ```python handlers.py theme={null}
+    async def check_kitchen_status(action: dict, flow_manager: FlowManager) -> None:
+        """Check if the kitchen is open and log status."""
+        logger.info("Checking kitchen status")
+    ```
+  </Tab>
+
+  <Tab title="Programmatic">
+    ```python theme={null}
+    "post_actions": [
+        {
+            "type": "function",
+            "handler": end_conversation_handler
+        }
+    ]
+    ```
+  </Tab>
+</Tabs>
+
+A `function` action requires a handler; a config that omits one fails to load. The handler runs inline in the pipeline, queued behind the bot's turn, which is what makes its timing predictable.
+
+## Custom Actions
+
+You can define your own actions to handle specific business logic or integrations. In most cases, consider using a **function action** first, as it executes at the expected time in the pipeline.
+
+A custom action is a type Flows doesn't provide. There are two ways to supply its code.
+
+**Name a handler in the config.** Like a `function` action, but with your own type. The handler runs immediately when the node's actions execute, rather than being queued in the pipeline:
+
+```yaml theme={null}
+pre_actions:
+  - type: notify_slack
+    handler: notify_slack
+    channel: "#support"
+    text: Session started
+```
+
+**Register it in code.** A custom type with no `handler` in the config must be registered with `register_action()`, which is also how a programmatic flow supplies every custom action:
+
+```python theme={null}
+async def notify_slack(action: dict, flow_manager: FlowManager):
+    channel = action.get("channel", "#general")
+    await slack_client.post_message(channel=channel, text=action["text"])
+
+flow_manager.register_action("notify_slack", notify_slack)
+```
+
+Either way, any keys beyond `type` and `handler` pass through to the handler on the `action` dict — `channel` and `text` above.
+
+<Note>
+  Action handlers should accept `(action, flow_manager)`. Single-argument
+  handlers `(action)` are deprecated and will be removed in 2.0.0.
+</Note>
+
+Once registered, a node uses it like any other action: `{"type": "notify_slack", "channel": "#support", "text": "Session started"}`.
+
+## Action Timing
+
+The execution order ensures predictable behavior:
+
+1. **Pre-actions** run first upon node entry (in the order they are defined)
+2. **LLM inference** processes the node's messages and functions
+3. **TTS** speaks the LLM's response
+4. **Post-actions** run after TTS completes (in the order they are defined)
+
+This timing guarantees that actions execute in the correct sequence, such as ensuring the bot finishes speaking before ending the conversation. Note that custom actions may not follow this predictable timing, which is another reason to prefer function actions when possible.

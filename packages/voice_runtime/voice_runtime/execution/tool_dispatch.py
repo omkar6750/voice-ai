@@ -518,15 +518,8 @@ class NativeToolDispatch:
                 )
 
             if name in ("check_callback_availability", "book_callback"):
-                contact = (
-                    self._snapshot.get("_resolved", {}).get("contact")
-                    or self._snapshot.get("contact_snapshot")
-                    or {}
-                )
                 payload = {
                     "run_id": self.run_id,
-                    "agent_version_id": self._snapshot.get("agent_version_id"),
-                    "contact_id": contact.get("id") or self._snapshot.get("contact_id"),
                 }
                 if name == "check_callback_availability":
                     payload.update(

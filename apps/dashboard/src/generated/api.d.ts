@@ -1828,6 +1828,40 @@ export interface paths {
         patch: operations["rename_calendar_api_v1_calendar_integrations__integration_id__patch"];
         trace?: never;
     };
+    "/api/v1/calendar-integrations/{integration_id}/test/availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Calendar Availability */
+        post: operations["test_calendar_availability_api_v1_calendar_integrations__integration_id__test_availability_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendar-integrations/{integration_id}/test/book": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Calendar Booking */
+        post: operations["test_calendar_booking_api_v1_calendar_integrations__integration_id__test_book_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/callback-scheduling/availability": {
         parameters: {
             query?: never;
@@ -3754,6 +3788,40 @@ export interface paths {
         patch: operations["rename_calendar_api_calendar_integrations__integration_id__patch"];
         trace?: never;
     };
+    "/api/calendar-integrations/{integration_id}/test/availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Calendar Availability */
+        post: operations["test_calendar_availability_api_calendar_integrations__integration_id__test_availability_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/calendar-integrations/{integration_id}/test/book": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Calendar Booking */
+        post: operations["test_calendar_booking_api_calendar_integrations__integration_id__test_book_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/callback-scheduling/availability": {
         parameters: {
             query?: never;
@@ -4013,10 +4081,8 @@ export interface components {
         };
         /** AvailabilityRequest */
         AvailabilityRequest: {
-            /** Agent Version Id */
-            agent_version_id: string;
-            /** Contact Id */
-            contact_id?: string | null;
+            /** Run Id */
+            run_id: string;
             /** Timeframe */
             timeframe: string;
             /** Role */
@@ -4075,10 +4141,8 @@ export interface components {
         };
         /** BookRequest */
         BookRequest: {
-            /** Agent Version Id */
-            agent_version_id: string;
-            /** Contact Id */
-            contact_id: string;
+            /** Run Id */
+            run_id: string;
             /** Slot Id */
             slot_id: string;
             /** Reason */
@@ -4140,11 +4204,72 @@ export interface components {
              */
             sample_rate: number;
         };
+        /** CalendarTestAvailabilityRequest */
+        CalendarTestAvailabilityRequest: {
+            /**
+             * Limit
+             * @default 5
+             */
+            limit: number;
+        };
+        /** CalendarTestAvailabilityResponse */
+        CalendarTestAvailabilityResponse: {
+            /** Timezone */
+            timezone: string;
+            /** Slots */
+            slots: components["schemas"]["CalendarTestSlotResponse"][];
+        };
+        /** CalendarTestBookingRequest */
+        CalendarTestBookingRequest: {
+            /** Slot Id */
+            slot_id: string;
+            /** Summary */
+            summary: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+        };
+        /** CalendarTestBookingResponse */
+        CalendarTestBookingResponse: {
+            /**
+             * Status
+             * @constant
+             */
+            status: "confirmed";
+            /** Event Id */
+            event_id: string;
+            /** Scheduled Time */
+            scheduled_time: string;
+            /**
+             * Duration Minutes
+             * @constant
+             */
+            duration_minutes: 15;
+        };
+        /** CalendarTestSlotResponse */
+        CalendarTestSlotResponse: {
+            /** Slot Id */
+            slot_id: string;
+            /** Display */
+            display: string;
+            /**
+             * Start At
+             * Format: date-time
+             */
+            start_at: string;
+            /**
+             * End At
+             * Format: date-time
+             */
+            end_at: string;
+        };
         /** CallLimits */
         CallLimits: {
             /**
              * Max Duration Secs
-             * @default 300
+             * @default 600
              */
             max_duration_secs: number;
             /**
@@ -11399,6 +11524,76 @@ export interface operations {
             };
         };
     };
+    test_calendar_availability_api_v1_calendar_integrations__integration_id__test_availability_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                integration_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalendarTestAvailabilityRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarTestAvailabilityResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_calendar_booking_api_v1_calendar_integrations__integration_id__test_book_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                integration_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalendarTestBookingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarTestBookingResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     availability_api_v1_callback_scheduling_availability_post: {
         parameters: {
             query?: {
@@ -15656,6 +15851,76 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_calendar_availability_api_calendar_integrations__integration_id__test_availability_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                integration_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalendarTestAvailabilityRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarTestAvailabilityResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_calendar_booking_api_calendar_integrations__integration_id__test_book_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                integration_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalendarTestBookingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarTestBookingResponse"];
                 };
             };
             /** @description Validation Error */

@@ -7,9 +7,11 @@ import hashlib
 import hmac
 import json
 import re
+import struct
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from google.auth.transport.requests import Request
@@ -28,6 +30,11 @@ SCOPES = [
     "https://www.googleapis.com/auth/calendar.freebusy",
     "https://www.googleapis.com/auth/calendar.events",
 ]
+
+_CALLBACK_SLOT_VERSION = 1
+_CALLBACK_SLOT = struct.Struct(">B16sIBIB")
+_CALLBACK_SLOT_TAG_BYTES = 16
+_CALLBACK_SLOT_DOMAIN = b"voice-ai/callback-slot/v1\x00"
 DAYPARTS = {"morning": (9, 12), "afternoon": (12, 17), "evening": (17, 20)}
 
 
@@ -91,9 +98,7 @@ def resolve_timeframe(
             raise SchedulingError("Could not understand the requested callback timeframe")
     date = (current + timedelta(days=day_offset)).date()
     remainder = text.strip()
-    if match := re.search(
-        r"(?:(?:at|after)\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", remainder
-    ):
+    if match := re.search(r"(?:(?:at|after)\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", remainder):
         hour, minute, meridiem = int(match.group(1)), int(match.group(2) or 0), match.group(3)
         if minute > 59 or (meridiem and not 1 <= hour <= 12):
             raise SchedulingError("The requested callback time is invalid")
@@ -166,8 +171,11 @@ async def _secret_value(session: AsyncSession, integration_id: str, name: str) -
     )
     if row is None:
         return None
-    return CredentialVault.from_env().decrypt(row.ciphertext, row.key_id,
-        scope=SecretScope(row.org_id, row.id, "google_calendar", row.name, row.version))
+    return CredentialVault.from_env().decrypt(
+        row.ciphertext,
+        row.key_id,
+        scope=SecretScope(row.org_id, row.id, "google_calendar", row.name, row.version),
+    )
 
 
 async def _put_secret(session: AsyncSession, integration_id: str, name: str, value: str) -> None:
@@ -180,13 +188,19 @@ async def _put_secret(session: AsyncSession, integration_id: str, name: str, val
     if row is None:
         from voice_api.db.tenant_scope import required_organization
 
-        row = CalendarIntegrationSecret(id=new_id(), org_id=required_organization(session.sync_session),
-            calendar_integration_id=integration_id, name=name, version=1)
+        row = CalendarIntegrationSecret(
+            id=new_id(),
+            org_id=required_organization(session.sync_session),
+            calendar_integration_id=integration_id,
+            name=name,
+            version=1,
+        )
         session.add(row)
     else:
         row.version += 1
-    encrypted = CredentialVault.from_env().encrypt(value,
-        scope=SecretScope(row.org_id, row.id, "google_calendar", name, row.version))
+    encrypted = CredentialVault.from_env().encrypt(
+        value, scope=SecretScope(row.org_id, row.id, "google_calendar", name, row.version)
+    )
     row.ciphertext, row.key_id = encrypted.ciphertext, encrypted.key_id
 
 
@@ -273,13 +287,17 @@ async def calendar_call(
         except (KeyError, TypeError, ValueError) as exc:
             raise SchedulingError("Google Calendar returned invalid availability data") from exc
     if operation == "insert":
-        return service.events().insert(
-            calendarId=integration.calendar_id or "primary", body=kwargs["event"]
-        ).execute()
+        return (
+            service.events()
+            .insert(calendarId=integration.calendar_id or "primary", body=kwargs["event"])
+            .execute()
+        )
     if operation == "delete":
-        return service.events().delete(
-            calendarId=integration.calendar_id or "primary", eventId=kwargs["event_id"]
-        ).execute()
+        return (
+            service.events()
+            .delete(calendarId=integration.calendar_id or "primary", eventId=kwargs["event_id"])
+            .execute()
+        )
     raise SchedulingError("Unsupported Google Calendar operation")
 
 
@@ -314,3 +332,105 @@ def verify_slot(value: str) -> dict:
     if datetime.fromisoformat(payload["expires_at"]) <= datetime.now(UTC):
         raise SchedulingError("Callback slot has expired")
     return payload
+
+
+def _slot_timestamp(value: datetime) -> int:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise SchedulingError("Callback slot times must include a timezone")
+    timestamp = int(value.timestamp())
+    if not 0 <= timestamp <= 0xFFFFFFFF:
+        raise SchedulingError("Callback slot time is outside the supported range")
+    return timestamp
+
+
+def _callback_slot_key() -> bytes:
+    key_value = get_settings().callback_slot_signing_key
+    if not key_value:
+        raise SchedulingError("Callback slot signing is not configured")
+    return key_value.encode()
+
+
+def _callback_slot_mac(key: bytes, run_id: str, payload: bytes) -> bytes:
+    try:
+        run_bytes = UUID(run_id).bytes
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise SchedulingError("Invalid callback run") from exc
+    return hmac.new(key, _CALLBACK_SLOT_DOMAIN + run_bytes + payload, hashlib.sha256).digest()[
+        :_CALLBACK_SLOT_TAG_BYTES
+    ]
+
+
+def sign_callback_slot(
+    *,
+    run_id: str,
+    calendar_integration_id: str,
+    start: datetime,
+    duration_minutes: int,
+    expires_at: datetime,
+    role_index: int,
+) -> str:
+    """Create a compact stateless callback offer bound to one run."""
+
+    if not 5 <= duration_minutes <= 120:
+        raise SchedulingError("Callback slot duration is invalid")
+    if not 0 <= role_index <= 0xFF:
+        raise SchedulingError("Callback role index is invalid")
+    try:
+        calendar_bytes = UUID(calendar_integration_id).bytes
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise SchedulingError("Invalid callback calendar") from exc
+    payload = _CALLBACK_SLOT.pack(
+        _CALLBACK_SLOT_VERSION,
+        calendar_bytes,
+        _slot_timestamp(start),
+        duration_minutes,
+        _slot_timestamp(expires_at),
+        role_index,
+    )
+    token = payload + _callback_slot_mac(_callback_slot_key(), run_id, payload)
+    return base64.urlsafe_b64encode(token).decode().rstrip("=")
+
+
+def verify_callback_slot(
+    value: str, *, run_id: str, reference: datetime | None = None
+) -> dict[str, Any]:
+    """Verify and decode a compact callback offer in the current run context."""
+
+    try:
+        encoded = value.encode("ascii")
+        token = base64.b64decode(
+            encoded + b"=" * (-len(encoded) % 4), altchars=b"-_", validate=True
+        )
+    except (UnicodeEncodeError, ValueError) as exc:
+        raise SchedulingError("Invalid callback slot") from exc
+    if base64.urlsafe_b64encode(token).decode().rstrip("=") != value:
+        raise SchedulingError("Invalid callback slot")
+    payload_size = _CALLBACK_SLOT.size
+    if len(token) != payload_size + _CALLBACK_SLOT_TAG_BYTES:
+        raise SchedulingError("Invalid callback slot")
+    payload, signature = token[:payload_size], token[payload_size:]
+    expected = _callback_slot_mac(_callback_slot_key(), run_id, payload)
+    if not hmac.compare_digest(signature, expected):
+        raise SchedulingError("Invalid callback slot")
+    try:
+        version, calendar_bytes, start_at, duration, expires_at, role_index = _CALLBACK_SLOT.unpack(
+            payload
+        )
+    except struct.error as exc:
+        raise SchedulingError("Invalid callback slot") from exc
+    if version != _CALLBACK_SLOT_VERSION or not 5 <= duration <= 120:
+        raise SchedulingError("Invalid callback slot")
+    current = reference or datetime.now(UTC)
+    if current.tzinfo is None or current.utcoffset() is None:
+        raise SchedulingError("Callback verification time must include a timezone")
+    expiry = datetime.fromtimestamp(expires_at, UTC)
+    if expiry <= current.astimezone(UTC):
+        raise SchedulingError("Callback slot has expired")
+    start = datetime.fromtimestamp(start_at, UTC)
+    return {
+        "integration": str(UUID(bytes=calendar_bytes)),
+        "start": start,
+        "end": start + timedelta(minutes=duration),
+        "expires_at": expiry,
+        "role_index": role_index,
+    }

@@ -39,6 +39,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useResource } from "@/lib/resources";
+import { CalendarIntegrationTestDialog } from "./CalendarIntegrationTestDialog";
 
 type CalendarIntegration = { id: string; display_name: string; provider: "google_calendar"; calendar_id: string; timezone: string; status: string; connected_at?: string | null; last_error?: string | null };
 
@@ -355,7 +356,7 @@ export function IntegrationsPage() {
           <div className="flex items-center gap-2"><Input aria-label="New calendar name" value={calendarLabel} onChange={(event) => setCalendarLabel(event.target.value)} placeholder="e.g. Omkar work calendar" /><Button onClick={() => void connectCalendar()}>Connect Google Calendar</Button></div>
         </div>
         <div className="mt-4 grid gap-2">
-          {calendars.data?.integrations.map((calendar) => <div key={calendar.id} className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2 text-sm"><div className="flex items-center gap-3"><span>{calendar.display_name} · {calendar.calendar_id}</span><StatusBadge value={calendar.status} /></div><div className="flex items-center gap-1"><Button variant="ghost" size="icon" aria-label={`Rename ${calendar.display_name}`} onClick={() => void renameCalendar(calendar)}><Pencil className="size-4" /></Button><Button variant="ghost" size="icon" aria-label={`Discard ${calendar.display_name}`} onClick={() => void discardCalendar(calendar.id)}><Trash2 className="size-4" /></Button></div></div>)}
+          {calendars.data?.integrations.map((calendar) => <div key={calendar.id} className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2 text-sm"><div className="flex items-center gap-3"><span>{calendar.display_name} · {calendar.calendar_id}</span><StatusBadge value={calendar.status} /></div><div className="flex items-center gap-1"><CalendarIntegrationTestDialog integrationId={calendar.id} integrationName={calendar.display_name} disabled={calendar.status !== "connected"} /><Button variant="ghost" size="icon" aria-label={`Rename ${calendar.display_name}`} onClick={() => void renameCalendar(calendar)}><Pencil className="size-4" /></Button><Button variant="ghost" size="icon" aria-label={`Discard ${calendar.display_name}`} onClick={() => void discardCalendar(calendar.id)}><Trash2 className="size-4" /></Button></div></div>)}
           {calendars.data?.integrations.length === 0 && <p className="text-sm text-muted-foreground">No Google Calendars connected.</p>}
         </div>
       </section>
