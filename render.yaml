@@ -10,7 +10,7 @@ services:
     region: singapore
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    autoDeployTrigger: "off"
+    autoDeployTrigger: "commit"
     healthCheckPath: /health
     maxShutdownDelaySeconds: 300
     envVars:
