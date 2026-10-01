@@ -558,6 +558,10 @@ async def availability(
         if len(slots) == 3:
             break
     partial = bool(failures)
+    speech_guidance = (
+        "Offer the display labels exactly as written; they are in the caller's local time. "
+        "Never read or alter a slot ID."
+    )
     return {
         "status": (
             "partial_availability" if partial else "available" if slots else "no_availability"
@@ -565,9 +569,9 @@ async def availability(
         "requested_timeframe": requested_timeframe,
         "slots": slots,
         "message": (
-            "Some calendars could not be checked; results may be incomplete."
+            f"Some calendars could not be checked; results may be incomplete. {speech_guidance}"
             if partial
-            else None
+            else speech_guidance
             if slots
             else "No callback slots are available in the requested window."
         ),

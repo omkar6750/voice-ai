@@ -259,7 +259,7 @@ async def tool_handlers(_: None = Operator) -> ToolHandlerCatalog:
             },
             {
                 "name": "check_callback_availability",
-                "description": "Find available human callback slots within a caller-requested timeframe and configured role.",
+                "description": "Find available human callback slots within a caller-requested timeframe and configured role. Offer returned display labels exactly as written because they are speech-ready local times; never read slot IDs or timezone identifiers aloud.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -274,7 +274,7 @@ async def tool_handlers(_: None = Operator) -> ToolHandlerCatalog:
             },
             {
                 "name": "book_callback",
-                "description": "Book one slot returned by check_callback_availability on the selected employee calendar.",
+                "description": "Book the caller-selected slot using the complete, unchanged slot_id returned by check_callback_availability. Wait for a successful result before confirming.",
                 "parameters": {
                     "type": "object",
                     "properties": {"slot_id": {"type": "string"}, "reason": {"type": "string"}},

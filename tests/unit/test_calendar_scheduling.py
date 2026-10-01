@@ -178,10 +178,17 @@ def test_time_without_at_prefix_uses_contact_timezone():
     assert window.end.isoformat() == "2026-09-26T10:45:00+05:30"
 
 
-def test_callback_confirmation_uses_portable_local_time_format():
+def test_callback_confirmation_uses_tts_safe_local_time_format():
     value = datetime(2026, 9, 26, 5, 0, tzinfo=UTC)
     assert format_local_callback_time(value, "Asia/Kolkata") == (
-        "Saturday at 10:30 AM (Asia/Kolkata)"
+        "Saturday at ten thirty in the morning"
+    )
+
+
+def test_callback_confirmation_speaks_whole_hours_without_timezone_identifiers():
+    value = datetime(2026, 10, 2, 11, 30, tzinfo=UTC)
+    assert format_local_callback_time(value, "Asia/Kolkata") == (
+        "Friday at five in the evening"
     )
 
 
@@ -345,6 +352,10 @@ async def test_availability_uses_contact_timezone_and_skips_disconnected_person(
 
     assert result["status"] == "partial_availability"
     assert len(result["slots"]) == 3
+    assert all("Asia/" not in slot["display"] for slot in result["slots"])
+    assert all(not any(char.isdigit() for char in slot["display"]) for slot in result["slots"])
+    assert "exactly as written" in result["message"]
+    assert "Never read or alter a slot ID" in result["message"]
     assert [call[0] for call in calls] == calendar_ids[1:]
     assert [call[1] for call in calls] == ["Asia/Kolkata", "Asia/Kolkata"]
     assert calls[0][2].key == "Asia/Kolkata"

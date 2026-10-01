@@ -36,6 +36,29 @@ _CALLBACK_SLOT = struct.Struct(">B16sIBIB")
 _CALLBACK_SLOT_TAG_BYTES = 16
 _CALLBACK_SLOT_DOMAIN = b"voice-ai/callback-slot/v1\x00"
 DAYPARTS = {"morning": (9, 12), "afternoon": (12, 17), "evening": (17, 20)}
+_SMALL_NUMBER_WORDS = (
+    "zero",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+    "eleven",
+    "twelve",
+    "thirteen",
+    "fourteen",
+    "fifteen",
+    "sixteen",
+    "seventeen",
+    "eighteen",
+    "nineteen",
+)
+_TENS_WORDS = {20: "twenty", 30: "thirty", 40: "forty", 50: "fifty"}
 
 
 @dataclass(frozen=True)
@@ -123,12 +146,36 @@ def resolve_timeframe(
     return TimeWindow(phrase, start, end, timezone)
 
 
+def _number_words(value: int) -> str:
+    if value < 20:
+        return _SMALL_NUMBER_WORDS[value]
+    tens, remainder = divmod(value, 10)
+    prefix = _TENS_WORDS[tens * 10]
+    return prefix if remainder == 0 else f"{prefix} {_SMALL_NUMBER_WORDS[remainder]}"
+
+
 def format_local_callback_time(value: datetime, timezone: str) -> str:
-    """Format a callback time consistently on Windows and POSIX hosts."""
+    """Format a local callback time for natural LLM-to-TTS speech."""
     local = value.astimezone(_zone(timezone))
     hour = local.hour % 12 or 12
-    meridiem = "AM" if local.hour < 12 else "PM"
-    return f"{local:%A} at {hour}:{local.minute:02d} {meridiem} ({timezone})"
+    if local.hour == 0 and local.minute == 0:
+        spoken_time = "midnight"
+    elif local.hour == 12 and local.minute == 0:
+        spoken_time = "noon"
+    else:
+        spoken_time = _number_words(hour)
+        if local.minute:
+            minute = _number_words(local.minute)
+            spoken_time = f"{spoken_time} {'oh ' if local.minute < 10 else ''}{minute}"
+        if 5 <= local.hour < 12:
+            spoken_time = f"{spoken_time} in the morning"
+        elif 12 <= local.hour < 17:
+            spoken_time = f"{spoken_time} in the afternoon"
+        elif 17 <= local.hour < 21:
+            spoken_time = f"{spoken_time} in the evening"
+        else:
+            spoken_time = f"{spoken_time} at night"
+    return f"{local:%A} at {spoken_time}"
 
 
 def generate_slots(
