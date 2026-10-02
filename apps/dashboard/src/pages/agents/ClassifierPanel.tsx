@@ -304,7 +304,7 @@ export function ClassifierPanel({
                 <div>
                   <h3 className="text-sm font-semibold">LLM Classifier</h3>
                   <p className="text-xs text-muted-foreground">
-                    Groq / Gemini / OpenRouter
+                    Groq / Gemini / OpenRouter / Isoquant
                   </p>
                 </div>
               </div>
@@ -513,19 +513,33 @@ export function ClassifierPanel({
                       id="classifier-provider"
                       value={currentProvider}
                       disabled={disabled}
-                      onChange={(e) =>
-                        update({
-                          llm: {
-                            ...currentLlm,
-                            provider: e.target
-                              .value as typeof currentLlm.provider,
-                            model:
-                              providers?.providers.find(
-                                (p) => p.provider === e.target.value,
-                              )?.models_by_slot?.llm?.[0] || "",
+                      onChange={(e) => {
+                        const provider = e.target.value as typeof currentLlm.provider;
+                        const next = {
+                          ...config,
+                          classifier: {
+                            ...classifier,
+                            llm: {
+                              ...currentLlm,
+                              provider,
+                              model:
+                                providers?.providers.find(
+                                  (p) => p.provider === provider,
+                                )?.models_by_slot?.llm?.[0] || "",
+                              reasoning_effort:
+                                provider === "isoquant"
+                                  ? "low" as const
+                                  : provider === "gemini" || provider === "openrouter"
+                                    ? "provider_default" as const
+                                    : "none" as const,
+                              models: provider === "openrouter" ? currentLlm.models : [],
+                              provider_preferences:
+                                provider === "openrouter" ? currentLlm.provider_preferences : null,
+                            },
                           },
-                        })
-                      }
+                        };
+                        change(bindCredential(next, "classifier", null));
+                      }}
                     >
                       {llmProviders.map((p) => (
                         <NativeSelectOption key={p.provider} value={p.provider}>

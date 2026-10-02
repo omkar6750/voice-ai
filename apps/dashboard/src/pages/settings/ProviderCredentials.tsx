@@ -20,6 +20,7 @@ const providers: Array<{ id: Provider; label: string; purpose: string }> = [
   { id: "sarvam", label: "Sarvam", purpose: "Chat models, speech recognition and speech synthesis" },
   { id: "groq", label: "Groq", purpose: "Voice agent, classifier and summarizer" },
   { id: "openrouter", label: "OpenRouter", purpose: "Account-specific models for LLM, classifier and summarizer" },
+  { id: "isoquant", label: "Isoquant", purpose: "GLM-5.3-Flash for voice, classification and summaries" },
   { id: "gemini", label: "Google Gemini", purpose: "Voice agent, classifier and knowledge search" },
   { id: "cartesia", label: "Cartesia", purpose: "Speech synthesis" },
   { id: "jev", label: "JEV", purpose: "Lead classification" },

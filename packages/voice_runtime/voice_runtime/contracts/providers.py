@@ -45,7 +45,7 @@ class OpenRouterProviderPreferences(ConfigModel):
 class LLMFallbackConfig(ConfigModel):
     """Optional first-response failover target for the main conversational LLM."""
 
-    provider: Literal["groq", "gemini", "openrouter", "sarvam"]
+    provider: Literal["groq", "gemini", "openrouter", "sarvam", "isoquant"]
     model: str = Field(min_length=1)
     first_token_timeout_seconds: float = Field(default=3.0, ge=0.5, le=10)
 
@@ -53,16 +53,18 @@ class LLMFallbackConfig(ConfigModel):
     def validate_sarvam_model(self):
         if self.provider == "sarvam" and self.model not in SARVAM_LLM_MODELS:
             raise ValueError("Select a stable Sarvam chat model supported by the runtime")
+        if self.provider == "isoquant" and self.model != "glm-5.3-flash":
+            raise ValueError("Select the supported Isoquant model glm-5.3-flash")
         return self
 
 
 class LLMConfig(ConfigModel):
-    provider: Literal["groq", "gemini", "openrouter", "sarvam"] = "groq"
+    provider: Literal["groq", "gemini", "openrouter", "sarvam", "isoquant"] = "groq"
     model: str = Field(default="qwen/qwen3.8-27b", min_length=1)
     temperature: float = Field(default=0.4, ge=0, le=2)
     max_tokens: int = Field(default=180, gt=0)
     top_p: float | None = Field(default=None, gt=0, le=1)
-    reasoning_effort: Literal["none", "provider_default", "low", "medium", "high"] = "none"
+    reasoning_effort: Literal["none", "provider_default", "low", "medium", "high", "max"] = "none"
     models: list[str] = Field(default_factory=list)
     provider_preferences: "OpenRouterProviderPreferences | None" = None
 
@@ -70,6 +72,8 @@ class LLMConfig(ConfigModel):
     def validate_reasoning(self):
         if self.provider == "gemini" and self.reasoning_effort != "provider_default":
             raise ValueError("Gemini reasoning uses the provider default")
+        if self.provider == "isoquant" and self.reasoning_effort not in {"low", "high", "max"}:
+            raise ValueError("Isoquant reasoning effort must be low, high, or max")
         if self.provider in {"groq", "openrouter"} and self.reasoning_effort not in {
             "none",
             "provider_default",
@@ -87,6 +91,8 @@ class LLMConfig(ConfigModel):
             )
         if self.provider == "sarvam" and self.model not in SARVAM_LLM_MODELS:
             raise ValueError("Select a stable Sarvam chat model supported by the runtime")
+        if self.provider == "isoquant" and self.model != "glm-5.3-flash":
+            raise ValueError("Select the supported Isoquant model glm-5.3-flash")
         if self.provider != "openrouter" and (self.models or self.provider_preferences):
             raise ValueError("OpenRouter routing settings require the openrouter provider")
         return self

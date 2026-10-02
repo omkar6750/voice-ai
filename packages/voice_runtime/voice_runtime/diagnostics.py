@@ -11,7 +11,9 @@ from voice_runtime.contracts.diagnostics import diagnostic_dict
 from voice_runtime.safe_logs import error_category
 from voice_runtime.telephony.sim7600 import Sim7600Modem
 
-_PROVIDERS = frozenset({"groq", "gemini", "cartesia", "sarvam", "jev", "whatsapp"})
+_PROVIDERS = frozenset(
+    {"groq", "gemini", "cartesia", "sarvam", "jev", "whatsapp", "openrouter", "isoquant"}
+)
 _SOURCES = frozenset({"provider", "modem", "transport", "call", "evidence", "runtime"})
 _FAILURES = {
     "runtime_exception": ("runtime_failure", "Runtime execution failed"),
@@ -90,8 +92,12 @@ def provider_error_diagnostic(
             f"{provider} rejected the configured credentials",
             False,
         )
-    elif status_code == 429 and any(
-        term in lower for term in ("quota", "credits", "credit exhausted", "usage limit", "billing")
+    elif status_code == 402 or (
+        status_code == 429
+        and any(
+            term in lower
+            for term in ("quota", "credits", "credit exhausted", "usage limit", "billing")
+        )
     ):
         category, code, message, retryable = (
             "provider_quota_exhausted",
@@ -216,7 +222,16 @@ def text_error_diagnostic(error: object, *, fallback_source: str = "runtime") ->
     provider = next(
         (
             name
-            for name in ("groq", "gemini", "cartesia", "sarvam", "jev", "whatsapp")
+            for name in (
+                "groq",
+                "gemini",
+                "cartesia",
+                "sarvam",
+                "jev",
+                "whatsapp",
+                "openrouter",
+                "isoquant",
+            )
             if name in lower
         ),
         None,

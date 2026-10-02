@@ -106,6 +106,28 @@ async def get_provider_registry(settings: Settings) -> ProviderCatalogResponse:
             "runtime_status": "supported",
         }
     )
+    providers.append(
+        {
+            "provider": "isoquant",
+            "slots": ["llm"],
+            "models": ["glm-5.3-flash"],
+            "models_by_slot": {"llm": ["glm-5.3-flash"]},
+            "fields": {
+                "model": {
+                    "type": "string",
+                    "runtime_supported": True,
+                    "description": "Isoquant GLM-5.3-Flash via streaming Chat Completions.",
+                },
+                "reasoning_effort": {
+                    "type": "string",
+                    "runtime_supported": True,
+                    "description": "Low, high, or max. Reasoning is always enabled.",
+                },
+            },
+            "status": "configured",
+            "runtime_status": "supported",
+        }
+    )
     for name, key in (("sarvam", settings.sarvam_api_key), ("cartesia", settings.cartesia_api_key)):
         capability = runtime_provider_capability(name)
         catalog_ready = any(capability["models_by_slot"].values())

@@ -25,6 +25,7 @@ from pipecat.services.openrouter.llm import OpenRouterLLMService
 from pipecat.services.sarvam.llm import SarvamLLMService
 
 from voice_runtime.execution.credential_keys import stage_api_key
+from voice_runtime.execution.isoquant import IsoquantLLMService
 from voice_runtime.safe_logs import RuntimeEvent, error_category, operational_event
 
 
@@ -404,6 +405,10 @@ class _FallbackSarvamLLMService(_FirstTokenFallback, SarvamLLMService):
     pass
 
 
+class _FallbackIsoquantLLMService(_FirstTokenFallback, IsoquantLLMService):
+    pass
+
+
 def _settings(config: dict[str, Any], *, system_instruction: str | None = None) -> dict[str, Any]:
     values = {
         "model": config.get("model"),
@@ -529,6 +534,26 @@ def build_llm_service(
             else SarvamLLMService
         )
         service = service_type(api_key=api_key, settings=service_type.Settings(**values))
+        return (
+            _attach_fallback(settings, service, config, system_instruction)
+            if config.get("fallback")
+            else service
+        )
+    if provider == "isoquant":
+        effort = config.get("reasoning_effort", "low")
+        if effort not in {"low", "high", "max"}:
+            raise ValueError("Isoquant reasoning effort must be low, high, or max")
+        values.pop("reasoning_effort", None)
+        values.pop("temperature", None)
+        values.pop("top_p", None)
+        service_type = (
+            _FallbackIsoquantLLMService
+            if stage == "llm" and config.get("fallback")
+            else IsoquantLLMService
+        )
+        service = service_type(
+            api_key=api_key, reasoning_effort=effort, settings=service_type.Settings(**values)
+        )
         return (
             _attach_fallback(settings, service, config, system_instruction)
             if config.get("fallback")
