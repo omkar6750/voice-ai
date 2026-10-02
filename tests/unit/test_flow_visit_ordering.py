@@ -42,7 +42,7 @@ async def test_visit_exists_before_response_dispatch_and_failed_setup_is_recorde
     ]
 
 
-async def test_lifecycle_actions_keep_classifier_order_and_background_hooks_unsupported(
+async def test_classifier_order_does_not_run_legacy_custom_node_actions(
     monkeypatch,
 ):
     flow = object.__new__(TracedFlowManager)
@@ -73,10 +73,5 @@ async def test_lifecycle_actions_keep_classifier_order_and_background_hooks_unsu
     monkeypatch.setattr(FlowManager, "_set_node", dispatch)
     await flow._set_node("closing", {})
 
-    assert events == [
-        "classifier:exit:prior",
-        "action:exit:prior:end_call",
-        "classifier:entry:closing",
-        "action:entry:closing:end_call",
-        "dispatch:closing",
-    ]
+    assert events == ["classifier:exit:prior", "classifier:entry:closing", "dispatch:closing"]
+    flow._action_runner.assert_not_awaited()

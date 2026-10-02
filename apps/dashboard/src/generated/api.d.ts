@@ -1999,6 +1999,177 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/chat-conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Listing */
+        get: operations["listing_api_v1_chat_conversations_get"];
+        put?: never;
+        /** Create */
+        post: operations["create_api_v1_chat_conversations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/chat-conversations/{conversation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Detail */
+        get: operations["detail_api_v1_chat_conversations__conversation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/chat-conversations/{conversation_id}/ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ticket */
+        post: operations["ticket_api_v1_chat_conversations__conversation_id__ticket_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/chat-conversations/{conversation_id}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** End */
+        post: operations["end_api_v1_chat_conversations__conversation_id__end_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/chat-conversations/{conversation_id}/messages/{message_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Inspect */
+        get: operations["inspect_api_v1_chat_conversations__conversation_id__messages__message_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runtime/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sync */
+        post: operations["sync_api_v1_runtime_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runtime/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Tool */
+        post: operations["tool_api_v1_runtime_tools_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runtime/artifacts/grant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Grant */
+        post: operations["grant_api_v1_runtime_artifacts_grant_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runtime/artifacts/{run_id}/{artifact_id}/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Upload */
+        put: operations["upload_api_v1_runtime_artifacts__run_id___artifact_id__upload_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runtime/artifacts/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete */
+        post: operations["complete_api_v1_runtime_artifacts_complete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/clerk/webhook": {
         parameters: {
             query?: never;
@@ -3977,6 +4148,177 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/chat-conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Listing */
+        get: operations["listing_api_chat_conversations_get"];
+        put?: never;
+        /** Create */
+        post: operations["create_api_chat_conversations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chat-conversations/{conversation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Detail */
+        get: operations["detail_api_chat_conversations__conversation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chat-conversations/{conversation_id}/ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ticket */
+        post: operations["ticket_api_chat_conversations__conversation_id__ticket_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chat-conversations/{conversation_id}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** End */
+        post: operations["end_api_chat_conversations__conversation_id__end_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chat-conversations/{conversation_id}/messages/{message_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Inspect */
+        get: operations["inspect_api_chat_conversations__conversation_id__messages__message_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runtime/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sync */
+        post: operations["sync_api_runtime_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runtime/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Tool */
+        post: operations["tool_api_runtime_tools_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runtime/artifacts/grant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Grant */
+        post: operations["grant_api_runtime_artifacts_grant_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runtime/artifacts/{run_id}/{artifact_id}/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Upload */
+        put: operations["upload_api_runtime_artifacts__run_id___artifact_id__upload_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runtime/artifacts/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete */
+        post: operations["complete_api_runtime_artifacts_complete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4000,10 +4342,27 @@ export interface components {
              * @default
              */
             greeting: string;
+            /**
+             * Idle Reprompt Text
+             * @default Are you still there?
+             */
+            idle_reprompt_text: string;
+            /**
+             * Idle Reprompt Limit
+             * @default 1
+             */
+            idle_reprompt_limit: number;
+            /**
+             * Filter Incomplete User Turns
+             * @default false
+             */
+            filter_incomplete_user_turns: boolean;
             /** Contact Variables */
             contact_variables?: string[];
             language?: components["schemas"]["LanguageConfig"];
             flow: components["schemas"]["FlowConfig"];
+            /** Fact Slots */
+            fact_slots?: components["schemas"]["FactSlotConfig"][];
             /** Tool Bindings */
             tool_bindings?: {
                 [key: string]: components["schemas"]["ToolBinding"];
@@ -4087,6 +4446,51 @@ export interface components {
             kind: "input" | "output" | "mixed" | "pipeline_log";
             /** Path */
             path: string;
+        };
+        /** ArtifactRequest */
+        ArtifactRequest: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Generation
+             * Format: uuid
+             */
+            generation: string;
+            /**
+             * Boot Id
+             * Format: uuid
+             */
+            boot_id: string;
+            /**
+             * Grant
+             * Format: password
+             */
+            grant: string;
+            /**
+             * Artifact Id
+             * Format: uuid
+             */
+            artifact_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "input" | "output" | "mixed" | "pipeline_log" | "runtime_log";
+            /** Size Bytes */
+            size_bytes: number;
+            /** Sha256 */
+            sha256: string;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /** Sample Rate */
+            sample_rate?: number | null;
+            /** Channels */
+            channels?: number | null;
+            /** Sample Width */
+            sample_width?: number | null;
         };
         /** AudioConfig */
         AudioConfig: {
@@ -4427,6 +4831,36 @@ export interface components {
             /** Pronunciation Dict Id */
             pronunciation_dict_id?: string | null;
         };
+        /** ChatSummary */
+        ChatSummary: {
+            /** Id */
+            id: string;
+            /** Agent Version Id */
+            agent_version_id: string;
+            /** Revision */
+            revision: number;
+            /** Status */
+            status: string;
+            /** Scenario */
+            scenario: string;
+            /** Destination */
+            destination: string;
+            /** Created At */
+            created_at: string;
+            /** Error */
+            error?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** ChatTicket */
+        ChatTicket: {
+            /** Ws Url */
+            ws_url: string;
+            /** Run Id */
+            run_id: string;
+            /** Conversation Id */
+            conversation_id: string;
+        };
         /** Claim */
         Claim: {
             /** Token */
@@ -4484,6 +4918,8 @@ export interface components {
             node_exits?: string[];
             /** Every N Exchanges */
             every_n_exchanges?: number | null;
+            /** Routing Policy */
+            routing_policy?: "lead_followup" | null;
             /**
              * Classifier Type
              * @default llm
@@ -4593,7 +5029,19 @@ export interface components {
             provider_preferences?: components["schemas"]["OpenRouterProviderPreferences"] | null;
             /**
              * Prompt
-             * @default Classify the supplied conversation using only observed evidence.
+             * @default Classify the supplied conversation using only observed evidence. Do not invent intent, needs, consent or confirmed actions. Short acknowledgements alone are not negative. When evidence is uncertain, use warm, possible_fit or hesitant as appropriate. An inferred label is not permission to send messages or book a call.
+             *     lead_temperature: Classify the contact's current sales intent based primarily on their behavior and meaning in the conversation. Voice-call responses are often very short, so do not treat short answers such as 'yeah', 'okay', 'hmm', or 'sure' as negative by themselves. Consider whether the contact has a real need, demonstrates interest in the offering, asks buying-related questions, indicates timing or urgency, or shows resistance. When evidence supports multiple classifications or contains conflicting signals, preserve that uncertainty.
+             *     - hot: The contact shows clear current buying intent or meaningful progression toward a purchase. Signals may include confirming a real need, wanting the service soon, asking about price, timeline, implementation, next steps, availability, payment, or requesting a meeting or proposal.
+             *     - warm: The contact shows genuine interest or relevance but has not demonstrated strong immediate purchase intent. They may listen, answer discovery questions positively, acknowledge a need, or ask general questions, but timing, commitment, urgency, or next-step intent remains uncertain.
+             *     - cold: The contact demonstrates little current interest or weak relevance. Signals include saying they are only browsing, having no current need, rejecting the offering, repeatedly avoiding engagement, stating bad timing without future intent, or otherwise showing no meaningful movement toward a purchase.
+             *     service_fit: Determine how closely the contact's actual need matches the service currently being offered (custom modern web & mobile app development).
+             *     - strong_fit: The contact clearly needs custom web or mobile application development, UI/UX redesign, or secure cloud backends.
+             *     - possible_fit: The need may overlap with the offered service (e.g. existing tech team needing support, adjacent integrations) but requires clarification.
+             *     - poor_fit: The contact needs something materially different (e.g. non-software hardware, marketing-only, or no development needed).
+             *     tone: What is the contact's conversational tone and attitude?
+             *     - receptive: Friendly, engaged, curious, or actively answering questions.
+             *     - hesitant: Reserved, busy, distracted, but not hostile.
+             *     - resistant: Disinterested, irritated, abusive, or explicitly asking to stop.
              */
             prompt: string;
             /** Output Fields */
@@ -4602,7 +5050,7 @@ export interface components {
             };
             /**
              * Max Output Tokens
-             * @default 96
+             * @default 256
              */
             max_output_tokens: number;
         };
@@ -4805,6 +5253,31 @@ export interface components {
              */
             timezone: string;
         };
+        /** CreateChat */
+        CreateChat: {
+            /**
+             * Agent Version Id
+             * Format: uuid
+             */
+            agent_version_id: string;
+            /** Contact Id */
+            contact_id?: string | null;
+            /** Whatsapp Number */
+            whatsapp_number?: string | null;
+            /** Starting Node */
+            starting_node?: string | null;
+            /**
+             * Caller Background
+             * @default
+             */
+            caller_background: string;
+            /**
+             * Scenario
+             * @default manual
+             * @enum {string}
+             */
+            scenario: "manual" | "interested" | "hesitant" | "busy" | "mismatch" | "multilingual" | "opt_out";
+        };
         /** CreateOrganizationBody */
         CreateOrganizationBody: {
             /** Name */
@@ -4818,7 +5291,7 @@ export interface components {
              * Provider
              * @enum {string}
              */
-            provider: "groq" | "gemini" | "openrouter" | "sarvam" | "isoquant" | "cartesia" | "jev" | "twilio" | "whatsapp";
+            provider: "groq" | "gemini" | "openrouter" | "sarvam" | "isoquant" | "gnani" | "cartesia" | "jev" | "twilio" | "whatsapp";
             /** Api Key */
             api_key?: string | null;
             /** Account Sid */
@@ -4850,7 +5323,7 @@ export interface components {
              * Provider
              * @enum {string}
              */
-            provider: "groq" | "gemini" | "openrouter" | "sarvam" | "isoquant" | "cartesia" | "jev" | "twilio" | "whatsapp";
+            provider: "groq" | "gemini" | "openrouter" | "sarvam" | "isoquant" | "gnani" | "cartesia" | "jev" | "twilio" | "whatsapp";
             /** Api Key */
             api_key?: string | null;
             /** Account Sid */
@@ -4874,7 +5347,7 @@ export interface components {
              * Provider
              * @enum {string}
              */
-            provider: "groq" | "gemini" | "openrouter" | "sarvam" | "isoquant" | "cartesia" | "jev" | "twilio" | "whatsapp";
+            provider: "groq" | "gemini" | "openrouter" | "sarvam" | "isoquant" | "gnani" | "cartesia" | "jev" | "twilio" | "whatsapp";
             /** Purpose */
             purpose: string;
             /** Version */
@@ -5223,12 +5696,49 @@ export interface components {
             /** Supersedes Id */
             supersedes_id?: string | null;
         };
+        /**
+         * FactSlotConfig
+         * @description Operator-declared, fixed-key values the caller can ask the agent to capture.
+         */
+        FactSlotConfig: {
+            /** Key */
+            key: string;
+            /** Description */
+            description: string;
+            /**
+             * Value Type
+             * @default string
+             * @enum {string}
+             */
+            value_type: "string" | "integer" | "number" | "boolean";
+            /** Enum */
+            enum?: (string | number | boolean)[] | null;
+            /** Minimum */
+            minimum?: number | null;
+            /** Maximum */
+            maximum?: number | null;
+            /** Nodes */
+            nodes?: string[];
+        };
+        /** FlowBranchConfig */
+        FlowBranchConfig: {
+            /** Field */
+            field: string;
+            /** Cases */
+            cases?: {
+                [key: string]: string;
+            };
+            /** Default */
+            default?: string | null;
+        };
         /** FlowConfig */
         FlowConfig: {
             /** Initial Node */
             initial_node: string;
             /** Nodes */
             nodes: components["schemas"]["FlowNodeConfig"][];
+            /** Global Functions */
+            global_functions?: components["schemas"]["FlowFunctionConfig"][];
             /**
              * Prompt Composition
              * @default node_only
@@ -5236,10 +5746,54 @@ export interface components {
              */
             prompt_composition: "node_only" | "global_plus_node";
         };
+        /** FlowFunctionConfig */
+        FlowFunctionConfig: {
+            /** Name */
+            name: string;
+            /**
+             * Transition Only
+             * @default false
+             */
+            transition_only: boolean;
+            /** Description */
+            description?: string | null;
+            /** Transition To */
+            transition_to?: string | components["schemas"]["FlowBranchConfig"] | null;
+        };
+        /**
+         * FlowMessageConfig
+         * @description A context message intentionally added when entering a Pipecat flow node.
+         */
+        FlowMessageConfig: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "system" | "developer" | "user" | "assistant";
+            /**
+             * Content
+             * @default
+             */
+            content: string;
+        };
         /** FlowNodeConfig */
         FlowNodeConfig: {
             /** Id */
             id: string;
+            /** Role Message */
+            role_message?: string | null;
+            /** Task Messages */
+            task_messages?: components["schemas"]["FlowMessageConfig"][];
+            /** Functions */
+            functions?: components["schemas"]["FlowFunctionConfig"][];
+            /** Pre Actions */
+            pre_actions?: {
+                [key: string]: unknown;
+            }[];
+            /** Post Actions */
+            post_actions?: {
+                [key: string]: unknown;
+            }[];
             /**
              * Prompt
              * @default
@@ -5652,6 +6206,23 @@ export interface components {
              * @enum {string}
              */
             mode: "manual" | "automatic";
+        };
+        /** LeadClassifierContract */
+        LeadClassifierContract: {
+            /** Version */
+            version: number;
+            /** Tool */
+            tool: string;
+            /** Prompt */
+            prompt: string;
+            /** Questions */
+            questions: {
+                [key: string]: components["schemas"]["JevQuestion"];
+            };
+            /** Fields */
+            fields: {
+                [key: string]: string[];
+            };
         };
         /**
          * MainLLMConfig
@@ -6182,6 +6753,7 @@ export interface components {
         ProviderCatalogResponse: {
             /** Providers */
             providers: components["schemas"]["ProviderEntryResponse"][];
+            classifier_contract?: components["schemas"]["LeadClassifierContract"] | null;
         };
         /** ProviderEntryResponse */
         ProviderEntryResponse: {
@@ -6547,20 +7119,81 @@ export interface components {
             /** Endpoints */
             endpoints: components["schemas"]["RuntimeEndpointResponse"][];
         };
+        /** RuntimeSync */
+        RuntimeSync: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Generation
+             * Format: uuid
+             */
+            generation: string;
+            /**
+             * Boot Id
+             * Format: uuid
+             */
+            boot_id: string;
+            /**
+             * Grant
+             * Format: password
+             */
+            grant: string;
+            /** Records */
+            records?: {
+                [key: string]: unknown;
+            }[];
+            /** Context Updates */
+            context_updates?: {
+                [key: string]: unknown;
+            }[];
+            /** Metrics */
+            metrics?: {
+                [key: string]: unknown;
+            };
+            /** Diagnostics */
+            diagnostics?: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Diagnostic Sequence
+             * @default 0
+             */
+            diagnostic_sequence: number;
+            /** Lifecycle */
+            lifecycle?: {
+                [key: string]: unknown;
+            } | null;
+            /** Text Records */
+            text_records?: {
+                [key: string]: unknown;
+            }[];
+            /** Text Checkpoint */
+            text_checkpoint?: {
+                [key: string]: unknown;
+            } | null;
+        };
         /** STTConfig */
         STTConfig: {
             /**
              * Provider
              * @default sarvam
-             * @constant
+             * @enum {string}
              */
-            provider: "sarvam";
+            provider: "sarvam" | "gnani";
             /**
              * Model
              * @default saaras:v3
-             * @constant
+             * @enum {string}
              */
-            model: "saaras:v3";
+            model: "saaras:v3" | "gnani-prisma-v2.5";
+            /**
+             * Language
+             * @default en-IN
+             */
+            language: string;
         };
         /** ScheduleCallback */
         ScheduleCallback: {
@@ -6687,7 +7320,7 @@ export interface components {
              * @default sarvam
              * @enum {string}
              */
-            provider: "sarvam" | "cartesia";
+            provider: "sarvam" | "cartesia" | "gnani";
             /**
              * Model
              * @default bulbul:v3
@@ -7025,6 +7658,8 @@ export interface components {
             handler?: string | null;
             http?: components["schemas"]["HTTPToolConfig"] | null;
             whatsapp?: components["schemas"]["WhatsAppTemplateConfig"] | null;
+            /** Whatsapp Connection Id */
+            whatsapp_connection_id?: string | null;
             /** Knowledge Base Id */
             knowledge_base_id?: string | null;
             /** Parameters */
@@ -7143,6 +7778,40 @@ export interface components {
         ToolListResponse: {
             /** Tools */
             tools: components["schemas"]["ToolSummaryResponse"][];
+        };
+        /** ToolRequest */
+        ToolRequest: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Generation
+             * Format: uuid
+             */
+            generation: string;
+            /**
+             * Boot Id
+             * Format: uuid
+             */
+            boot_id: string;
+            /**
+             * Grant
+             * Format: password
+             */
+            grant: string;
+            /**
+             * Invocation Id
+             * Format: uuid
+             */
+            invocation_id: string;
+            /** Name */
+            name: string;
+            /** Arguments */
+            arguments: {
+                [key: string]: unknown;
+            };
         };
         /** ToolResultConsumed */
         ToolResultConsumed: {
@@ -12087,6 +12756,359 @@ export interface operations {
             };
         };
     };
+    listing_api_v1_chat_conversations_get: {
+        parameters: {
+            query: {
+                agent_version_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_api_v1_chat_conversations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateChat"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    detail_api_v1_chat_conversations__conversation_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ticket_api_v1_chat_conversations__conversation_id__ticket_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatTicket"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    end_api_v1_chat_conversations__conversation_id__end_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inspect_api_v1_chat_conversations__conversation_id__messages__message_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_api_v1_runtime_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuntimeSync"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tool_api_v1_runtime_tools_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    grant_api_v1_runtime_artifacts_grant_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArtifactRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_api_v1_runtime_artifacts__run_id___artifact_id__upload_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    complete_api_v1_runtime_artifacts_complete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArtifactRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     clerk_webhook_api_auth_clerk_webhook_post: {
         parameters: {
             query?: never;
@@ -16497,6 +17519,359 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listing_api_chat_conversations_get: {
+        parameters: {
+            query: {
+                agent_version_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_api_chat_conversations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateChat"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    detail_api_chat_conversations__conversation_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ticket_api_chat_conversations__conversation_id__ticket_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatTicket"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    end_api_chat_conversations__conversation_id__end_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inspect_api_chat_conversations__conversation_id__messages__message_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_api_runtime_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuntimeSync"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tool_api_runtime_tools_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    grant_api_runtime_artifacts_grant_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArtifactRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_api_runtime_artifacts__run_id___artifact_id__upload_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    complete_api_runtime_artifacts_complete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArtifactRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

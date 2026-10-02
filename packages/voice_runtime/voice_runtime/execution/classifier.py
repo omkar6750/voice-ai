@@ -7,15 +7,16 @@ from typing import Any
 
 from pipecat.processors.aggregators.llm_context import LLMContext
 
+from voice_runtime.contracts.cadence import (
+    LEAD_CLASSIFIER_PROMPT,
+    LEAD_OUTPUT_FIELDS,
+    ClassifierConfig,
+)
 from voice_runtime.diagnostics import exception_diagnostic, provider_error_diagnostic
 from voice_runtime.execution.llm_factory import build_llm_service
 from voice_runtime.safe_logs import RuntimeEvent, error_category, operational_event
 
-DEFAULT_OUTPUT_FIELDS = {
-    "lead_temperature": ["hot", "warm", "cold"],
-    "service_fit": ["strong_fit", "possible_fit", "poor_fit"],
-    "tone": ["receptive", "hesitant", "resistant"],
-}
+DEFAULT_OUTPUT_FIELDS = LEAD_OUTPUT_FIELDS
 DEFAULT_RESULT = {"status": "error", "code": "classifier_unavailable"}
 
 
@@ -44,7 +45,7 @@ def normalize_classifier_result(
     *,
     max_result_chars: int = 512,
 ) -> dict[str, Any]:
-    """Return only configured labels; keep diagnostics out of model-visible data."""
+    """Return the fixed three labels and derived combination; strip provider padding."""
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
@@ -58,17 +59,16 @@ def normalize_classifier_result(
             result["_diagnostic"] = raw["_diagnostic"]
         return result
 
-    allowed = output_fields or DEFAULT_OUTPUT_FIELDS
-    allowed_map = allowed if isinstance(allowed, dict) else {field: [] for field in allowed}
     result: dict[str, Any] = {}
-    for field, labels in allowed_map.items():
+    for field, labels in DEFAULT_OUTPUT_FIELDS.items():
         value = raw.get(field)
         if isinstance(value, dict):
             value = value.get("choice")
         if isinstance(value, str) and (not labels or value in labels):
             result[field] = value
-    if not result:
+    if len(result) != len(DEFAULT_OUTPUT_FIELDS):
         return dict(DEFAULT_RESULT)
+    result["classification_key"] = "|".join(result[field] for field in DEFAULT_OUTPUT_FIELDS)
     encoded = json.dumps(result, separators=(",", ":"), ensure_ascii=False)
     if len(encoded) > max_result_chars:
         return dict(DEFAULT_RESULT)
@@ -90,11 +90,9 @@ class PipecatLLMClassifierRunner:
     async def run(self, *, settings, config: dict[str, Any], transcript: str) -> dict[str, Any]:
         provider = config.get("provider", "groq")
         model = config.get("model", "qwen/qwen3.8-27b")
-        prompt = config.get(
-            "prompt", "Classify the supplied conversation using only observed evidence."
-        )
-        output_fields = config.get("output_fields") or DEFAULT_OUTPUT_FIELDS
-        max_tokens = min(int(config.get("max_output_tokens", 96)), 512)
+        prompt = LEAD_CLASSIFIER_PROMPT
+        output_fields = DEFAULT_OUTPUT_FIELDS
+        max_tokens = 256
         schema = json.dumps(output_fields, separators=(",", ":"), ensure_ascii=False)
         system_instruction = (
             f"{prompt}\nReturn only one compact JSON object. Allowed fields and labels: {schema}."
@@ -147,6 +145,7 @@ class JevClassifierRunner:
 async def run_selected_classifier(
     *, settings, classifier: dict[str, Any], transcript: str, jev_request
 ):
+    classifier = ClassifierConfig.model_validate(classifier).model_dump(mode="json")
     classifier_type = classifier.get("classifier_type", "llm")
     if classifier_type == "jev":
         return await JevClassifierRunner(jev_request).run(

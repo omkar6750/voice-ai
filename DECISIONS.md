@@ -22,3 +22,32 @@
 | [ADR-0028 Clerk history](docs/adr/ADR-0028-clerk-organizations-workspaces-and-access.md) | Earlier nested tenant proposal | Superseded by Clerk org-only ADR |
 | [ADR-0030 Clerk history](docs/adr/ADR-0030-clerk-basic-org-access-for-demo.md) | Earlier basic-org/nested-tenant proposal | Superseded by Clerk org-only ADR |
 | [ADR-0031 Clerk org-only](docs/adr/ADR-0031-clerk-organization-is-tenant.md) | Make Clerk Organization the only customer tenant; org-scope all data and record platform admin in DB | Accepted |
+
+
+## 2026-10-02 — Separate runtime implementation checkpoint
+
+Prepared `apps/runtime/voice_runner`, shared pure JSON/compiler/logging contracts,
+HTTP dispatch/broker/synchronization and scoped artifact uploads, plus ownership
+migrations 0044/0045 and the runtime Docker/Render definition. Runtime packages
+have no API/SQLAlchemy imports. Local targeted checks pass with an isolated DB;
+no real provider/modem/Render acceptance was run. Active route wiring is pending
+explicit activation approval after automatic review rejected changing live call
+paths for service-disruption risk. See `docs/deployment/RUNTIME-SPLIT.md` and
+`docs/adr/ADR-0044-separate-runtime.md`. Do not deploy or describe the active API
+as separated until that wiring and acceptance are complete.
+
+
+### Local activation authorized
+
+User explicitly authorized running the split locally and prohibited live deployment.
+Development routes now use remote dispatch/browser/control; hosted routes remain
+unchanged. The testing worktree uses dashboard 5174/API 8002/runtime 8001 to
+preserve the primary checkout's 5173/8000 processes. Matching ignored local env
+files and a native start-local-services.ps1 launcher are configured; localhost
+55433/voice migrated through 0045. Both service health endpoints and authenticated
+runtime status respond. Provider/modem call acceptance remains operator-run.
+
+Text tests share the voice runtime conversation engine: [ADR-0046](docs/adr/ADR-0046-text-tests.md).
+Provider adapters: [ADR-0047](docs/adr/ADR-0047-provider-adapters.md) — Isoquant Chat Completions and Gnani SDK WebSocket services.
+
+- [ADR-0048](docs/adr/ADR-0048-fixed-lead-classification.md): fixed classify_lead contract, shared enums and configurable destinations for all 27 combinations.

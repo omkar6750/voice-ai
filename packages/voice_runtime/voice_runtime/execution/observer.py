@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import time
 from pathlib import Path
 
 from pipecat.frames.frames import (
@@ -26,9 +27,12 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import (
     LLMUsageMetricsData,
     ProcessingMetricsData,
+    STTUsageMetricsData,
+    TextAggregationMetricsData,
     TTFAMetricsData,
     TTFATMetricsData,
     TTFBMetricsData,
+    TTSUsageMetricsData,
 )
 from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
 from pipecat.processors.frame_processor import FrameDirection
@@ -77,6 +81,7 @@ class EvidenceObserver(BaseObserver):
         self.last_speech_operation_id: str | None = None
         self.last_tts_operation_id: str | None = None
         self._seen_interruption_frames: set[int] = set()
+        self._vad_stop_clock_ns: int | None = None
         self.context_event_consumer = None
         self._log = log_path.open("a", encoding="utf-8") if log_path else None
 
@@ -129,7 +134,7 @@ class EvidenceObserver(BaseObserver):
                 self.tts_operation = self.tracker.start_operation(
                     "synthesis",
                     "tts",
-                    provider=type(self.tts).__name__,
+                    provider=self.providers["tts"],
                     model=self.models["tts"],
                     input_payload={"text": data.frame.text},
                     parent_operation_id=(
@@ -145,18 +150,26 @@ class EvidenceObserver(BaseObserver):
         frame = data.frame
         source = data.source
         if isinstance(frame, VADUserStartedSpeakingFrame):
+            self._vad_stop_clock_ns = None
             self._mark("vad_speech_started", processor=type(source).__name__)
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            self._vad_stop_clock_ns = time.monotonic_ns()
             self._mark("vad_speech_stopped", processor=type(source).__name__)
         if isinstance(frame, MetricsFrame):
             self._metrics(source, frame)
         if isinstance(frame, ErrorFrame):
             processor = getattr(frame, "processor", None) or source
             operation_name = (
-                "llm" if processor is self.llm else "stt" if processor is self.stt else "tts"
+                "llm"
+                if processor is self.llm
+                else "stt"
+                if processor is self.stt
+                else "tts"
+                if processor is self.tts
+                else "runtime"
             )
             exception = getattr(frame, "exception", None)
-            provider = self.providers.get(operation_name, type(processor).__name__)
+            provider = self.providers.get(operation_name, "pipecat")
             if exception is not None:
                 diagnostic = provider_exception_diagnostic(
                     exception, provider=provider, operation=operation_name
@@ -164,8 +177,17 @@ class EvidenceObserver(BaseObserver):
             else:
                 diagnostic = provider_error_diagnostic(provider=provider, body=frame.error)
                 diagnostic["metadata"]["operation"] = operation_name
+            diagnostic["metadata"]["pipecat_error_category"] = (
+                frame.category.value if frame.category is not None else "unknown"
+            )
+            if processor is not None and hasattr(processor, "is_usable"):
+                diagnostic["metadata"]["processor_is_usable"] = bool(processor.is_usable)
             self.tracker.diagnostic(**diagnostic)
-            active = getattr(self, f"{operation_name}_operation", None)
+            active = (
+                getattr(self, f"{operation_name}_operation", None)
+                if operation_name in self.providers
+                else None
+            )
             if active is not None:
                 self.tracker.finish_operation(
                     active,
@@ -208,6 +230,11 @@ class EvidenceObserver(BaseObserver):
                 self._finish_llm("completed")
         if source is self.stt and isinstance(frame, TranscriptionFrame) and frame.finalized:
             if self.stt_operation is not None:
+                if self._vad_stop_clock_ns is not None:
+                    self.metrics["stt"]["ttfs_ms"] = (
+                        time.monotonic_ns() - self._vad_stop_clock_ns
+                    ) / 1_000_000
+                    self._vad_stop_clock_ns = None
                 self.tracker.finish_operation(
                     self.stt_operation,
                     "completed",
@@ -250,7 +277,7 @@ class EvidenceObserver(BaseObserver):
             self.stt_operation = self.tracker.start_operation(
                 "transcription",
                 "stt",
-                provider="sarvam",
+                provider=self.providers["stt"],
                 model=self.models["stt"],
                 parent_operation_id=self.speech_operation["operation_id"],
             )
@@ -325,10 +352,17 @@ class EvidenceObserver(BaseObserver):
             if source is self.stt
             else None
         )
-        if category is None:
-            return
-        values = self.metrics[category]
         for metric in frame.data:
+            metric_category = (
+                "stt"
+                if isinstance(metric, STTUsageMetricsData)
+                else "tts"
+                if isinstance(metric, (TTSUsageMetricsData, TextAggregationMetricsData))
+                else category
+            )
+            if metric_category is None:
+                continue
+            values = self.metrics[metric_category]
             if isinstance(metric, TTFBMetricsData):
                 values["ttfb_ms"] = metric.value * 1000
             elif isinstance(metric, TTFAMetricsData):
@@ -344,6 +378,12 @@ class EvidenceObserver(BaseObserver):
                 values["reasoning_tokens"] = metric.value.reasoning_tokens
             elif isinstance(metric, ProcessingMetricsData):
                 values["processing_ms"] = metric.value * 1000
+            elif isinstance(metric, STTUsageMetricsData):
+                values["audio_seconds"] = metric.value.audio_seconds
+            elif isinstance(metric, TTSUsageMetricsData):
+                values["tts_characters"] = metric.value
+            elif isinstance(metric, TextAggregationMetricsData):
+                values["text_aggregation_ms"] = metric.value * 1000
 
     def _finish_llm(self, status: str) -> None:
         if self.llm_operation is None:

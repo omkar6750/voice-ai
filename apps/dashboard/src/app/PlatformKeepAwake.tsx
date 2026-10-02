@@ -3,7 +3,7 @@ import { Activity, Square } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { healthUrl } from "./api";
+import { healthUrl, runtimeHealthUrl } from "./api";
 
 const STORAGE_KEY = "voice-ai:platform-keep-awake:v1";
 const PING_INTERVAL_MS = 10 * 60 * 1000;
@@ -14,6 +14,7 @@ type KeepAwakeState = {
   lastAttemptAt: number | null;
   lastResult: "ok" | "error" | null;
   lastStatus: number | null;
+  runtimeStatus: number | null;
 };
 
 const disabledState: KeepAwakeState = {
@@ -21,6 +22,7 @@ const disabledState: KeepAwakeState = {
   lastAttemptAt: null,
   lastResult: null,
   lastStatus: null,
+  runtimeStatus: null,
 };
 
 let memoryState = disabledState;
@@ -36,6 +38,7 @@ function readState(): KeepAwakeState {
       lastAttemptAt: typeof value.lastAttemptAt === "number" ? value.lastAttemptAt : null,
       lastResult: value.lastResult === "ok" || value.lastResult === "error" ? value.lastResult : null,
       lastStatus: typeof value.lastStatus === "number" ? value.lastStatus : null,
+      runtimeStatus: typeof value.runtimeStatus === "number" ? value.runtimeStatus : null,
     };
     return memoryState;
   } catch {
@@ -68,7 +71,7 @@ export function PlatformKeepAwake({ enabled, showControls }: { enabled: boolean;
 
   const refresh = useCallback(() => setState(readState()), []);
 
-  const ping = useCallback(async (force = false) => {
+  const pingPair = useCallback(async (force = false) => {
     const current = readState();
     const now = Date.now();
     if (current.until <= now) {
@@ -85,13 +88,20 @@ export function PlatformKeepAwake({ enabled, showControls }: { enabled: boolean;
     controllerRef.current?.abort();
     controllerRef.current = controller;
     try {
-      const response = await fetch(healthUrl(), { method: "GET", cache: "no-store", signal: controller.signal });
+      const runtimeUrl = runtimeHealthUrl();
+      const responses = await Promise.allSettled([
+        fetch(healthUrl(), { method: "GET", cache: "no-store", signal: controller.signal }),
+        runtimeUrl ? fetch(runtimeUrl, { method: "GET", cache: "no-store", signal: controller.signal }) : Promise.reject(new Error("Runtime origin missing")),
+      ]);
+      const response = responses[0].status === "fulfilled" ? responses[0].value : null;
+      const runtime = responses[1].status === "fulfilled" ? responses[1].value : null;
       const latest = readState();
       if (latest.until <= Date.now()) return;
       const result: KeepAwakeState = {
         ...latest,
-        lastResult: response.ok ? "ok" : "error",
-        lastStatus: response.status,
+        lastResult: response?.ok && runtime?.ok ? "ok" : "error",
+        lastStatus: response?.status ?? null,
+        runtimeStatus: runtime?.status ?? null,
       };
       saveState(result);
       setState(result);
@@ -104,6 +114,16 @@ export function PlatformKeepAwake({ enabled, showControls }: { enabled: boolean;
       setState(result);
     }
   }, []);
+
+  const ping = useCallback(async (force = false) => {
+    if (navigator.locks) {
+      await navigator.locks.request("voice-ai:paired-keep-awake", { ifAvailable: true }, async (lock) => {
+        if (lock) await pingPair(force);
+      });
+    } else {
+      await pingPair(force);
+    }
+  }, [pingPair]);
 
   const stop = useCallback(() => {
     controllerRef.current?.abort();
@@ -121,6 +141,7 @@ export function PlatformKeepAwake({ enabled, showControls }: { enabled: boolean;
   useEffect(() => {
     if (!enabled) {
       controllerRef.current?.abort();
+      if (readState().until) saveState(disabledState);
       return;
     }
     refresh();
@@ -153,15 +174,15 @@ export function PlatformKeepAwake({ enabled, showControls }: { enabled: boolean;
   return <Card className="fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] shadow-lg">
     <CardHeader>
       <div className="flex items-center justify-between gap-3">
-        <CardTitle className="flex items-center gap-2"><Activity className="size-4" aria-hidden="true" /> Demo backend</CardTitle>
+        <CardTitle className="flex items-center gap-2"><Activity className="size-4" aria-hidden="true" /> Demo API and runtime</CardTitle>
         <Badge variant={active ? "secondary" : "outline"}>{active ? "Keep-awake on" : "Sleeping allowed"}</Badge>
       </div>
-      <CardDescription>Send a lightweight health request every 10 minutes. Automatically stops after 72 hours.</CardDescription>
+      <CardDescription>Ping both services every 10 minutes. Automatically stops after 72 hours.</CardDescription>
     </CardHeader>
     <CardContent className="flex flex-col gap-3">
       <p className="text-xs text-muted-foreground">
         {active
-          ? `Up to ${remainingLabel(state.until, now)} remaining · ${state.lastAttemptAt ? `Last ping ${state.lastResult === "ok" ? "succeeded" : state.lastResult === "error" ? "failed" : "started"}` : "Starting first ping"}${state.lastStatus ? ` (HTTP ${state.lastStatus})` : ""}. Keep this signed-in dashboard open.`
+          ? `Up to ${remainingLabel(state.until, now)} remaining · ${state.lastAttemptAt ? `Last ping ${state.lastResult === "ok" ? "succeeded" : state.lastResult === "error" ? "failed" : "started"}` : "Starting first ping"}${` · API ${state.lastStatus ?? "unavailable"} · Runtime ${state.runtimeStatus ?? "unavailable"}`}. Keep this signed-in dashboard open.`
           : "Only a platform administrator can run this. Closing the browser, losing connectivity, or background-tab throttling can still let the free service sleep."}
       </p>
       {active

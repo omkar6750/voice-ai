@@ -1,5 +1,7 @@
 """Safe operational events and timestamp-aligned serial PCM recordings."""
 
+import queue
+import threading
 import time
 import wave
 from collections import Counter
@@ -25,6 +27,11 @@ class CallCapture(BaseObserver):
         self.positions = {"input": 0, "output": 0}
         self.files = {}
         self.closed = False
+        self.error = None
+        self._writes = queue.Queue(maxsize=512)
+        self._writer = threading.Thread(
+            target=self._write_pcm, daemon=True, name="call-recording-writer"
+        )
         self._has_direct_pcm = False
         self._last_pcm_at = {"input": None, "output": None}
         for name in self.positions:
@@ -32,6 +39,7 @@ class CallCapture(BaseObserver):
             wav.setparams((1, 2, sample_rate, 0, "NONE", "not compressed"))
             wav.writeframes(b"")
             self.files[name] = wav
+        self._writer.start()
 
     def pcm(self, direction: str, audio: bytes, *, direct: bool = True):
         """RX is timestamped at read completion; TX at successful write completion."""
@@ -54,7 +62,12 @@ class CallCapture(BaseObserver):
             observed -= samples
         start = max(self.positions[direction], observed, 0)
         gap = start - self.positions[direction]
-        self.files[direction].writeframes(b"\0\0" * gap + audio)
+        self.check()
+        try:
+            self._writes.put_nowait((direction, gap, audio))
+        except queue.Full as exc:
+            self.error = BufferError("Recording writer queue exhausted")
+            raise self.error from exc
         if started:
             elapsed_ms = (time.perf_counter() - started) * 1000
             if elapsed_ms >= 10:
@@ -66,6 +79,24 @@ class CallCapture(BaseObserver):
             operational_event(
                 RuntimeEvent.PCM_CAPTURED, direction=direction, bytes=count, samples=samples
             )
+
+    def check(self):
+        if self.error:
+            raise RuntimeError("Recording writer failed") from self.error
+
+    def _write_pcm(self):
+        while True:
+            item = self._writes.get()
+            try:
+                if item is None:
+                    return
+                if self.error is None:
+                    direction, gap, audio = item
+                    self.files[direction].writeframes(b"\0\0" * gap + audio)
+            except Exception as exc:
+                self.error = exc
+            finally:
+                self._writes.task_done()
 
     async def on_push_frame(self, data: FramePushed):
         frame = data.frame
@@ -96,6 +127,13 @@ class CallCapture(BaseObserver):
         if self.closed:
             return
         self.closed = True
+        self._writes.put(None)
+        self._writes.join()
+        self._writer.join(timeout=5)
+        if self.error:
+            for wav in self.files.values():
+                wav.close()
+            self.check()
         end = max(*self.positions.values(), round((self.clock() - self.started) * self.sample_rate))
         for name, wav in self.files.items():
             wav.writeframes(b"\0\0" * (end - self.positions[name]))

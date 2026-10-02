@@ -41,6 +41,12 @@ services:
         sync: false
       - key: VOICE_RUNTIME_SERVICE_TOKEN
         sync: false
+      - key: VOICE_RUNTIME_CONTROL_TOKEN
+        sync: false
+      - key: VOICE_RUNTIME_BASE_URL
+        sync: false
+      - key: VOICE_RUNTIME_PUBLIC_BASE_URL
+        sync: false
       - key: VOICE_PUBLIC_BASE_URL
         sync: false
       - key: VOICE_CLERK_AUTHORIZED_PARTIES
@@ -67,3 +73,41 @@ services:
         sync: false
       - key: VOICE_SUPABASE_PRIVATE_BUCKET
         value: voice-private
+
+  - type: web
+    name: voice-ai-runtime-demo
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile.runtime
+    dockerContext: .
+    autoDeployTrigger: "commit"
+    healthCheckPath: /health
+    maxShutdownDelaySeconds: 300
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: VOICE_ENV
+        value: production
+      - key: VOICE_HOSTED_CALLS_ENABLED
+        value: "false"
+      - key: VOICE_MAX_CONCURRENT_CALLS
+        value: "1"
+      - key: VOICE_RUNTIME_CPU_BUDGET
+        value: "0.1"
+      - key: VOICE_API_BASE_URL
+        sync: false
+      - key: VOICE_RUNTIME_PUBLIC_BASE_URL
+        sync: false
+      - key: VOICE_RUNTIME_CONTROL_TOKEN
+        sync: false
+      - key: VOICE_RUNTIME_SERVICE_TOKEN
+        sync: false
+      - key: VOICE_RUNTIME_ALLOWED_ORIGINS
+        sync: false
+      - key: VOICE_RUNTIME_SPOOL_DIR
+        value: /app/data/runtime-evidence
+      - key: VOICE_RECORDINGS_DIR
+        value: /app/data/runtime-recordings
+      - key: VOICE_LOG_LEVEL
+        value: INFO

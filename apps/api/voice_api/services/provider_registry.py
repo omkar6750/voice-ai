@@ -6,6 +6,7 @@ import time
 
 import httpx
 from voice_runtime.contracts import runtime_provider_capability
+from voice_runtime.contracts.cadence import lead_classifier_contract
 
 from voice_api.core.config import Settings
 from voice_api.schemas.providers import ProviderCatalogResponse
@@ -128,7 +129,11 @@ async def get_provider_registry(settings: Settings) -> ProviderCatalogResponse:
             "runtime_status": "supported",
         }
     )
-    for name, key in (("sarvam", settings.sarvam_api_key), ("cartesia", settings.cartesia_api_key)):
+    for name, key in (
+        ("sarvam", settings.sarvam_api_key),
+        ("cartesia", settings.cartesia_api_key),
+        ("gnani", settings.gnani_api_key),
+    ):
         capability = runtime_provider_capability(name)
         catalog_ready = any(capability["models_by_slot"].values())
         providers.append(
@@ -145,4 +150,6 @@ async def get_provider_registry(settings: Settings) -> ProviderCatalogResponse:
                 **capability,
             }
         )
-    return ProviderCatalogResponse.model_validate({"providers": providers})
+    return ProviderCatalogResponse.model_validate(
+        {"providers": providers, "classifier_contract": lead_classifier_contract()}
+    )

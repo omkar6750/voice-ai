@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from voice_runtime.contracts.cadence import JevQuestion
 
 ProviderSlot = Literal["llm", "stt", "tts", "embedding"]
 ProviderStatus = Literal["configured", "unconfigured", "stale", "unavailable"]
@@ -144,7 +145,16 @@ class ProviderEntryResponse(BaseModel):
     checked_at: datetime | None = None
 
 
+class LeadClassifierContract(BaseModel):
+    version: int
+    tool: str
+    prompt: str
+    questions: dict[str, JevQuestion]
+    fields: dict[str, list[str]]
+
+
 class ProviderCatalogResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     providers: list[ProviderEntryResponse]
+    classifier_contract: LeadClassifierContract | None = None

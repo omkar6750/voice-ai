@@ -53,6 +53,17 @@ Operator = Depends(require_legacy_owner)
 
 
 async def _whatsapp_media_issue(session: AsyncSession, config: ToolConfig) -> str | None:
+    if config.whatsapp_connection_id is not None:
+        direct_connection = await session.get(
+            IntegrationConnection, config.whatsapp_connection_id
+        )
+        if (
+            direct_connection is None
+            or direct_connection.provider != "whatsapp"
+            or not direct_connection.enabled
+            or direct_connection.deleted_at is not None
+        ):
+            return "Direct WhatsApp tool requires an enabled pinned WhatsApp connection"
     whatsapp = config.whatsapp
     if whatsapp is None:
         return None
@@ -132,7 +143,7 @@ def _remove_deleted_tool_references(
     nodes = []
     for raw_node in flow.get("nodes", []):
         node = dict(raw_node)
-        for prompt_key in ("prompt", "role_prompt"):
+        for prompt_key in ("prompt", "role_prompt", "role_message"):
             if prompt_key in node:
                 node[prompt_key] = remove_prompt_sentences(node[prompt_key])
         for action_key in ("tool_bindings", "entry_actions", "exit_actions"):
@@ -141,10 +152,34 @@ def _remove_deleted_tool_references(
             if filtered != values:
                 node[action_key] = filtered
                 changed = True
+        for action_key in ("pre_actions", "post_actions"):
+            actions = node.get(action_key, [])
+            filtered_actions = [
+                action
+                for action in actions
+                if not (
+                    isinstance(action, dict)
+                    and action.get("type") == "function"
+                    and action.get("handler") in reference_names
+                )
+            ]
+            if filtered_actions != actions:
+                node[action_key] = filtered_actions
+                changed = True
         nodes.append(node)
     if "nodes" in flow:
         flow["nodes"] = nodes
     config["flow"] = flow
+    global_functions = flow.get("global_functions", [])
+    filtered_global = [
+        function
+        for function in global_functions
+        if (function.get("name") if isinstance(function, dict) else function) not in reference_names
+    ]
+    if filtered_global != global_functions:
+        flow["global_functions"] = filtered_global
+        config["flow"] = flow
+        changed = True
 
     background_hooks = config.get("background_hooks", [])
     filtered_hooks = [hook for hook in background_hooks if hook not in reference_names]

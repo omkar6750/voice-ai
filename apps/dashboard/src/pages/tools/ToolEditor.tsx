@@ -48,6 +48,18 @@ type EditableToolConfig = Omit<ToolConfig, "parameters"> & {
 };
 
 function editableConfig(config: ToolConfig): EditableToolConfig {
+  if (config.handler === "classify_lead" || config.name === "classify_lead") {
+    return {
+      ...config,
+      description:
+        "Fixed lead classification: lead_temperature, service_fit, tone and classification_key. Takes no arguments.",
+      parameters: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
+    };
+  }
   return {
     ...config,
     parameters: config.parameters ?? { type: "object", properties: {} },
@@ -81,6 +93,7 @@ export function ToolEditor({
   onSectionChange,
   onConflict,
   onDirtyChange,
+  whatsappConnections = [],
 }: {
   version: ToolVersion;
   handlers: HandlerCatalog["handlers"];
@@ -88,13 +101,17 @@ export function ToolEditor({
   onSectionChange: (section: string) => void;
   onConflict: () => void;
   onDirtyChange?: (dirty: boolean) => void;
+  whatsappConnections?: { id: string; label: string }[];
 }) {
+  const fixedClassifier =
+    version.config.handler === "classify_lead" ||
+    version.config.name === "classify_lead";
   const api = useApi();
   const [config, setConfig] = useState<EditableToolConfig>(() =>
     editableConfig(version.config),
   );
   const [rows, setRows] = useState<ParameterRow[]>(() =>
-    parameterRows(version.config.parameters ?? {}),
+    parameterRows(editableConfig(version.config).parameters),
   );
   const [busy, setBusy] = useState<"save" | "validate" | null>(null);
   const [mapping, setMapping] = useState(() =>
@@ -117,11 +134,7 @@ export function ToolEditor({
     ? params.get("section")!
     : "definition";
   const [schemaText, setSchemaText] = useState(() =>
-    JSON.stringify(
-      version.config.parameters ?? { type: "object", properties: {} },
-      null,
-      2,
-    ),
+    JSON.stringify(editableConfig(version.config).parameters, null, 2),
   );
   const [schemaEdited, setSchemaEdited] = useState(false);
   const [revision, setRevision] = useState(version.revision);
@@ -333,19 +346,33 @@ export function ToolEditor({
         <div className="flex gap-2">
           <Button
             variant="outline"
-            disabled={busy !== null || conflict || locked}
+            disabled={busy !== null || conflict || locked || fixedClassifier}
             onClick={() => void validate()}
           >
             Save & validate
           </Button>
           <Button
-            disabled={busy !== null || conflict || locked || !dirty}
+            disabled={
+              busy !== null || conflict || locked || fixedClassifier || !dirty
+            }
             onClick={() => void save()}
           >
             {busy === "save" ? "Saving…" : "Save draft"}
           </Button>
         </div>
       </div>
+      {fixedClassifier && (
+        <Alert>
+          <AlertTitle>Fixed classify_lead tool</AlertTitle>
+          <AlertDescription>
+            This application-owned tool takes no arguments and returns
+            lead_temperature, service_fit, tone and classification_key.
+            Questions, criteria, instructions and output labels are locked.
+            Select its model in the agent Classifier settings and destinations
+            in Flow → Tools.
+          </AlertDescription>
+        </Alert>
+      )}
       {locked && (
         <Alert>
           <AlertTitle>This version was published</AlertTitle>
@@ -375,7 +402,10 @@ export function ToolEditor({
           <TabsTrigger value="advanced">Advanced</TabsTrigger>
         </TabsList>
       </Tabs>
-      <fieldset disabled={busy !== null || locked} className="min-w-0">
+      <fieldset
+        disabled={busy !== null || locked || fixedClassifier}
+        className="min-w-0"
+      >
         <FieldGroup>
           {section === "definition" && (
             <>
@@ -389,7 +419,7 @@ export function ToolEditor({
               </Field>
               <Field>
                 <FieldLabel htmlFor={`tool-description-${version.id}`}>
-                  Description
+                  When should the assistant use this tool?
                 </FieldLabel>
                 <Textarea
                   id={`tool-description-${version.id}`}
@@ -400,10 +430,9 @@ export function ToolEditor({
                   rows={3}
                 />
                 <FieldDescription>
-                  The model receives this as the function description. Explain
-                  when to use the tool; put overall conversation behavior in the
-                  agent prompt and argument-specific guidance in the parameter
-                  descriptions below.
+                  This guidance is shown to the model. Explain the trigger and
+                  expected outcome. Put the details for each input in its
+                  parameter description.
                 </FieldDescription>
               </Field>
             </>
@@ -411,7 +440,7 @@ export function ToolEditor({
           {section === "execution" && (
             <>
               <Field>
-                <FieldLabel>Execution</FieldLabel>
+                <FieldLabel>How it runs</FieldLabel>
                 <Input
                   value={
                     config.kind === "registered"
@@ -426,7 +455,7 @@ export function ToolEditor({
                 <>
                   <Field>
                     <FieldLabel htmlFor={`tool-handler-${version.id}`}>
-                      Handler
+                      Approved backend action
                     </FieldLabel>
                     <NativeSelect
                       id={`tool-handler-${version.id}`}
@@ -436,10 +465,17 @@ export function ToolEditor({
                         setField("handler", handler);
                         if (handler !== "send_whatsapp_template")
                           setField("whatsapp", null);
+                        if (
+                          ![
+                            "check_whatsapp_window",
+                            "send_whatsapp_message",
+                          ].includes(handler ?? "")
+                        )
+                          setField("whatsapp_connection_id", null);
                       }}
                     >
                       <NativeSelectOption value="">
-                        Select reviewed handler
+                        Choose an approved action
                       </NativeSelectOption>
                       {handlers.map((handler) => (
                         <NativeSelectOption
@@ -464,6 +500,55 @@ export function ToolEditor({
                         onChange={(whatsapp) => setField("whatsapp", whatsapp)}
                       />
                     )}
+                  {["check_whatsapp_window", "send_whatsapp_message"].includes(
+                    config.handler ?? "",
+                  ) && (
+                    <Field>
+                      <FieldLabel
+                        htmlFor={`tool-whatsapp-connection-${version.id}`}
+                      >
+                        whatsapp_connection_id
+                      </FieldLabel>
+                      <NativeSelect
+                        id={`tool-whatsapp-connection-${version.id}`}
+                        value={config.whatsapp_connection_id ?? ""}
+                        onChange={(event) =>
+                          setField(
+                            "whatsapp_connection_id",
+                            event.target.value || null,
+                          )
+                        }
+                      >
+                        <NativeSelectOption value="">
+                          Choose a WhatsApp connection
+                        </NativeSelectOption>
+                        {whatsappConnections.map((connection) => (
+                          <NativeSelectOption
+                            key={connection.id}
+                            value={connection.id}
+                          >
+                            {connection.label}
+                          </NativeSelectOption>
+                        ))}
+                        {config.whatsapp_connection_id &&
+                          !whatsappConnections.some(
+                            (connection) =>
+                              connection.id === config.whatsapp_connection_id,
+                          ) && (
+                            <NativeSelectOption
+                              value={config.whatsapp_connection_id}
+                            >
+                              Pinned connection unavailable
+                            </NativeSelectOption>
+                          )}
+                      </NativeSelect>
+                      <FieldDescription>
+                        Pin this tool to a WhatsApp connection ID from
+                        Integrations. Set the same ID on the window-check and
+                        send tools.
+                      </FieldDescription>
+                    </Field>
+                  )}
                 </>
               )}
 
@@ -577,11 +662,14 @@ export function ToolEditor({
             <div>
               <div className="mb-2 flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm font-medium">Input parameters</h3>
+                  <h3 className="text-sm font-medium">
+                    Information the assistant must collect
+                  </h3>
                   <p className="text-xs text-muted-foreground">
-                    Names, descriptions, and required status become the
-                    function-calling schema. For WhatsApp templates, describe
-                    what each placeholder should contain.
+                    Add one row for each value the tool needs. Clear
+                    descriptions help the assistant ask for the right
+                    information; required values must be supplied before the
+                    call.
                   </p>
                 </div>
                 <Button
@@ -600,18 +688,19 @@ export function ToolEditor({
                     ])
                   }
                 >
-                  Add parameter
+                  Add input
                 </Button>
               </div>
               <div className="flex flex-col gap-3">
                 {rows.map((row, index) => (
                   <div
                     key={`${version.id}-${index}`}
-                    className="grid gap-2 rounded-md border p-3 md:grid-cols-[1fr_120px_1.5fr_auto]"
+                    className="grid gap-3 border-b py-3 md:grid-cols-[minmax(8rem,1fr)_8rem_minmax(12rem,1.5fr)_auto]"
                   >
                     <Input
                       value={row.name}
-                      placeholder="parameter_name"
+                      aria-label={`Input ${index + 1} name`}
+                      placeholder="e.g. callback_time"
                       onChange={(event) =>
                         setRows((current) =>
                           current.map((item, itemIndex) =>
@@ -651,7 +740,8 @@ export function ToolEditor({
                     </NativeSelect>
                     <Input
                       value={row.description}
-                      placeholder="Description"
+                      aria-label={`Input ${index + 1} description`}
+                      placeholder="What should this value contain?"
                       onChange={(event) =>
                         setRows((current) =>
                           current.map((item, itemIndex) =>
@@ -750,7 +840,7 @@ export function ToolEditor({
               Discard changes
             </Button>
             <Button
-              disabled={busy !== null || conflict || locked}
+              disabled={busy !== null || conflict || locked || fixedClassifier}
               onClick={() => {
                 void save().then((ok) => {
                   if (ok && blocker.state === "blocked") blocker.proceed();

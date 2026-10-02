@@ -18,18 +18,33 @@ def upgrade() -> None:
             "WHERE p.id = 1"
         )
     ).scalars().all()
-    if len(legacy_ids) != 1:
-        raise RuntimeError("Expected exactly one verified legacy organization")
+    if len(legacy_ids) > 1:
+        raise RuntimeError("Expected at most one verified legacy organization")
+    if not legacy_ids:
+        # A fresh installation has no verified Clerk identity or organization
+        # yet. Leave the legacy mapping empty; onboarding may create ordinary
+        # organizations later, but must not invent a platform administrator.
+        identity_count = connection.scalar(
+            sa.text("SELECT (SELECT count(*) FROM users) + (SELECT count(*) FROM organizations)")
+        )
+        administrator_count = connection.scalar(
+            sa.text("SELECT count(*) FROM platform_administrator")
+        )
+        if identity_count or administrator_count:
+            raise RuntimeError(
+                "Could not identify exactly one verified legacy organization for existing data"
+            )
     op.create_table(
         "legacy_data_tenant",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("organization_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=False, unique=True),
         sa.CheckConstraint("id = 1", name="ck_legacy_data_tenant_singleton"),
     )
-    connection.execute(
-        sa.text("INSERT INTO legacy_data_tenant (id, organization_id) VALUES (1, :org_id)"),
-        {"org_id": legacy_ids[0]},
-    )
+    if legacy_ids:
+        connection.execute(
+            sa.text("INSERT INTO legacy_data_tenant (id, organization_id) VALUES (1, :org_id)"),
+            {"org_id": legacy_ids[0]},
+        )
     op.create_table(
         "organization_audit",
         sa.Column("id", sa.String(36), primary_key=True),

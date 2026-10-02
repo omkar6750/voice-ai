@@ -48,10 +48,14 @@ class NativePipelineLifecycle:
     async def _handle_user_idle(self) -> None:
         if self._call_hung_up or self.worker is None:
             return
-        if self._idle_reprompts == 0:
-            self._idle_reprompts = 1
+        maximum = int(self._snapshot.get("idle_reprompt_limit", 1))
+        if self._idle_reprompts < maximum:
+            self._idle_reprompts += 1
             await self.worker.queue_frame(
-                TTSSpeakFrame("Are you still there?", append_to_context=True)
+                TTSSpeakFrame(
+                    self._snapshot.get("idle_reprompt_text", "Are you still there?"),
+                    append_to_context=True,
+                )
             )
             return
         self._call_hung_up = True
@@ -102,11 +106,6 @@ class NativePipelineLifecycle:
         """
         self.tracker.begin("greeting")
         await self.flow.initialize(self._node(self._snapshot["flow"]["initial_node"]))
-        if self._verbatim_opening:
-            await self.worker.queue_frame(
-                TTSSpeakFrame(self._verbatim_opening, append_to_context=True)
-            )
-
         async def _check_active() -> bool:
             if modem_or_check is None:
                 return True
@@ -116,6 +115,8 @@ class NativePipelineLifecycle:
             return await modem_or_check.state() == CallState.ACTIVE
 
         while self.runner_task and not self.runner_task.done():
+            if self.capture:
+                self.capture.check()
             if self.errors:
                 raise RuntimeError(self.errors[-1])
             if self.termination.graceful_deadline_expired(self._graceful_close_timeout_secs):
@@ -266,37 +267,11 @@ class NativePipelineLifecycle:
                         await asyncio.gather(*pending, return_exceptions=True)
                     if done:
                         await asyncio.gather(*done, return_exceptions=True)
-                if self.run_id:
-                    from sqlalchemy import update
-                    from voice_api.db.session import SessionFactory
-                    from voice_api.db.tenant_scope import bind_run_organization
-                    from voice_api.models import RunContextEvent
-
-                    try:
-                        async with SessionFactory() as session:
-                            await bind_run_organization(session, self.run_id)
-                            await session.execute(
-                                update(RunContextEvent)
-                                .where(
-                                    RunContextEvent.run_id == self.run_id,
-                                    RunContextEvent.status == "pending",
-                                )
-                                .values(status="ended_before_delivery")
-                            )
-                            await session.commit()
-                    except Exception:
-                        operational_event(RuntimeEvent.EVIDENCE_FAILED, level="ERROR")
-                        if self.tracker:
-                            try:
-                                self.tracker.diagnostic(
-                                    severity="warning",
-                                    category="context_event_persistence",
-                                    source="evidence",
-                                    code="context_event_finalize_failed",
-                                    message="Pending asynchronous outcomes could not be finalized at call end",
-                                )
-                            except Exception:
-                                operational_event(RuntimeEvent.EVIDENCE_FAILED, level="ERROR")
+                for event in getattr(self, "pending_context", {}).values():
+                    if event["status"] == "pending":
+                        event["status"] = "ended_before_delivery"
+                        if getattr(self, "broker", None):
+                            await self.broker.context_update({"id": event["id"], "status": "ended_before_delivery"})
             except asyncio.CancelledError as exc:
                 self.termination.request("cancelled")
                 primary_error = exc
@@ -320,7 +295,7 @@ class NativePipelineLifecycle:
                 if self.observer:
                     attempt_cleanup(self.observer.close)
                 if self.capture:
-                    attempt_cleanup(self.capture.close)
+                    await asyncio.to_thread(attempt_cleanup, self.capture.close)
 
             if cleanup_error is not None:
                 self.termination.summary.cleanup_status = "uncertain"

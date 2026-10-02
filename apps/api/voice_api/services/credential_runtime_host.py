@@ -15,12 +15,21 @@ from voice_api.services.credential_lease_service import (
 
 class CredentialRuntimeHost(NativePipelineHost):
     async def prepare(self, snapshot, tracker, **kwargs):
-        return await guard(self.run_id, lambda: super(CredentialRuntimeHost, self).prepare(snapshot, tracker, **kwargs),
-                           timeout_secs=HANDSHAKE_SECONDS)
+        from voice_api.services.legacy_runtime_broker import LegacyRuntimeBroker
+
+        self.broker = LegacyRuntimeBroker(self)
+        return await guard(
+            self.run_id,
+            lambda: super(CredentialRuntimeHost, self).prepare(snapshot, tracker, **kwargs),
+            timeout_secs=HANDSHAKE_SECONDS,
+        )
 
     async def converse(self, modem_or_check=None):
-        return await guard(self.run_id, lambda: super(CredentialRuntimeHost, self).converse(modem_or_check),
-                           timeout_secs=call_seconds(self.settings, self._snapshot))
+        return await guard(
+            self.run_id,
+            lambda: super(CredentialRuntimeHost, self).converse(modem_or_check),
+            timeout_secs=call_seconds(self.settings, self._snapshot),
+        )
 
     async def close(self):
         try:
@@ -30,3 +39,8 @@ class CredentialRuntimeHost(NativePipelineHost):
             await release(self.run_id)
             # Best-effort drop of the host's references; Python cannot promise memory erasure.
             self.settings = None
+
+    async def _deliver_pending_context_events(self, context):
+        if self.broker:
+            await self.broker.refresh_context()
+        await super()._deliver_pending_context_events(context)

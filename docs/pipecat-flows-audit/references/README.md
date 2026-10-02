@@ -12,3 +12,5 @@ These are byte-for-byte copies of the six user attachments, in the order supplie
 | [attachment-06.txt](attachment-06.txt) | State Management | `a0689dee-014e-4f99-91f7-df65d7ec95d8` |
 
 The conversation also pasted excerpts from Flows Introduction, Context Strategies, and Examples. Those excerpts are part of the request, not separate attached files. The audit links to the current Pipecat pages for those topics.
+
+| [attached-implementation-review.txt](attached-implementation-review.txt) | User-provided runtime/code review findings and lifecycle notes | `8f478630-1093-44b7-b301-ab33bfdf1e43` |

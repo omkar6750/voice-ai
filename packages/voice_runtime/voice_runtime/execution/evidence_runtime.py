@@ -1,6 +1,6 @@
-"""Persistence of runtime evidence associated with contextual events."""
+"""Locally queue classifier outcomes; deliver through the evidence channel."""
 
-from __future__ import annotations
+from uuid import NAMESPACE_URL, uuid5
 
 
 class NativeEvidenceRuntime:
@@ -15,22 +15,17 @@ class NativeEvidenceRuntime:
         connection_id=None,
         provider_message_id=None,
     ):
-        from voice_api.db.session import SessionFactory
-        from voice_api.db.tenant_scope import bind_run_organization
-        from voice_api.services.run_context_service import enqueue_context_event
-
-        async with SessionFactory() as session:
-            await bind_run_organization(session, self.run_id)
-            await enqueue_context_event(
-                session,
-                run_id=self.run_id,
-                tool_invocation_id=invocation_id,
-                dedupe_key=dedupe_key,
-                source=source,
-                source_reference=source_reference,
-                connection_id=connection_id,
-                provider_message_id=provider_message_id,
-                status="ended_before_delivery" if self._call_closed else "pending",
-                payload=self._bounded_context_result(payload),
-            )
-            await session.commit()
+        event = {
+            "id": str(uuid5(NAMESPACE_URL, f"{self.run_id}/{dedupe_key}")),
+            "dedupe_key": dedupe_key,
+            "source": source,
+            "source_reference": source_reference,
+            "payload": self._bounded_context_result(payload),
+            "tool_invocation_id": invocation_id,
+            "connection_id": connection_id,
+            "provider_message_id": provider_message_id,
+            "status": "ended_before_delivery" if self._call_closed else "pending",
+        }
+        self.pending_context[event["id"]] = event
+        if getattr(self, "broker", None):
+            await self.broker.context_update({"enqueue": event})

@@ -35,6 +35,7 @@ class DurableSpool:
         max_bytes: int = 64 * 1024 * 1024,
         capacity: int = 4096,
         max_record_bytes: int = 256 * 1024,
+        on_admit=None,
     ):
         if min(max_bytes, capacity, max_record_bytes) <= 0:
             raise ValueError("spool limits must be positive")
@@ -43,6 +44,7 @@ class DurableSpool:
         self.cursor_path = path.with_suffix(".ack")
         self.max_bytes = max_bytes
         self.max_record_bytes = max_record_bytes
+        self.on_admit = on_admit
         self._queue: queue.Queue[bytes | None] = queue.Queue(capacity)
         self._lock = threading.Lock()
         self.error: Exception | None = None
@@ -73,6 +75,8 @@ class DurableSpool:
             if len(payload) > self.max_record_bytes:
                 raise BufferError("evidence record exceeds size bound")
             self._queue.put_nowait(payload)
+            if self.on_admit:
+                self.on_admit(len(payload), typed_record.kind)
         except ValueError as exc:
             self.error = exc
             raise
@@ -120,7 +124,7 @@ class DurableSpool:
             await asyncio.sleep(0.01)
         self.check()
 
-    def _read_batch(self, limit: int):
+    def _read_batch(self, limit: int, max_batch_bytes: int = 256 * 1024):
         with self._lock:
             offset = int(self.cursor_path.read_text()) if self.cursor_path.exists() else 0
             if not self.path.exists():
@@ -130,12 +134,18 @@ class DurableSpool:
                 if offset > self.path.stat().st_size:
                     raise ValueError("spool acknowledgement exceeds file size")
                 stream.seek(offset)
+                batch_bytes = 0
                 for _ in range(limit):
+                    before = stream.tell()
                     line = stream.readline()
                     if not line:
                         break
                     if not line.endswith(b"\n"):
                         raise ValueError("incomplete spool record")
+                    if records and batch_bytes + len(line) > max_batch_bytes:
+                        stream.seek(before)
+                        break
+                    batch_bytes += len(line)
                     records.append(json.loads(line))
                 return records, stream.tell()
 

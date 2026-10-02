@@ -12,6 +12,11 @@
 !packages/voice_runtime/
 !packages/voice_runtime/**
 # Re-exclude secrets and local outputs underneath the allowed source trees.
+!Dockerfile.runtime
+!apps/runtime/
+!apps/runtime/**
+!packages/voice_shared/
+!packages/voice_shared/**
 **/.env
 **/.env.*
 **/.git

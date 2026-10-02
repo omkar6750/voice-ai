@@ -108,3 +108,7 @@ __all__ = [
     "User",
     "WorkspaceSettings",
 ]
+
+from .runtime import RuntimeAssignment, RuntimeToolAttempt  # noqa: F401
+
+from .chat import ChatConversation, ChatExecution, ChatMessage  # noqa: F401

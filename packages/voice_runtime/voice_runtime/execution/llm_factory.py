@@ -57,7 +57,7 @@ def _has_generated_content(chunk) -> bool:
 def _fallback_worthy(error: Exception) -> bool:
     status_code = getattr(error, "status_code", None) or getattr(error, "code", None)
     return isinstance(
-        error, (APIConnectionError, APIStatusError, APITimeoutError, genai_errors.APIError)
+        error, (ConnectionError, APIConnectionError, APIStatusError, APITimeoutError, genai_errors.APIError)
     ) or (isinstance(status_code, int) and status_code != 200)
 
 
@@ -254,7 +254,7 @@ class _FirstTokenFallback:
     async def get_chat_completions(self, context):
         if self._fallback_active:
             try:
-                return await self._fallback_service.get_chat_completions(context)
+                return await self._fallback_stream(context)
             except asyncio.CancelledError:
                 raise
             except Exception as error:

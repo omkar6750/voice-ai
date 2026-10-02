@@ -11,13 +11,16 @@ import yaml
 from voice_api.core.config import _ENV_FILES
 
 ROOT = Path(__file__).resolve().parents[2]
-PUBLIC_KEYS = {"VITE_CLERK_PUBLISHABLE_KEY", "VITE_API_ORIGIN"}
+PUBLIC_KEYS = {"VITE_CLERK_PUBLISHABLE_KEY", "VITE_API_ORIGIN", "VITE_RUNTIME_ORIGIN"}
 PRIVATE_ENV = {
     "VOICE_DATABASE_URL",
     "VOICE_INTEGRATION_KEYS",
     "VOICE_INTEGRATION_ACTIVE_KEY",
     "VOICE_CALLBACK_SLOT_SIGNING_KEY",
     "VOICE_RUNTIME_SERVICE_TOKEN",
+    "VOICE_RUNTIME_CONTROL_TOKEN",
+    "VOICE_RUNTIME_BASE_URL",
+    "VOICE_RUNTIME_PUBLIC_BASE_URL",
     "VOICE_PUBLIC_BASE_URL",
     "VOICE_CLERK_AUTHORIZED_PARTIES",
     "CLERK_SECRET_KEY",
@@ -44,12 +47,16 @@ def test_render_has_only_free_manual_web_service():
     blueprint = yaml.safe_load((ROOT / "render.yaml").read_text())
     assert set(blueprint) == {"services", "previews"}
     assert blueprint["previews"] == {"generation": "off"}
-    assert len(blueprint["services"]) == 1
+    assert len(blueprint["services"]) == 2
+    runtime = blueprint["services"][1]
+    assert runtime["dockerfilePath"] == "./Dockerfile.runtime"
+    assert runtime["plan"] == "free"
+    assert runtime["healthCheckPath"] == "/health"
     service = blueprint["services"][0]
     assert service["type"] == "web"
     assert service["runtime"] == "docker"
     assert service["plan"] == "free"
-    assert service["autoDeployTrigger"] == "off"
+    assert service["autoDeployTrigger"] == "commit"
     assert service["healthCheckPath"] == "/health"
     assert service["dockerfilePath"] == "./Dockerfile"
     assert service["dockerContext"] == "."
@@ -126,6 +133,11 @@ def test_docker_context_is_default_deny_with_secret_exclusions():
     assert lines[0] == "**"
     assert set(line for line in lines if line.startswith("!")) == {
         "!Dockerfile",
+        "!Dockerfile.runtime",
+        "!apps/runtime/",
+        "!apps/runtime/**",
+        "!packages/voice_shared/",
+        "!packages/voice_shared/**",
         "!.dockerignore",
         "!pyproject.toml",
         "!uv.lock",

@@ -160,12 +160,12 @@ export function RunDetailPage() {
     run?.started_at && run.ended_at
       ? Date.parse(run.ended_at) - Date.parse(run.started_at)
       : null;
-  const ttft =
-    timeline?.spans
-      .filter((span) => span.ttfb_ms != null)
-      .map((span) => span.ttfb_ms!) ?? [];
   const llmSpans =
     timeline?.spans.filter((span) => span.category === "llm") ?? [];
+  const llmFirstToken =
+    llmSpans
+      .filter((span) => span.ttfb_ms != null)
+      .map((span) => span.ttfb_ms!) ?? [];
   const usageSpans = llmSpans.filter(
     (span) =>
       span.total_tokens != null ||
@@ -327,10 +327,10 @@ export function RunDetailPage() {
                 Tools <strong>{timeline.tools.length}</strong>
               </span>
               <span>
-                Avg first token{" "}
+                Avg LLM first token{" "}
                 <strong>
-                  {ttft.length
-                    ? duration(ttft.reduce((a, b) => a + b, 0) / ttft.length)
+                  {llmFirstToken.length
+                    ? duration(llmFirstToken.reduce((a, b) => a + b, 0) / llmFirstToken.length)
                     : "Not recorded"}
                 </strong>
               </span>

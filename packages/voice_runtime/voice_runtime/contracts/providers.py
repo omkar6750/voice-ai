@@ -6,8 +6,56 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from .base import ConfigModel
+from .gnani import GNANI_LANGUAGES, GNANI_VOICES
 
 SARVAM_LLM_MODELS = ("sarvam-105b", "sarvam-105b-conversations")
+
+# Bulbul v3's documented speakers. This credential-free catalog is returned by
+# /providers; it is not a provider voice-list API call. Keep IDs case-sensitive.
+# https://docs.sarvam.ai/api/api-guides-tutorials/text-to-speech/how-to/change-the-speaker-voice
+SARVAM_V3_SPEAKERS = {
+    "male": (
+        "shubh",
+        "aditya",
+        "rahul",
+        "rohan",
+        "amit",
+        "dev",
+        "ratan",
+        "varun",
+        "manan",
+        "sumit",
+        "kabir",
+        "aayan",
+        "ashutosh",
+        "advait",
+        "anand",
+        "tarun",
+        "sunny",
+        "mani",
+        "gokul",
+        "vijay",
+        "mohit",
+        "rehan",
+        "soham",
+    ),
+    "female": (
+        "ritu",
+        "priya",
+        "neha",
+        "pooja",
+        "simran",
+        "kavya",
+        "ishita",
+        "shreya",
+        "roopa",
+        "tanya",
+        "shruti",
+        "suhani",
+        "kavitha",
+        "rupali",
+    ),
+}
 
 
 class AudioConfig(ConfigModel):
@@ -25,8 +73,18 @@ class VADConfig(ConfigModel):
 
 
 class STTConfig(ConfigModel):
-    provider: Literal["sarvam"] = "sarvam"
-    model: Literal["saaras:v3"] = "saaras:v3"
+    provider: Literal["sarvam", "gnani"] = "sarvam"
+    model: Literal["saaras:v3", "gnani-prisma-v2.5"] = "saaras:v3"
+    language: str = "en-IN"
+
+    @model_validator(mode="after")
+    def validate_provider_model(self):
+        expected = {"sarvam": "saaras:v3", "gnani": "gnani-prisma-v2.5"}[self.provider]
+        if self.model != expected:
+            raise ValueError(f"STT provider '{self.provider}' requires model '{expected}'")
+        if self.provider == "gnani" and self.language not in GNANI_LANGUAGES:
+            raise ValueError("Select a supported Gnani STT language")
+        return self
 
 
 class OpenRouterProviderPreferences(ConfigModel):
@@ -116,7 +174,7 @@ class CartesiaTTSConfig(ConfigModel):
 
 
 class TTSConfig(ConfigModel):
-    provider: Literal["sarvam", "cartesia"] = "sarvam"
+    provider: Literal["sarvam", "cartesia", "gnani"] = "sarvam"
     model: str = "bulbul:v3"
     voice: str = "ritu"
     language: str = "en-IN"
@@ -128,14 +186,22 @@ class TTSConfig(ConfigModel):
         expected = {
             "sarvam": "bulbul:v3",
             "cartesia": "sonic-3",
+            "gnani": "timbre-v2.5",
         }[self.provider]
         if self.model != expected:
             raise ValueError(
                 f"TTS model '{self.model}' is not supported by provider '{self.provider}'; "
                 f"use '{expected}'"
             )
-        if self.provider == "sarvam" and self.cartesia is not None:
-            raise ValueError("Cartesia settings are unavailable for Sarvam TTS")
+        if self.provider != "cartesia" and self.cartesia is not None:
+            raise ValueError("Cartesia settings require the Cartesia provider")
+        if self.provider == "gnani":
+            if self.voice not in GNANI_VOICES:
+                raise ValueError("Select a supported Gnani Timbre v2.5 voice")
+            if self.language not in (*GNANI_LANGUAGES, "auto"):
+                raise ValueError("Select a supported Gnani TTS language")
+            if not 0.85 <= self.pace <= 1.15:
+                raise ValueError("Gnani pace must be between 0.85 and 1.15")
         if self.provider == "cartesia" and self.pace != 1.0:
             raise ValueError("Cartesia uses generation_config.speed, not Sarvam pace")
         return self
@@ -144,6 +210,23 @@ class TTSConfig(ConfigModel):
 # This is the runtime-owned capability contract. The API augments these definitions with
 # credential/catalog status without importing provider SDKs into the dashboard contract.
 RUNTIME_PROVIDER_CAPABILITIES: dict[str, dict] = {
+    "gnani": {
+        "slots": ["stt", "tts"],
+        "models_by_slot": {"stt": ["gnani-prisma-v2.5"], "tts": ["timbre-v2.5"]},
+        "languages": [*GNANI_LANGUAGES, "auto"],
+        "voices": [{"id": voice, "name": voice} for voice in GNANI_VOICES],
+        "fields": {
+            "model": {"type": "string", "runtime_supported": True},
+            "voice": {"type": "string", "runtime_supported": True},
+            "language": {"type": "string", "runtime_supported": True},
+            "pace": {
+                "type": "number",
+                "runtime_supported": True,
+                "description": "Gnani speed from 0.85 to 1.15.",
+            },
+        },
+        "runtime_status": "supported",
+    },
     "sarvam": {
         "slots": ["llm", "stt", "tts"],
         "models_by_slot": {
@@ -152,7 +235,11 @@ RUNTIME_PROVIDER_CAPABILITIES: dict[str, dict] = {
             "tts": ["bulbul:v3"],
         },
         "languages": ["en-IN", "hi-IN", "mr-IN", "te-IN"],
-        "voices": [],
+        "voices": [
+            {"id": speaker, "name": f"{speaker.title()} ({gender})", "gender": gender}
+            for gender, speakers in SARVAM_V3_SPEAKERS.items()
+            for speaker in speakers
+        ],
         "fields": {
             "model": {"type": "string", "runtime_supported": True},
             "voice": {"type": "string", "runtime_supported": True},

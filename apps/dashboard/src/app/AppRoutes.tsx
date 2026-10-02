@@ -63,6 +63,21 @@ const IntegrationsPage = lazy(() =>
     default: page.IntegrationsPage,
   })),
 );
+const WhatsAppIntegrationsPage = lazy(() =>
+  import("@/pages/integrations/provider").then((page) => ({
+    default: page.WhatsAppIntegrationsPage,
+  })),
+);
+const TwilioIntegrationsPage = lazy(() =>
+  import("@/pages/integrations/provider").then((page) => ({
+    default: page.TwilioIntegrationsPage,
+  })),
+);
+const CalendarIntegrationsPage = lazy(() =>
+  import("@/pages/integrations/provider").then((page) => ({
+    default: page.CalendarIntegrationsPage,
+  })),
+);
 const IntegrationDetailPage = lazy(() =>
   import("@/pages/integrations/detail").then((page) => ({
     default: page.IntegrationDetailPage,
@@ -76,6 +91,11 @@ const EndpointsPage = lazy(() =>
 );
 const SettingsPage = lazy(() =>
   import("@/pages/settings").then((page) => ({ default: page.SettingsPage })),
+);
+const CredentialsSettingsPage = lazy(() =>
+  import("@/pages/settings/ProviderCredentials").then((page) => ({
+    default: page.CredentialsSettingsPage,
+  })),
 );
 
 export function AppRoutes({ platformAdmin }: { platformAdmin: boolean }) {
@@ -119,6 +139,18 @@ export function AppRoutes({ platformAdmin }: { platformAdmin: boolean }) {
         />
         <Route path="/integrations" element={<IntegrationsPage />} />
         <Route
+          path="/integrations/whatsapp"
+          element={<WhatsAppIntegrationsPage />}
+        />
+        <Route
+          path="/integrations/twilio"
+          element={<TwilioIntegrationsPage />}
+        />
+        <Route
+          path="/integrations/calendar"
+          element={<CalendarIntegrationsPage />}
+        />
+        <Route
           path="/integrations/:connectionId"
           element={<IntegrationDetailPage />}
         />
@@ -130,7 +162,15 @@ export function AppRoutes({ platformAdmin }: { platformAdmin: boolean }) {
           }
         />
 
-        <Route path="/settings" element={<SettingsPage />} />
+        <Route
+          path="/settings"
+          element={<Navigate to="/settings/organization" replace />}
+        />
+        <Route path="/settings/organization" element={<SettingsPage />} />
+        <Route
+          path="/settings/credentials"
+          element={<CredentialsSettingsPage />}
+        />
         <Route
           path="/orgs/:orgId/*"
           element={<Navigate to="/organizations/profile" replace />}

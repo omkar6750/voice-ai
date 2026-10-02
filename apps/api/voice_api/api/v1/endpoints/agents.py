@@ -273,7 +273,7 @@ async def agent_deletion_impact(
     run_count = 0
     if v_ids:
         run_count = (
-            await session.scalar(select(func.count(Run.id)).where(Run.agent_version_id.in_(v_ids)))
+            await session.scalar(select(func.count(Run.id)).where(Run.agent_version_id.in_(v_ids), Run.channel != "text_test"))
         ) or 0
 
     warnings = []
@@ -316,7 +316,7 @@ async def delete_agent(
     run_count = 0
     if v_ids:
         run_count = (
-            await session.scalar(select(func.count(Run.id)).where(Run.agent_version_id.in_(v_ids)))
+            await session.scalar(select(func.count(Run.id)).where(Run.agent_version_id.in_(v_ids), Run.channel != "text_test"))
         ) or 0
 
     if run_count > 0 and not force:

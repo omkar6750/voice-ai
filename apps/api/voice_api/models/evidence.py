@@ -21,7 +21,7 @@ class Run(Identity, Created, OrganizationOwned, Base):
     __tablename__ = "runs"
     __table_args__ = (
         Index("ix_runs_status_created", "status", "created_at"),
-        CheckConstraint("channel IN ('phone','browser')", name="ck_run_channel"),
+        CheckConstraint("channel IN ('phone','browser','text_test')", name="ck_run_channel"),
         Index(
             "uq_endpoint_active_run",
             "endpoint_id",

@@ -10,6 +10,8 @@ COPY pyproject.toml uv.lock .python-version ./
 RUN uv lock --check && uv sync --frozen --no-dev --no-install-project --no-editable
 COPY apps/api ./apps/api
 COPY packages/voice_runtime ./packages/voice_runtime
+COPY packages/voice_shared ./packages/voice_shared
+COPY apps/runtime ./apps/runtime
 RUN uv sync --frozen --no-dev --no-editable
 
 FROM python:3.12-slim-bookworm AS runtime

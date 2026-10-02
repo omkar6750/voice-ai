@@ -14,8 +14,8 @@ from typing import Any
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.flows import ContextStrategy, ContextStrategyConfig, NodeConfig
-from pipecat.flows.types import FlowsFunctionSchema
+from pipecat.flows import NodeConfig
+from pipecat.flows.types import NO_RESPONSE, TRANSITION_IN_YAML, FlowsFunctionSchema
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -30,7 +30,7 @@ from pipecat.utils.context.llm_context_summarization import (
 from pipecat.workers.runner import WorkerRunner
 
 from voice_runtime.call_capture import CallCapture
-from voice_runtime.contracts import is_registered_handler, validate_node_actions
+from voice_runtime.contracts import FactSlotConfig, is_registered_handler, validate_node_actions
 from voice_runtime.contracts.prompt_references import compile_tool_references
 from voice_runtime.execution.classifier_runtime import NativeClassifierRuntime
 from voice_runtime.execution.contact_context import sanitize_contact_variables
@@ -46,16 +46,27 @@ from voice_runtime.execution.native_helpers import (
 from voice_runtime.execution.native_helpers import (
     build_user_aggregator_params as build_user_aggregator_params,
 )
-from voice_runtime.execution.native_helpers import (
-    render_opening as render_opening,
-)
 from voice_runtime.execution.node_actions import NativeNodeActions
 from voice_runtime.execution.observer import EvidenceObserver
+from voice_runtime.execution.pipecat_flow import compile_pipecat_flow
 from voice_runtime.execution.pipeline_lifecycle import NativePipelineLifecycle
 from voice_runtime.execution.speech import build_speech_services as build_speech_services
 from voice_runtime.execution.temporal import resolve_local_time_context
 from voice_runtime.execution.termination import CallTermination
 from voice_runtime.execution.tool_dispatch import NativeToolDispatch
+
+
+def text_commit(output):
+    return output.commit_processor()
+
+
+def text_user_params():
+    from pipecat.processors.aggregators.llm_response_universal import LLMUserAggregatorParams
+    from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+
+    return LLMUserAggregatorParams(
+        user_turn_strategies=ExternalUserTurnStrategies(), user_idle_timeout=0
+    )
 
 
 class NativePipelineHost(
@@ -79,6 +90,8 @@ class NativePipelineHost(
             raise ValueError("Graceful close timeout must be finite and positive")
         self._graceful_close_timeout_secs = graceful_close_timeout_secs
         self.run_id, self.directory, self.settings = run_id, recordings_dir / run_id, settings
+        self.broker = None
+        self.pending_context = {}
         self.worker = self.flow = self.capture = self.observer = None
         self.runner_task: asyncio.Task | None = None
         self.ready = asyncio.Event()
@@ -91,8 +104,11 @@ class NativePipelineHost(
         self._idle_reprompts = 0
         self.tracker: ExchangeTracker | None = None
         self._nodes: dict[str, dict] = {}
+        self._pipecat_flow = None
+        self._global_function_keys: set[str] = set()
+        self._flow_nodes_enriched = False
+        self._compiled_global_functions: list[FlowsFunctionSchema] = []
         self._snapshot: dict = {}
-        self._verbatim_opening: str | None = None
         self._exchange_count = 0
         self._classifier_cadence_running = False
         self._background_tool_tasks: set[asyncio.Task] = set()
@@ -102,16 +118,14 @@ class NativePipelineHost(
         self._close_error: BaseException | None = None
 
     def _node(self, key: str) -> NodeConfig:
-        """Adapt one saved graph node into Pipecat's native NodeConfig shape."""
+        """Add versioned application tools to Pipecat's compiled native node."""
+        if self._flow_nodes_enriched:
+            return dict(self._pipecat_flow.node(key))
         node = self._nodes[key]
-        flow = self._snapshot["flow"]
-        role_message = node.get("role_prompt")
-        if key == flow.get("initial_node") and not role_message:
-            role_message = self._snapshot.get("system_prompt", "")
-        if "initial_node" not in flow and not role_message:
-            # Compatibility for pre-Pipecat snapshots used by older evidence tests.
-            role_message = node.get("prompt", "")
+        if self._pipecat_flow is None:
+            self._pipecat_flow = compile_pipecat_flow(self._snapshot)
         transitions = node.get("transitions", [])
+        config = dict(self._pipecat_flow.node(key))
         callback_config = self._snapshot.get("callback_scheduling", {})
         callback_role_keys = {
             role.get("key")
@@ -123,35 +137,41 @@ class NativePipelineHost(
             )
         }
         callback_tools_available = bool(callback_config.get("enabled") and callback_role_keys)
+        direct_functions = {
+            function["name"] if isinstance(function, dict) else function.name
+            for function in node.get("functions", [])
+            if not (
+                function.get("transition_only")
+                if isinstance(function, dict)
+                else function.transition_only
+            )
+        }
         node_bindings = [
             name
-            for name in node["tool_bindings"]
-            if (name != "change_node" or transitions)
+            for name in [*node["tool_bindings"], *direct_functions]
+            if name not in node["tool_bindings"] or name not in direct_functions
+            if name != "change_node"
+            and name not in self._global_function_keys
             and (
                 name not in {"check_callback_availability", "book_callback"}
                 or callback_tools_available
             )
         ]
-        exposed_tools = set(node_bindings)
-        role_message = compile_tool_references(role_message or "", exposed_tools)
-        task_messages = []
-        if node.get("prompt"):
-            task_messages.append(
-                {
-                    "role": "user",
-                    "content": compile_tool_references(node["prompt"], exposed_tools),
-                }
-            )
-        if node.get("terminal"):
-            task_messages.append(
-                {
-                    "role": "user",
-                    "content": (
-                        "Deliver the terminal response now. Do not restart the conversation, "
-                        "greet the caller, ask discovery questions, or continue the flow."
-                    ),
-                }
-            )
+        exposed_tools = (
+            set(node_bindings)
+            | self._global_function_keys
+            | {f"go_to_{target}" for target in transitions}
+        )
+        config["role_message"] = compile_tool_references(
+            config.get("role_message", ""), exposed_tools
+        )
+        config["task_messages"] = [
+            {
+                "role": message["role"],
+                "content": compile_tool_references(message["content"], exposed_tools),
+            }
+            for message in config.get("task_messages", [])
+        ]
         bindings = self._snapshot["_resolved"]["tools"]
         functions = []
         for name in node_bindings:
@@ -195,32 +215,196 @@ class NativePipelineHost(
                     description=description,
                     properties=properties,
                     required=parameters.get("required", []),
-                    handler=self._handler(name),
+                    handler=(
+                        next(
+                            function.handler
+                            for function in config.get("functions", [])
+                            if (function["name"] if isinstance(function, dict) else function.name)
+                            == name
+                        )
+                        if any(
+                            (function["name"] if isinstance(function, dict) else function.name)
+                            == name
+                            and not (
+                                function.get("transition_only")
+                                if isinstance(function, dict)
+                                else function.transition_only
+                            )
+                            for function in node.get("functions", [])
+                        )
+                        else self._handler(name)
+                    ),
                 )
             )
-        config = NodeConfig(
-            name=key,
-            role_message=role_message or "",
-            task_messages=task_messages,
-            functions=functions,
-            respond_immediately=node["respond_immediately"],
-            context_strategy=ContextStrategyConfig(
-                strategy=ContextStrategy(node.get("context_strategy", "append"))
-            ),
-        )
+        merged_functions = {function.name: function for function in config.get("functions", [])}
+        merged_functions.update({function.name: function for function in functions})
+        config["functions"] = list(merged_functions.values())
+        for slot_data in self._snapshot.get("fact_slots", []):
+            if slot_data.get("nodes") and key not in slot_data["nodes"]:
+                continue
+            slot = FactSlotConfig.model_validate(slot_data)
+
+            async def record_fact(args, manager, slot=slot):
+                try:
+                    value = slot.validate_value(args.get("value"))
+                except (TypeError, ValueError) as exc:
+                    return {"status": "error", "error": str(exc)}
+                manager.state[slot.key] = value
+                return {"status": "ok", "key": slot.key, "value": value}
+
+            value_schema: dict[str, Any] = {
+                "type": slot.value_type,
+                "description": slot.description,
+            }
+            if slot.enum is not None:
+                value_schema["enum"] = slot.enum
+            if slot.minimum is not None:
+                value_schema["minimum"] = slot.minimum
+            if slot.maximum is not None:
+                value_schema["maximum"] = slot.maximum
+            config["functions"].append(
+                FlowsFunctionSchema(
+                    name=f"record_{slot.key}",
+                    description=f"Record the caller's {slot.description} as a conversation fact.",
+                    properties={"value": value_schema},
+                    required=["value"],
+                    handler=record_fact,
+                )
+            )
+        function_names = [function.name for function in config.get("functions", [])]
+        if len(set(function_names)) != len(function_names):
+            raise ValueError(f"Pipecat function names collide in node '{key}'")
         if node.get("terminal"):
             # Pipecat serializes this control frame behind synthesis and local
             # output audio. It is not a claim of browser/carrier playback.
             config["post_actions"] = [
-                {"type": "function", "handler": self._terminal_response_finished, "node": key}
+                *config.get("post_actions", []),
+                {"type": "function", "handler": self._terminal_response_finished, "node": key},
             ]
         return config
 
+    async def _run_configured_node_action(self, action: dict, _manager) -> None:
+        """Execute a registry-backed action from a native Pipecat function action."""
+        phase = action.get("phase", "entry")
+        node_id = action.get("node_id")
+        binding_key = action.get("binding_key")
+        if phase not in {"entry", "exit"} or node_id not in self._nodes or not binding_key:
+            raise ValueError("Configured Pipecat function action is invalid")
+        await self._run_node_action(phase, node_id, binding_key)
+
+    def _global_function_schemas(self) -> list[FlowsFunctionSchema]:
+        """Resolve configured shared tools once for FlowManager(global_functions=...)."""
+        if self._compiled_global_functions:
+            return list(self._compiled_global_functions)
+        if not self._global_function_keys:
+            return []
+        configured = [
+            function
+            for function in self._pipecat_flow.global_functions
+            if function.name in self._global_function_keys
+        ]
+        missing = self._global_function_keys - {function.name for function in configured}
+        if missing:
+            raise ValueError(f"global functions are unavailable: {sorted(missing)}")
+        return [
+            self._registry_function_schema(function.name, function.handler)
+            for function in configured
+        ]
+
+    def _registry_function_schema(self, name: str, handler) -> FlowsFunctionSchema:
+        tool = self._snapshot["_resolved"]["tools"][name]["definition"]
+        if name == "classify_lead":
+            from voice_runtime.contracts.registry import registered_handler_specs
+
+            spec = next(spec for spec in registered_handler_specs() if spec.name == name)
+            tool = {"description": spec.description, "parameters": spec.parameters}
+        return FlowsFunctionSchema(
+            name=name,
+            description=tool["description"],
+            properties=deepcopy(tool["parameters"].get("properties", {})),
+            required=tool["parameters"].get("required", []),
+            handler=handler,
+        )
+
+    def _pipecat_tool_proxy(self, name: str):
+        async def proxy(flow_manager, **params):
+            source_node = getattr(flow_manager, "current_node", None)
+            result = await self._handler(name)(params, flow_manager)
+            if isinstance(result, tuple):
+                result = result[0]
+            if name == "classify_lead" and flow_manager.current_node != source_node:
+                return result, NO_RESPONSE
+            if (
+                name == "classify_lead"
+                and self._snapshot.get("classifier", {}).get("routing_policy") == "lead_followup"
+            ):
+                from voice_runtime.execution.lead_routing import followup_route
+
+                route = followup_route(result)
+                # A failed result stays in place; an old result cannot change a newer node.
+                if flow_manager.current_node != source_node:
+                    return result, NO_RESPONSE
+                if route is None:
+                    return {
+                        **(result if isinstance(result, dict) else {}),
+                        "followup_route": "stay",
+                    }, TRANSITION_IN_YAML
+                result = {**result, "followup_route": route}
+                self.tracker.diagnostic(
+                    severity="info",
+                    category="classifier_routing",
+                    source="runtime",
+                    code="lead_followup_route",
+                    message="Classifier selected follow-up path",
+                    detail=f"{source_node} -> {route}",
+                )
+            if name == "classify_lead" and (
+                not isinstance(result, dict) or result.get("status") == "error"
+            ):
+                return result, NO_RESPONSE
+            return result, TRANSITION_IN_YAML
+
+        proxy.__name__ = name
+        proxy.__doc__ = f"Run the versioned application tool {name}."
+        return proxy
+
     async def prepare(
-        self, snapshot: dict, tracker: ExchangeTracker, *, transport=None, enable_rtvi=False
+        self,
+        snapshot: dict,
+        tracker: ExchangeTracker,
+        *,
+        transport=None,
+        enable_rtvi=False,
+        text_output=None,
     ) -> None:
         self.tracker, self._snapshot = tracker, snapshot
         self._nodes = {node["id"]: node for node in snapshot["flow"]["nodes"]}
+        self._global_function_keys = {
+            function["name"] if isinstance(function, dict) else function
+            for function in snapshot["flow"].get("global_functions", [])
+        }
+        tool_handlers = {
+            name: self._pipecat_tool_proxy(name)
+            for node in snapshot["flow"].get("nodes", [])
+            for function in node.get("functions", [])
+            for name in [function["name"]]
+            if not function.get("transition_only")
+        }
+        tool_handlers.update(
+            {name: self._pipecat_tool_proxy(name) for name in self._global_function_keys}
+        )
+        self._pipecat_flow = compile_pipecat_flow(
+            snapshot,
+            handlers={
+                "_run_configured_node_action": self._run_configured_node_action,
+                **tool_handlers,
+            },
+        )
+        self._compiled_global_functions = self._global_function_schemas()
+        compiled_nodes = {key: self._node(key) for key in self._nodes}
+        for key, node_config in compiled_nodes.items():
+            self._pipecat_flow.node(key).update(node_config)
+        self._flow_nodes_enriched = True
         action_errors = validate_node_actions(
             snapshot,
             snapshot.get("_resolved", {}).get("tools", {}),
@@ -239,7 +423,17 @@ class NativePipelineHost(
             for name in self._nodes[key]["tool_bindings"]:
                 if name not in snapshot["_resolved"]["tools"]:
                     raise ValueError("Node references unavailable tool binding")
-        required_credentials = [("stt:sarvam", stage_api_key(self.settings, "stt", "sarvam"))]
+        self.text_output = text_output
+        required_credentials = (
+            []
+            if text_output
+            else [
+                (
+                    f"stt:{snapshot['stt']['provider']}",
+                    stage_api_key(self.settings, "stt", snapshot["stt"]["provider"]),
+                )
+            ]
+        )
         llm_provider = snapshot["llm"]["provider"]
         required_credentials.append(
             (f"llm:{llm_provider}", stage_api_key(self.settings, "llm", llm_provider))
@@ -254,11 +448,11 @@ class NativePipelineHost(
                 )
             )
         classifier_cfg = snapshot.get("classifier", {})
-        if classifier_cfg.get("classifier_type") == "jev":
+        if classifier_cfg.get("enabled", True) and classifier_cfg.get("classifier_type") == "jev":
             required_credentials.append(
                 ("jev_api_key", getattr(self.settings, "jev_api_key", None))
             )
-        else:
+        elif classifier_cfg.get("enabled", True):
             classifier_provider = (classifier_cfg.get("llm") or {}).get("provider", "groq")
             required_credentials.append(
                 (
@@ -279,12 +473,12 @@ class NativePipelineHost(
             if not value:
                 raise ValueError(f"{name} is not configured")
         tts_provider = snapshot["tts"]["provider"]
-        if not stage_api_key(self.settings, "tts", tts_provider):
+        if text_output is None and not stage_api_key(self.settings, "tts", tts_provider):
             raise ValueError(f"tts:{tts_provider} is not configured")
         rate = snapshot["audio"]["sample_rate"]
         self.directory.mkdir(parents=True, exist_ok=True)
-        self.capture = CallCapture(self.directory, rate)
-        if transport is None:
+        self.capture = None if text_output else CallCapture(self.directory, rate)
+        if transport is None and text_output is None:
             # Legacy SIM7600 path: construct transport from endpoint config.
             endpoint = snapshot["_resolved"]["endpoint"]
             from voice_runtime.telephony.usb_audio import Sim7600UsbAudioBridge
@@ -297,7 +491,9 @@ class NativePipelineHost(
                 capture=self.capture,
                 frame_ms=snapshot["audio"]["frame_ms"],
             ).transport()
-        stt, tts = build_speech_services(self.settings, snapshot, rate)
+        stt, tts = (
+            (None, None) if text_output else build_speech_services(self.settings, snapshot, rate)
+        )
         llm_config = snapshot["llm"]
         llm = build_llm_service(
             self.settings,
@@ -350,14 +546,18 @@ class NativePipelineHost(
             )
         tts_config = snapshot["tts"]
         vad_config = snapshot["vad"]
-        vad = SileroVADAnalyzer(
-            sample_rate=rate,
-            params=VADParams(
-                confidence=vad_config["confidence"],
-                start_secs=vad_config["start_secs"],
-                stop_secs=vad_config["stop_secs"],
-                min_volume=vad_config["min_volume"],
-            ),
+        vad = (
+            None
+            if text_output
+            else SileroVADAnalyzer(
+                sample_rate=rate,
+                params=VADParams(
+                    confidence=vad_config["confidence"],
+                    start_secs=vad_config["start_secs"],
+                    stop_secs=vad_config["stop_secs"],
+                    min_volume=vad_config["min_volume"],
+                ),
+            )
         )
         contact = (
             snapshot.get("_resolved", {}).get("contact") or snapshot.get("contact_snapshot") or {}
@@ -369,33 +569,20 @@ class NativePipelineHost(
         flow_state: dict[str, Any] = dict(temporal)
         flow_state["contact"] = sanitized_contact
         flow_state.update(sanitized_contact)
+        for slot in snapshot.get("fact_slots", []):
+            flow_state.setdefault(slot["key"], "")
         for variable in allowed_vars:
             flow_state.setdefault(variable, "")
 
-        configured_opening = snapshot.get("greeting") or ""
-        self._verbatim_opening = (
-            render_opening(configured_opening, flow_state) if configured_opening.strip() else None
-        )
-        initial_messages: list[dict[str, str]] = []
-        if not self._verbatim_opening:
-            kickoff_greeting = configured_opening
-            if not kickoff_greeting:
-                name_phrase = (
-                    f" to {sanitized_contact['name']}" if "name" in sanitized_contact else ""
-                )
-                kickoff_greeting = (
-                    f"Start the phone conversation with a friendly '{temporal['greeting_phrase']}'"
-                    f"{name_phrase}. "
-                    f"Caller's local time is {temporal['local_time_12h']} "
-                    f"({temporal['local_time_24h']})."
-                )
-            initial_messages = [{"role": "user", "content": kickoff_greeting}]
-
-        context = LLMContext(initial_messages)
+        # Opening behavior belongs to the initial node's system instruction. Do not
+        # synthesize a user turn or speak a separate verbatim greeting here.
+        context = LLMContext([])
         self.context = context
         aggregators = LLMContextAggregatorPair(
             context,
-            user_params=build_user_aggregator_params(snapshot, vad),
+            user_params=text_user_params()
+            if text_output
+            else build_user_aggregator_params(snapshot, vad),
             assistant_params=assistant_params,
         )
 
@@ -428,8 +615,18 @@ class NativePipelineHost(
             self.observer.record_turn_event("user_turn_stop_timeout")
 
         bind_transcripts(aggregators, tracker)
+        self.aggregators = aggregators
         pipeline = Pipeline(
             [
+                aggregators.user(),
+                _CallerTurnContextEventProcessor(self._deliver_pending_context_events, context),
+                llm,
+                text_output,
+                aggregators.assistant(),
+                text_commit(text_output),
+            ]
+            if text_output
+            else [
                 transport.input(),
                 stt,
                 aggregators.user(),
@@ -458,7 +655,7 @@ class NativePipelineHost(
         self.observer.context_event_consumer = self._mark_context_events_consumed
         self.worker = PipelineWorker(
             pipeline,
-            observers=[self.observer, self.capture],
+            observers=[self.observer] + ([self.capture] if self.capture else []),
             enable_rtvi=enable_rtvi,
             params=PipelineParams(
                 enable_metrics=True,
@@ -477,11 +674,18 @@ class NativePipelineHost(
             snapshot=snapshot,
             observer=self.observer,
             context=context,
+            global_functions=self._global_function_schemas(),
             classifier_runner=self._run_node_classifier,
-            action_runner=self._run_node_action,
             end_call_runner=self._finish_end_call,
         )
         self.flow.state.update(flow_state)
+        if text_output:
+            text_output.host = self
+            for key in self._nodes:
+                for function in self._pipecat_flow.node(key).get("functions", []):
+                    function.cancel_on_interruption = False
+            for function in self._compiled_global_functions:
+                function.cancel_on_interruption = False
 
         @self.worker.event_handler("on_pipeline_started")
         async def started(_worker, _frame):

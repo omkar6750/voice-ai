@@ -90,7 +90,7 @@ const version = {
   },
 };
 const noop = () => {};
-function mountEditor(api, selected = version) {
+function mountEditor(api, selected = version, extras = {}) {
   const editor = h(
     ApiContext.Provider,
     { value: api },
@@ -100,6 +100,7 @@ function mountEditor(api, selected = version) {
       onSaved: noop,
       onConflict: noop,
       onSectionChange: noop,
+      ...extras,
     }),
   );
   // Match the application's root data-router plus nested declarative routes.
@@ -175,9 +176,12 @@ test("saving remains in editor, preserves schema, and uses returned revision on 
     };
   };
   const { router } = mountEditor(api);
-  fireEvent.change(screen.getByLabelText("Description"), {
-    target: { value: "Changed" },
-  });
+  fireEvent.change(
+    screen.getByLabelText("When should the assistant use this tool?"),
+    {
+      target: { value: "Changed" },
+    },
+  );
   fireEvent.mouseDown(screen.getByRole("tab", { name: "Parameters" }), {
     button: 0,
     ctrlKey: false,
@@ -186,7 +190,10 @@ test("saving remains in editor, preserves schema, and uses returned revision on 
     button: 0,
     ctrlKey: false,
   });
-  assert.equal(screen.getByLabelText("Description").value, "Changed");
+  assert.equal(
+    screen.getByLabelText("When should the assistant use this tool?").value,
+    "Changed",
+  );
   fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
   await waitFor(() =>
     assert.match(screen.getByText(/Revision 2/).textContent, /Saved/),
@@ -196,9 +203,12 @@ test("saving remains in editor, preserves schema, and uses returned revision on 
     router.state.location.pathname,
     "/tools/tool-1/versions/version-1/edit",
   );
-  fireEvent.change(screen.getByLabelText("Description"), {
-    target: { value: "Changed again" },
-  });
+  fireEvent.change(
+    screen.getByLabelText("When should the assistant use this tool?"),
+    {
+      target: { value: "Changed again" },
+    },
+  );
   fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
   await waitFor(() => assert.equal(calls.length, 2));
   assert.equal(calls[1].body.revision, 2);
@@ -217,9 +227,12 @@ test("dirty validation saves first and validates the persisted configuration", a
     return { id: version.id, revision: 2, valid: true, issues: [] };
   };
   mountEditor(api);
-  fireEvent.change(screen.getByLabelText("Description"), {
-    target: { value: "Validate this" },
-  });
+  fireEvent.change(
+    screen.getByLabelText("When should the assistant use this tool?"),
+    {
+      target: { value: "Validate this" },
+    },
+  );
   fireEvent.click(screen.getByRole("button", { name: "Save & validate" }));
   await waitFor(() => assert.deepEqual(methods, ["PATCH", "POST"]));
 });
@@ -230,9 +243,12 @@ test("a version published during editing retains unsaved input and blocks all wr
   mountEditor(async (...args) => {
     requests.push(args);
   }, selected);
-  fireEvent.change(screen.getByLabelText("Description"), {
-    target: { value: "Preserve after external publication" },
-  });
+  fireEvent.change(
+    screen.getByLabelText("When should the assistant use this tool?"),
+    {
+      target: { value: "Preserve after external publication" },
+    },
+  );
   selected.status = "published";
   fireEvent.mouseDown(screen.getByRole("tab", { name: "Parameters" }), {
     button: 0,
@@ -243,11 +259,13 @@ test("a version published during editing retains unsaved input and blocks all wr
     ctrlKey: false,
   });
   assert.equal(
-    screen.getByLabelText("Description").value,
+    screen.getByLabelText("When should the assistant use this tool?").value,
     "Preserve after external publication",
   );
   assert.equal(
-    screen.getByLabelText("Description").closest("fieldset").disabled,
+    screen
+      .getByLabelText("When should the assistant use this tool?")
+      .closest("fieldset").disabled,
     true,
   );
   assert.equal(
@@ -265,9 +283,12 @@ test("navigation offers Stay and Discard; failed Save & leave preserves the edit
   const { router } = mountEditor(async () => {
     throw new ApiError(409, "Draft changed by another operator");
   });
-  fireEvent.change(screen.getByLabelText("Description"), {
-    target: { value: "Keep my work" },
-  });
+  fireEvent.change(
+    screen.getByLabelText("When should the assistant use this tool?"),
+    {
+      target: { value: "Keep my work" },
+    },
+  );
   await act(async () => {
     await router.navigate("/elsewhere");
   });
@@ -282,7 +303,10 @@ test("navigation offers Stay and Discard; failed Save & leave preserves the edit
   fireEvent.click(await screen.findByRole("button", { name: "Save & leave" }));
   await screen.findByText("This draft changed");
   await waitFor(() =>
-    assert.equal(screen.getByLabelText("Description").value, "Keep my work"),
+    assert.equal(
+      screen.getByLabelText("When should the assistant use this tool?").value,
+      "Keep my work",
+    ),
   );
   assert.equal(
     router.state.location.pathname,
@@ -353,4 +377,37 @@ test("publication submits the reviewed revision once", async () => {
   fireEvent.click(button);
   await waitFor(() => assert.equal(requests.length, 2));
   assert.deepEqual(JSON.parse(requests[1].init.body), { revision: 1 });
+});
+
+test("merged WhatsApp controls preserve pinned connections and clear them when changing action", async () => {
+  const selected = structuredClone(version);
+  selected.config.handler = "send_whatsapp_message";
+  selected.config.whatsapp_connection_id = "missing-connection";
+  const calls = [];
+  const api = async (path, init) => {
+    const body = JSON.parse(init.body);
+    calls.push(body);
+    return { ...selected, revision: calls.length + 1, config: body.config };
+  };
+  mountEditor(api, selected, {
+    handlers: [
+      { name: "send_whatsapp_message", description: "Send a message" },
+      { name: "end_call", description: "End the call" },
+    ],
+    whatsappConnections: [{ id: "enabled-connection", label: "Support WhatsApp" }],
+  });
+  fireEvent.mouseDown(screen.getByRole("tab", { name: "Execution" }), { button: 0, ctrlKey: false });
+  const picker = screen.getByLabelText("whatsapp_connection_id");
+  assert.equal(picker.value, "missing-connection");
+  assert.ok(screen.getByRole("option", { name: "Pinned connection unavailable" }));
+  fireEvent.change(picker, { target: { value: "enabled-connection" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+  await waitFor(() => assert.equal(calls.length, 1));
+  assert.equal(calls[0].config.whatsapp_connection_id, "enabled-connection");
+  await waitFor(() => assert.equal(screen.getByLabelText("Approved backend action").disabled, false));
+  fireEvent.change(screen.getByLabelText("Approved backend action"), { target: { value: "end_call" } });
+  assert.equal(screen.queryByLabelText("whatsapp_connection_id"), null);
+  fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+  await waitFor(() => assert.equal(calls.length, 2));
+  assert.equal(calls[1].config.whatsapp_connection_id, null);
 });

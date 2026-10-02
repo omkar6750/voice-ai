@@ -5,14 +5,15 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pipecat.frames.frames import InputAudioRawFrame, OutputAudioRawFrame
 from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocketDisconnect
 from voice_api.api.deps import get_session, require_legacy_owner
+from voice_api.api.v1.endpoints.browser_sessions import router as legacy_browser_router
 from voice_api.core.config import get_settings
-from voice_api.main import app
 from voice_api.models import BrowserSession, Run
 from voice_api.services.browser_session_service import (
     BrowserSessionContext,
@@ -21,6 +22,10 @@ from voice_api.services.browser_session_service import (
     verify_ticket_actor,
 )
 from voice_runtime.execution.delivery import EvidenceFinalization
+
+# These tests intentionally retain coverage of the hosted legacy transport.
+app = FastAPI()
+app.include_router(legacy_browser_router, prefix="/api/v1")
 
 
 @pytest.mark.asyncio
@@ -85,7 +90,10 @@ def test_websocket_auth_and_binary_audio_round_trip():
         with (
             patch("voice_api.services.browser_session_service.browser_session_manager", manager),
             patch("voice_api.services.browser_session_service.SessionFactory", return_value=db),
-            patch("voice_api.services.browser_session_service.verify_ticket_actor", new_callable=AsyncMock),
+            patch(
+                "voice_api.services.browser_session_service.verify_ticket_actor",
+                new_callable=AsyncMock,
+            ),
             patch("voice_api.services.browser_session_service.acquire", new_callable=AsyncMock),
             patch(
                 "voice_api.services.browser_session_service._run_browser_pipeline",
@@ -144,7 +152,10 @@ async def test_ticket_expiration_and_one_active_call(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider_error", [False, True])
-async def test_pipeline_finalizes_disconnect_or_provider_failure(tmp_path, provider_error):
+async def test_pipeline_finalizes_disconnect_or_provider_failure(
+    tmp_path, monkeypatch, provider_error
+):
+    monkeypatch.chdir(tmp_path)
     ctx = BrowserSessionContext(
         "browser-test", "run-test", {"audio": {"sample_rate": 16000}}, "org-test"
     )
@@ -162,6 +173,7 @@ async def test_pipeline_finalizes_disconnect_or_provider_failure(tmp_path, provi
     db.__aenter__.return_value = db
     host = AsyncMock()
     host.directory = tmp_path / "not-created"
+
     async def complete_call(*_args):
         ctx.termination.request("terminal_completed", graceful=True)
         ctx.termination.pipeline_finished()
@@ -172,7 +184,11 @@ async def test_pipeline_finalizes_disconnect_or_provider_failure(tmp_path, provi
         host.prepare.side_effect = RuntimeError("provider offline")
     with (
         patch("voice_api.services.browser_session_service.SessionFactory", return_value=db),
-        patch("voice_api.services.browser_session_service.settings_for_snapshot", new_callable=AsyncMock, side_effect=lambda _session, _org, _snapshot, base, **_kwargs: base),
+        patch(
+            "voice_api.services.browser_session_service.settings_for_snapshot",
+            new_callable=AsyncMock,
+            side_effect=lambda _session, _org, _snapshot, base, **_kwargs: base,
+        ),
         patch("voice_api.services.browser_session_service.NativePipelineHost", return_value=host),
         patch("voice_api.services.browser_session_service.release", new_callable=AsyncMock),
         patch("voice_api.services.browser_session_service.DurableSpool"),

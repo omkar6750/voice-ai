@@ -12,6 +12,7 @@ from voice_api.services.vault_service import CredentialVault, SecretScope, Vault
 PROVIDER_FIELDS = {
     "groq": "groq_api_key",
     "isoquant": "isoquant_api_key",
+    "gnani": "gnani_api_key",
     "openrouter": "openrouter_api_key",
     "gemini": "gemini_api_key",
     "sarvam": "sarvam_api_key",
@@ -99,6 +100,9 @@ def stage_providers(snapshot: dict) -> dict[str, str]:
     result = {
         stage: snapshot[stage]["provider"] for stage in ("stt", "llm", "tts") if stage in snapshot
     }
+    if snapshot.get("_text_test"):
+        result.pop("stt", None)
+        result.pop("tts", None)
     fallback = snapshot.get("llm", {}).get("fallback")
     if fallback:
         result["llm_fallback"] = fallback["provider"]
@@ -157,7 +161,13 @@ async def resolve_references(
 
 
 async def settings_for_snapshot(
-    session: AsyncSession, organization_id: str, snapshot: dict, base: Settings, *, run_id: str
+    session: AsyncSession,
+    organization_id: str,
+    snapshot: dict,
+    base: Settings,
+    *,
+    run_id: str,
+    acquire_slot: bool = True,
 ) -> Settings:
     from fastapi import HTTPException
 
@@ -165,7 +175,8 @@ async def settings_for_snapshot(
 
     bind_organization(session.sync_session, organization_id)
     admit_settings(base)
-    await acquire(session, run_id)
+    if acquire_slot:
+        await acquire(session, run_id)
     pinned = snapshot.get("_resolved", {}).get("credentials")
     refs = pinned if pinned is not None else await resolve_references(session, snapshot)
     if set(refs) != set(stage_providers(snapshot)):

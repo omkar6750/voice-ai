@@ -68,3 +68,25 @@ async def test_unconfigured_models_are_not_invented():
     assert providers["groq"].models == []
     assert providers["gemini"].models == []
     assert providers["sarvam"].status == "configured"
+
+
+@pytest.mark.asyncio
+async def test_sarvam_bulbul_voice_catalog_without_provider_requests(monkeypatch):
+    def no_provider_fetch(*args, **kwargs):
+        raise AssertionError(
+            "Static voice catalogs do not need paid provider credentials or requests"
+        )
+
+    monkeypatch.setattr(provider_registry.httpx, "AsyncClient", no_provider_fetch)
+    registry = await provider_registry.get_provider_registry(
+        Settings(_env_file=None, groq_api_key=None, gemini_api_key=None)
+    )
+    sarvam = next(entry for entry in registry.providers if entry.provider == "sarvam")
+    voices = {voice.id: voice for voice in sarvam.voices}
+    assert sarvam.models_by_slot["tts"] == ["bulbul:v3"]
+    assert sarvam.fields["voice"].runtime_supported
+    assert len(voices) == 37
+    assert voices["shubh"].gender == "male"
+    assert voices["ritu"].gender == "female"
+    assert voices["priya"].name == "Priya (female)"
+    assert all(name == name.lower() for name in voices)

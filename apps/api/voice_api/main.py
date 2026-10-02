@@ -17,6 +17,10 @@ from voice_runtime import perf_diagnostics
 # renderers must never acquire caller/provider data, even during startup.
 configure_safe_logging()
 
+from voice_shared.http_clients import install as install_http_logging  # noqa: E402
+from voice_shared.logging import HttpLoggingMiddleware  # noqa: E402
+from voice_shared.logging import configure as configure_http_logging  # noqa: E402
+
 from voice_api.api.v1.api import api_router  # noqa: E402
 from voice_api.core.config import get_settings  # noqa: E402
 
@@ -24,6 +28,12 @@ from voice_api.core.config import get_settings  # noqa: E402
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     settings = get_settings()
+    configure_http_logging(
+        "voice-api",
+        "data/logs" if settings.env.casefold() in {"dev", "development", "local"} else None,
+        env_files=settings.model_config.get("env_file", ()),
+    )
+    install_http_logging("voice-api")
     perf_diagnostics.configure(env=settings.env, enabled=settings.debug_perf)
     monitor = asyncio.create_task(perf_diagnostics.loop_lag_monitor())
     try:
@@ -31,9 +41,13 @@ async def lifespan(_app: FastAPI):
     finally:
         monitor.cancel()
         await asyncio.gather(monitor, return_exceptions=True)
+        from voice_api.services.runtime_dispatch import close_client
+
+        await close_client()
 
 
 app = FastAPI(title="Voice AI API", version="0.2.0", lifespan=lifespan)
+app.add_middleware(HttpLoggingMiddleware, service="voice-api")
 
 
 @app.middleware("http")

@@ -122,12 +122,15 @@ export function ModelsPanel({
                       provider === "isoquant"
                         ? ("low" as const)
                         : provider === "gemini" || provider === "openrouter"
-                        ? ("provider_default" as const)
-                        : ("none" as const),
-                    max_tokens: provider === "isoquant" ? 1024 : config.llm.max_tokens,
+                          ? ("provider_default" as const)
+                          : ("none" as const),
+                    max_tokens:
+                      provider === "isoquant" ? 1024 : config.llm.max_tokens,
                     models: provider === "openrouter" ? config.llm.models : [],
                     provider_preferences:
-                      provider === "openrouter" ? config.llm.provider_preferences : null,
+                      provider === "openrouter"
+                        ? config.llm.provider_preferences
+                        : null,
                   },
                 };
                 change(bindCredential(next, "llm", null));
@@ -251,7 +254,9 @@ export function ModelsPanel({
           </Field>
           {config.llm.provider === "isoquant" && (
             <Field>
-              <FieldLabel htmlFor="llm-reasoning-effort">Reasoning effort</FieldLabel>
+              <FieldLabel htmlFor="llm-reasoning-effort">
+                Reasoning effort
+              </FieldLabel>
               <NativeSelect
                 id="llm-reasoning-effort"
                 value={config.llm.reasoning_effort}
@@ -261,7 +266,8 @@ export function ModelsPanel({
                     ...config,
                     llm: {
                       ...config.llm,
-                      reasoning_effort: event.target.value as "low" | "high" | "max",
+                      reasoning_effort: event.target.value as
+                        "low" | "high" | "max",
                     },
                   })
                 }
@@ -271,8 +277,9 @@ export function ModelsPanel({
                 <option value="max">Max</option>
               </NativeSelect>
               <FieldDescription>
-                Reasoning is always on. This effort and the answer share the output token limit.
-                Temperature and top-p are unavailable for this provider.
+                Reasoning is always on. This effort and the answer share the
+                output token limit. Temperature and top-p are unavailable for
+                this provider.
               </FieldDescription>
             </Field>
           )}
@@ -461,7 +468,11 @@ export function ModelsPanel({
                   if (!available.length) return;
                   change({
                     ...config,
-                    stt: { provider, model: available[0] as "saaras:v3" },
+                    stt: {
+                      provider,
+                      model: available[0] as AgentConfig["stt"]["model"],
+                      language: config.stt.language ?? "en-IN",
+                    },
                   });
                 }}
               >
@@ -480,6 +491,32 @@ export function ModelsPanel({
                 Choose an organization credential for speech recognition.
               </FieldDescription>
             </Field>
+            {config.stt.provider === "gnani" && (
+              <Field>
+                <FieldLabel htmlFor="stt-language">
+                  Recognition language
+                </FieldLabel>
+                <NativeSelect
+                  id="stt-language"
+                  value={config.stt.language ?? "en-IN"}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    change({
+                      ...config,
+                      stt: { ...config.stt, language: event.target.value },
+                    })
+                  }
+                >
+                  {(selectedStt?.languages ?? [])
+                    .filter((language) => language !== "auto")
+                    .map((language) => (
+                      <option key={language} value={language}>
+                        {language}
+                      </option>
+                    ))}
+                </NativeSelect>
+              </Field>
+            )}
             <CredentialBindingSelect
               stage="stt"
               provider={config.stt.provider}
@@ -508,7 +545,10 @@ export function ModelsPanel({
                 onChange={(model) =>
                   change({
                     ...config,
-                    stt: { ...config.stt, model: model as "saaras:v3" },
+                    stt: {
+                      ...config.stt,
+                      model: model as AgentConfig["stt"]["model"],
+                    },
                   })
                 }
                 placeholder="Search models..."
@@ -547,7 +587,9 @@ export function ModelsPanel({
                       provider,
                       model: defaultModel,
                       voice: defaultVoice,
-                      pace: provider === "cartesia" ? 1 : config.tts.pace,
+                      pace: provider === "sarvam" ? config.tts.pace : 1,
+                      language:
+                        provider === "gnani" ? "en-IN" : config.tts.language,
                       cartesia:
                         provider === "cartesia"
                           ? (config.tts.cartesia ?? null)
@@ -696,13 +738,14 @@ export function ModelsPanel({
               </Field>
             )}
 
-            {config.tts.provider === "sarvam" ? (
+            {config.tts.provider === "sarvam" ||
+            config.tts.provider === "gnani" ? (
               <NumberField
                 id="tts-pace"
                 label="Pace"
                 value={config.tts.pace}
-                min={0.5}
-                max={2.0}
+                min={config.tts.provider === "gnani" ? 0.85 : 0.5}
+                max={config.tts.provider === "gnani" ? 1.15 : 2.0}
                 step={0.05}
                 disabled={disabled}
                 onChange={(pace) =>

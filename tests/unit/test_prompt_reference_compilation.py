@@ -24,9 +24,7 @@ def test_unbound_node_prompt_reference_is_rejected():
                 "name": "Test",
                 "flow": {
                     "initial_node": "end",
-                    "nodes": [
-                        {"id": "end", "terminal": True, "prompt": "Call #missing now."}
-                    ],
+                    "nodes": [{"id": "end", "terminal": True, "prompt": "Call #missing now."}],
                 },
             }
         )
@@ -35,8 +33,8 @@ def test_unbound_node_prompt_reference_is_rejected():
 def test_native_node_compiles_marker_without_changing_saved_prompt():
     saved = {
         "id": "opening",
-        "prompt": "Call #change_node(node='closing').",
-        "tool_bindings": ["change_node"],
+        "prompt": "Call #go_to_closing().",
+        "tool_bindings": [],
         "transitions": ["closing"],
         "respond_immediately": True,
         "context_strategy": "append",
@@ -45,7 +43,13 @@ def test_native_node_compiles_marker_without_changing_saved_prompt():
     host = NativePipelineHost("test-run", Path("unused"), SimpleNamespace())
     host._nodes = {"opening": saved}
     host._snapshot = {
-        "flow": {"initial_node": "opening"},
+        "flow": {
+            "initial_node": "opening",
+            "nodes": [
+                saved,
+                {"id": "closing", "terminal": True, "transitions": [], "tool_bindings": []},
+            ],
+        },
         "system_prompt": "Follow the task.",
         "_resolved": {
             "tools": {
@@ -63,5 +67,6 @@ def test_native_node_compiles_marker_without_changing_saved_prompt():
         },
     }
     node = host._node("opening")
-    assert node["task_messages"][0]["content"] == "Call change_node(node='closing')."
-    assert saved["prompt"] == "Call #change_node(node='closing')."
+    assert node["task_messages"] == []
+    assert "Call go_to_closing()." in node["role_message"]
+    assert saved["prompt"] == "Call #go_to_closing()."

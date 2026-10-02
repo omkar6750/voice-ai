@@ -80,7 +80,14 @@ def upgrade() -> None:
         sa.text("SELECT organization_id FROM legacy_data_tenant WHERE id = 1")
     ).scalar_one_or_none()
     if legacy_id is None:
-        raise RuntimeError("Verified legacy organization mapping is required")
+        unowned_rows = sum(
+            connection.execute(sa.text(f"SELECT count(*) FROM {table}")).scalar_one()
+            for table in CUSTOMER_TABLES
+        )
+        if unowned_rows:
+            raise RuntimeError(
+                "Verified legacy organization mapping is required to scope existing customer data"
+            )
     for table in CUSTOMER_TABLES:
         op.add_column(table, sa.Column("org_id", sa.String(36), nullable=True))
         op.create_foreign_key(

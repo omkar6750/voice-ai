@@ -37,3 +37,33 @@ This checklist records the questions and proposed changes from the 2026-10-01 co
 - [x] Separate confirmed behavior from suggestions and historical rationale that cannot be proven from code.
 - [x] Record prioritized implementation plans in `plans/` without changing runtime behavior during this audit.
 - [x] Run narrow verification of created docs and inspect the final diff.
+
+## Attached runtime review and implementation
+
+- [x] Preserve the pasted implementation review verbatim in `references/attached-implementation-review.txt`.
+- [x] Verify review findings against current code; see `plans/02-runtime-evidence-findings.md` for finding-by-finding disposition.
+- [x] Fix WhatsApp connection consistency, runtime error attribution, and LLM-only first-token average findings.
+- [x] Normalize STT/TTS provider labels from configured provider IDs.
+- [x] Add applicable Pipecat metrics and TTFS evidence with units and span category.
+- [x] Persist Pipecat error category and processor usability state safely.
+- [ ] Investigate and implement voicemail detection before outbound agent speech. The installed Pipecat package lacks `VoicemailDetector`; hold integration pending a real dependency/API.
+- [x] Make idle reprompt text/retry count configurable with existing defaults.
+- [ ] Verify standard pipeline transcript event usage against call-level event semantics.
+- [x] Reconcile runtime plan/memory status and improve run inspector evidence grouping.
+- [x] Preserve browser/SIM7600/Twilio lifecycle and evidence ownership; no live-call tests run.
+- [x] Run targeted tests/lint and record provider/hardware limitations.
+
+## Pipecat feature implementation
+
+- [x] Create new worktree from `main` and copy dirty/untracked starting work.
+- [x] Preserve attached implementation review verbatim.
+- [x] Use node `role_message`, native task message fields, `pre_actions`/`post_actions`, TTS say action, registry-backed function actions, global functions, and fact slots.
+- [x] Compile each saved graph to validated Pipecat `FlowConfig` and `Flow` before constructing the runner.
+- [x] Replace generic destination-valued `change_node` advertisement with native `go_to_<node>` transitions.
+- [x] Add configured per-tool `transition_to` and branch table routing, retaining strict registry schemas.
+- [x] Add opt-in `filter_incomplete_user_turns` default false via Pipecat's current strategy API.
+- [x] Expose role/task messages, branch transitions, global functions, facts, node ordering and initial node in dashboard forms.
+- [x] Regenerate OpenAPI/dashboard types in the managed worktree after the main merge.
+- [x] Verify runtime unit tests, Ruff, fresh PostgreSQL migrations through `0043_remote_artifact_guard`, API health, and dashboard production build.
+- [x] Merge the current local `main` commit into this worktree without changing the `main` checkout.
+- [x] Fix clean-database migration bootstrap: leave the legacy tenant map empty only when there are no users, organizations, platform admins, or existing tenant rows; continue to reject unowned legacy customer data.

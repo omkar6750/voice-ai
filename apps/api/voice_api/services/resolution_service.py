@@ -63,7 +63,7 @@ def application_identity() -> dict:
 
 
 async def resolve(
-    session: AsyncSession, version: AgentVersion, logging_override: bool | None = None
+    session: AsyncSession, version: AgentVersion, logging_override: bool | None = None, *, text_test: bool = False
 ) -> tuple[dict, str]:
     config = AgentConfig.model_validate(version.config)
     settings = await session.scalar(select(WorkspaceSettings).where(WorkspaceSettings.id == 1))
@@ -102,7 +102,9 @@ async def resolve(
     )
     from voice_api.services.provider_credentials import resolve_references
 
-    credential_refs = await resolve_references(session, config.model_dump(mode="json"), strict=False)
+    credential_refs = await resolve_references(
+        session, {**config.model_dump(mode="json"), **({"_text_test": True} if text_test else {})}, strict=False
+    )
     snapshot = safe_evidence(
         {
             **config.model_dump(mode="json", exclude_none=True),

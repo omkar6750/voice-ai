@@ -14,7 +14,22 @@ from voice_runtime.execution.native import NativePipelineHost
 def host():
     value = NativePipelineHost("run", Path("unused"), SimpleNamespace())
     value.tracker = Mock()
-    value._snapshot = {"flow": {"initial_node": "closing"}, "_resolved": {"tools": {}}}
+    value._snapshot = {
+        "flow": {
+            "initial_node": "closing",
+            "nodes": [
+                {
+                    "id": "closing",
+                    "prompt": "Goodbye",
+                    "terminal": True,
+                    "tool_bindings": [],
+                    "transitions": [],
+                    "respond_immediately": True,
+                }
+            ],
+        },
+        "_resolved": {"tools": {}},
+    }
     value._nodes = {
         "closing": {
             "prompt": "Goodbye",

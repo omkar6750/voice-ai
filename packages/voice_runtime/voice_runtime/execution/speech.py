@@ -3,22 +3,28 @@ from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.services.sarvam.tts import SarvamTTSService
 
 from voice_runtime.execution.credential_keys import stage_api_key
+from voice_runtime.execution.gnani import build_gnani_stt, build_gnani_tts
 
 
 def build_speech_services(settings, snapshot: dict, sample_rate: int):
     """Build STT/TTS services from the resolved snapshot's exact selections."""
 
     stt_config = snapshot["stt"]
-    if stt_config["provider"] != "sarvam":
+    if stt_config["provider"] == "gnani":
+        stt = build_gnani_stt(stage_api_key(settings, "stt", "gnani"), stt_config, sample_rate)
+    elif stt_config["provider"] == "sarvam":
+        stt = SarvamSTTService(
+            api_key=stage_api_key(settings, "stt", "sarvam"),
+            settings=SarvamSTTService.Settings(model=stt_config["model"]),
+            sample_rate=sample_rate,
+        )
+    else:
         raise ValueError(f"Unsupported STT provider: {stt_config['provider']}")
-    stt = SarvamSTTService(
-        api_key=stage_api_key(settings, "stt", "sarvam"),
-        settings=SarvamSTTService.Settings(model=stt_config["model"]),
-        sample_rate=sample_rate,
-    )
 
     tts_config = snapshot["tts"]
-    if tts_config["provider"] == "sarvam":
+    if tts_config["provider"] == "gnani":
+        tts = build_gnani_tts(stage_api_key(settings, "tts", "gnani"), tts_config, sample_rate)
+    elif tts_config["provider"] == "sarvam":
         tts = SarvamTTSService(
             api_key=stage_api_key(settings, "tts", "sarvam"),
             settings=SarvamTTSService.Settings(

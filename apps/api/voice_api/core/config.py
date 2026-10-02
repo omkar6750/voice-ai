@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     sarvam_api_key: str | None = None
     groq_api_key: str | None = None
     isoquant_api_key: str | None = None
+    gnani_api_key: str | None = None
     jev_api_key: str | None = None
     recordings_dir: str = "data/recordings"
     integration_keys: str | None = None

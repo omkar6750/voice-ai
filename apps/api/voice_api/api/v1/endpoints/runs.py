@@ -71,7 +71,7 @@ async def request_browser_run(
 @router.get("/runs")
 @allow_organization_member
 async def list_runs(session: AsyncSession = Session, _: None = Operator) -> dict:
-    rows = (await session.scalars(select(Run).order_by(Run.created_at.desc()))).all()
+    rows = (await session.scalars(select(Run).where(Run.channel != "text_test").order_by(Run.created_at.desc()))).all()
     run_ids = [r.id for r in rows]
     calls = (
         (await session.scalars(select(Call).where(Call.run_id.in_(run_ids)))).all()

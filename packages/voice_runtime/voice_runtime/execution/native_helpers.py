@@ -17,7 +17,10 @@ from pipecat.turns.user_start import TranscriptionUserTurnStartStrategy, VADUser
 from pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy import (
     TurnAnalyzerUserTurnStopStrategy,
 )
-from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat.turns.user_turn_strategies import (
+    FilterIncompleteUserTurnStrategies,
+    UserTurnStrategies,
+)
 
 from voice_runtime.diagnostics import exception_diagnostic, provider_error_diagnostic
 from voice_runtime.execution.classifier import normalize_classifier_result
@@ -211,6 +214,11 @@ def build_user_aggregator_params(snapshot: dict, vad) -> LLMUserAggregatorParams
                 TranscriptionUserTurnStartStrategy(enable_interruptions=False),
             ],
             stop=stop_strategies,
+        )
+    if snapshot.get("filter_incomplete_user_turns", False):
+        strategies = FilterIncompleteUserTurnStrategies(
+            start=strategies.start,
+            stop=strategies.stop,
         )
     return LLMUserAggregatorParams(
         vad_analyzer=vad,

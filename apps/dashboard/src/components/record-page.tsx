@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { cn } from "cn";
 import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -36,9 +37,22 @@ export function PageHeader({
   );
 }
 
-export function PageBody({ children }: { children: ReactNode }) {
+export function PageBody({
+  children,
+  wide = false,
+}: {
+  children: ReactNode;
+  wide?: boolean;
+}) {
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-4 lg:p-6">
+    <div
+      className={cn(
+        "mx-auto flex w-full flex-col",
+        wide
+          ? "max-w-[100rem] min-h-[calc(100svh-3rem)] gap-4 bg-editor-background p-4 lg:p-5"
+          : "max-w-6xl gap-6 p-4 lg:p-6",
+      )}
+    >
       {children}
     </div>
   );

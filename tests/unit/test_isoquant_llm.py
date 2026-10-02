@@ -8,7 +8,7 @@ import pytest
 from openai import AsyncOpenAI
 from pipecat.processors.aggregators.llm_context import LLMContext
 from voice_runtime.contracts.providers import LLMConfig, LLMFallbackConfig
-from voice_runtime.execution.isoquant import IsoquantLLMService
+from voice_runtime.execution.isoquant import IsoquantLLMService, IsoquantStreamError
 from voice_runtime.execution.llm_factory import build_llm_service
 
 
@@ -163,7 +163,7 @@ async def test_isoquant_rejects_stream_without_completion_marker():
         stream = await service.get_chat_completions(
             LLMContext(messages=[{"role": "user", "content": "Hello!"}])
         )
-        with pytest.raises(RuntimeError, match=r"ended before completion.*req-test"):
+        with pytest.raises(IsoquantStreamError, match=r"ended before completion.*req-test"):
             _ = [chunk async for chunk in stream]
     finally:
         await service._client.close()

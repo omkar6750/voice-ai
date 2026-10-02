@@ -337,38 +337,26 @@ function Evidence({
                   ? `Spoken text · ${span.output_state}`
                   : span.output_state}
             </Value>
-            <Value label="Interrupted by">
-              {span.interruption_id ?? "Not interrupted"}
-            </Value>
+            {span.interruption_id && (
+              <Value label="Interrupted by">{span.interruption_id}</Value>
+            )}
             <Value label="Started">{stamp(span.started_at)}</Value>
             <Value label="Ended">{stamp(span.ended_at)}</Value>
             <Value label="Duration">{duration(span.duration_ms)}</Value>
-            <Value label="First token">{duration(span.ttfb_ms)}</Value>
-            <Value label="First audio">{duration(span.ttfa_ms)}</Value>
-            <Value label="Input tokens">
-              {span.prompt_tokens ?? "Not recorded"}
-            </Value>
-            <Value label="Output tokens">
-              {span.completion_tokens ?? "Not recorded"}
-            </Value>
-            <Value label="Total tokens">
-              {span.total_tokens ?? "Not recorded"}
-            </Value>
-            <Value label="Cached input read">
-              {span.cache_read_input_tokens ?? "Not recorded"}
-            </Value>
-            <Value label="Cached input created">
-              {span.cache_creation_input_tokens ?? "Not recorded"}
-            </Value>
-            <Value label="Reasoning tokens">
-              {span.reasoning_tokens ?? "Not recorded"}
-            </Value>
-            <Value label="OTel trace">
-              {span.otel_trace_id ?? "Not recorded"}
-            </Value>
-            <Value label="OTel span">
-              {span.otel_span_id ?? "Not recorded"}
-            </Value>
+            {span.ttfb_ms != null && (
+              <Value label={span.category === "llm" ? "First token" : "First byte"}>
+                {duration(span.ttfb_ms)}
+              </Value>
+            )}
+            {span.ttfa_ms != null && <Value label="First audio">{duration(span.ttfa_ms)}</Value>}
+            {span.prompt_tokens != null && <Value label="Input tokens">{span.prompt_tokens}</Value>}
+            {span.completion_tokens != null && <Value label="Output tokens">{span.completion_tokens}</Value>}
+            {span.total_tokens != null && <Value label="Total tokens">{span.total_tokens}</Value>}
+            {span.cache_read_input_tokens != null && <Value label="Cached input read">{span.cache_read_input_tokens}</Value>}
+            {span.cache_creation_input_tokens != null && <Value label="Cached input created">{span.cache_creation_input_tokens}</Value>}
+            {span.reasoning_tokens != null && <Value label="Reasoning tokens">{span.reasoning_tokens}</Value>}
+            {span.otel_trace_id && <Value label="OTel trace">{span.otel_trace_id}</Value>}
+            {span.otel_span_id && <Value label="OTel span">{span.otel_span_id}</Value>}
           </dl>
           <Json label="Provider input / prompt" value={span.input} />
           <Json

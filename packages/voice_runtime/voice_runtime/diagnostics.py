@@ -12,7 +12,7 @@ from voice_runtime.safe_logs import error_category
 from voice_runtime.telephony.sim7600 import Sim7600Modem
 
 _PROVIDERS = frozenset(
-    {"groq", "gemini", "cartesia", "sarvam", "jev", "whatsapp", "openrouter", "isoquant"}
+    {"groq", "gemini", "cartesia", "sarvam", "jev", "whatsapp", "openrouter", "isoquant", "gnani"}
 )
 _SOURCES = frozenset({"provider", "modem", "transport", "call", "evidence", "runtime"})
 _FAILURES = {
@@ -181,8 +181,20 @@ def exception_diagnostic(
 
 def provider_exception_diagnostic(exc: BaseException, *, provider: str, operation: str) -> dict:
     """Extract safe provider response metadata from SDK exceptions across providers."""
-    response = _response(exc)
-    status_code = _response_status(response)
+    # The Gnani SDK wraps WebSocket handshake errors; inspect a bounded
+    # cause chain for HTTP metadata without retaining vendor error text.
+    cause = exc
+    response = None
+    status_code = None
+    for _ in range(5):
+        response = _response(cause)
+        status_code = _response_status(response) or _status(getattr(cause, "status_code", None))
+        if status_code is not None:
+            break
+        next_cause = getattr(cause, "__cause__", None)
+        if next_cause is None or next_cause is cause:
+            break
+        cause = next_cause
     body = None
     if response is not None:
         try:
@@ -199,6 +211,24 @@ def provider_exception_diagnostic(exc: BaseException, *, provider: str, operatio
         body=body,
         retry_after_seconds=_retry_after(retry_after),
     )
+    if status_code in {None, 200} and isinstance(cause, (TimeoutError, ConnectionError, OSError)):
+        diagnostic.update(
+            category="provider_unavailable",
+            code="provider_transport_failed",
+            message=f"{_provider(provider)} connection failed",
+            retryable=True,
+        )
+    # Request IDs are retained only for the new adapters; prior providers keep
+    # their established evidence policy. Never retain raw error bodies.
+    if provider in {"gnani", "isoquant"}:
+        headers = getattr(response, "headers", {}) or {}
+        request_id = headers.get("x-request-id") or headers.get("request-id")
+        if (
+            type(request_id) is str
+            and len(request_id) <= 255
+            and all(char.isascii() and (char.isalnum() or char in "_-:.") for char in request_id)
+        ):
+            diagnostic["provider_request_id"] = request_id
     if type(operation) is str and operation in {"llm", "stt", "tts", "classifier", "embedding"}:
         diagnostic["metadata"]["operation"] = operation
     diagnostic["metadata"]["error_category"] = error_category(exc)
@@ -231,6 +261,7 @@ def text_error_diagnostic(error: object, *, fallback_source: str = "runtime") ->
                 "whatsapp",
                 "openrouter",
                 "isoquant",
+                "gnani",
             )
             if name in lower
         ),

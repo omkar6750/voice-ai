@@ -1,11 +1,21 @@
-import { useRef } from "react";
-import { Badge } from "@/components/ui/badge";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { closeHistory } from "@tiptap/pm/history";
+import { EditorContent, useEditor } from "@tiptap/react";
+import { Placeholder, UndoRedo } from "@tiptap/extensions";
+import { promptDocument, promptExtensions } from "./prompt-document";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
-import { Textarea } from "@/components/ui/textarea";
+import { Maximize2 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 const toolPattern = /#([a-z][a-z0-9_]*)\b/g;
 const variablePattern = /\{\{\s*([a-zA-Z0-9_\.]+)\s*\}\}/g;
-const tokenPattern = /(?:#([a-z][a-z0-9_]*)\b)|(?:\{\{\s*([a-zA-Z0-9_\.]+)\s*\}\})/g;
 
 export function PromptEditor({
   id,
@@ -28,136 +38,178 @@ export function PromptEditor({
   placeholder?: string;
   disabled?: boolean;
 }) {
-  const mirror = useRef<HTMLPreElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const catalog = useRef({
+    tools: availableTools,
+    variables: availableVariables,
+  });
+  catalog.current = { tools: availableTools, variables: availableVariables };
+  const extensions = useMemo(
+    () => [
+      ...promptExtensions(() => catalog.current),
+      UndoRedo,
+      Placeholder.configure({
+        placeholder: placeholder ?? "Write the agent’s instructions…",
+      }),
+    ],
+    [placeholder],
+  );
+  const editor = useEditor(
+    {
+      extensions,
+      content: promptDocument(value),
+      editable: !disabled,
+      immediatelyRender: false,
+      shouldRerenderOnTransaction: false,
+      onUpdate: ({ editor }) => {
+        if (!editor.isDestroyed)
+          onChange(editor.getText({ blockSeparator: "\n" }));
+      },
+      editorProps: {
+        attributes: {
+          id,
+          role: "textbox",
+          "aria-multiline": "true",
+          "aria-labelledby": `${id}-label`,
+          spellcheck: "false",
+          class:
+            "min-h-48 max-h-[36rem] overflow-y-auto [scrollbar-width:thin] [scrollbar-color:var(--border)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/30 [&::-webkit-scrollbar-track]:bg-transparent whitespace-pre-wrap break-words rounded-lg border border-input bg-transparent px-3 py-2 font-mono text-sm leading-6 text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-disabled:cursor-not-allowed aria-disabled:opacity-50 [&_.is-empty]:before:pointer-events-none [&_.is-empty]:before:float-left [&_.is-empty]:before:h-0 [&_.is-empty]:before:text-muted-foreground [&_.is-empty]:before:content-[attr(data-placeholder)]",
+        },
+      },
+    },
+    [id, extensions],
+  );
+  // useEditor can destroy an old instance in its effect before these effects run
+  // when the node id or extensions change. Never read that stale instance.
+  // Parent echoes never replace the document or move its selection.
+  useEffect(() => {
+    if (
+      editor &&
+      !editor.isDestroyed &&
+      editor.getText({ blockSeparator: "\n" }) !== value
+    ) {
+      editor
+        .chain()
+        .setContent(promptDocument(value), { emitUpdate: false })
+        .setMeta("addToHistory", false)
+        .run();
+      editor.view.dispatch(closeHistory(editor.state.tr));
+    }
+  }, [editor, value]);
+  useEffect(() => {
+    if (editor && !editor.isDestroyed) editor.setEditable(!disabled, false);
+  }, [editor, disabled]);
+  const catalogKey = JSON.stringify([availableTools, availableVariables]);
+  useEffect(() => {
+    if (editor && !editor.isDestroyed)
+      editor.view.dispatch(editor.state.tr.setMeta("prompt-catalog", true));
+  }, [editor, catalogKey]);
   const roughTokens = Math.ceil(new TextEncoder().encode(value).length / 4);
 
   // Tool references
-  const toolReferences = [...value.matchAll(toolPattern)].map((match) => match[1]);
+  const toolReferences = [...value.matchAll(toolPattern)].map(
+    (match) => match[1],
+  );
   const unresolvedTools = [
     ...new Set(toolReferences.filter((name) => !availableTools.includes(name))),
   ];
 
   // Variable references
-  const variableReferences = [...value.matchAll(variablePattern)].map((match) => match[1]);
+  const variableReferences = [...value.matchAll(variablePattern)].map(
+    (match) => match[1],
+  );
   const usedVariables = [...new Set(variableReferences)];
   const unresolvedVariables = [
-    ...new Set(variableReferences.filter((name) => !availableVariables.includes(name))),
+    ...new Set(
+      variableReferences.filter((name) => !availableVariables.includes(name)),
+    ),
   ];
 
-  // Tokenize value for overlay highlighting
-  const segments: { text: string; tool?: string; variable?: string }[] = [];
-  let start = 0;
-  for (const match of value.matchAll(tokenPattern)) {
-    if (match.index > start) {
-      segments.push({ text: value.slice(start, match.index) });
-    }
-    if (match[1]) {
-      // #tool_name
-      segments.push({ text: match[0], tool: match[1] });
-    } else if (match[2]) {
-      // {{ variable_name }}
-      segments.push({ text: match[0], variable: match[2] });
-    }
-    start = match.index + match[0].length;
-  }
-  if (start < value.length) {
-    segments.push({ text: value.slice(start) });
+  function insertReference(token: string) {
+    if (disabled || !editor || editor.isDestroyed) return;
+    editor.chain().focus().insertContent({ type: "text", text: token }).run();
   }
 
-  function insertVariable(varName: string) {
-    if (disabled) return;
-    const token = `{{ ${varName} }}`;
-    const el = textareaRef.current;
-    if (!el) {
-      onChange(value ? `${value} ${token}` : token);
-      return;
-    }
-    const selStart = el.selectionStart ?? value.length;
-    const selEnd = el.selectionEnd ?? value.length;
-    const next = value.slice(0, selStart) + token + value.slice(selEnd);
-    onChange(next);
-    setTimeout(() => {
-      el.focus();
-      const pos = selStart + token.length;
-      el.setSelectionRange(pos, pos);
-    }, 0);
-  }
+  const hasErrors =
+    unresolvedTools.length > 0 || unresolvedVariables.length > 0;
 
-  const hasErrors = unresolvedTools.length > 0 || unresolvedVariables.length > 0;
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    editor.view.dom.setAttribute("aria-invalid", String(hasErrors));
+    editor.view.dom.setAttribute("aria-disabled", String(disabled));
+  }, [editor, hasErrors, disabled]);
 
   return (
     <Field data-invalid={hasErrors || undefined}>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <div className="relative font-mono text-sm">
-        <pre
-          ref={mirror}
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words rounded-md border border-transparent px-3 py-2 leading-6 text-foreground"
+      <div className="flex items-center justify-between gap-2">
+        <FieldLabel id={`${id}-label`} htmlFor={id}>
+          {label}
+        </FieldLabel>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`Expand ${label}`}
+          onClick={() => setExpanded(true)}
         >
-          {segments.map((segment, index) => {
-            if (segment.tool) {
-              const isBound = availableTools.includes(segment.tool);
-              return (
-                <span
-                  key={index}
-                  className={
-                    isBound
-                      ? "font-semibold text-primary"
-                      : "font-semibold text-destructive underline decoration-wavy"
-                  }
-                >
-                  {segment.text}
-                </span>
-              );
-            }
-            if (segment.variable) {
-              const isValid = availableVariables.includes(segment.variable);
-              return (
-                <span
-                  key={index}
-                  className={
-                    isValid
-                      ? "rounded bg-primary/20 px-1 font-semibold text-primary"
-                      : "rounded bg-destructive/20 px-1 font-semibold text-destructive underline decoration-wavy"
-                  }
-                >
-                  {segment.text}
-                </span>
-              );
-            }
-            return <span key={index}>{segment.text}</span>;
-          })}
-          {"\u200b"}
-        </pre>
-        <Textarea
-          id={id}
-          ref={textareaRef}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          onScroll={(event) => {
-            if (mirror.current)
-              mirror.current.scrollTop = event.currentTarget.scrollTop;
-          }}
-          disabled={disabled}
-          placeholder={placeholder}
-          aria-invalid={hasErrors}
-          spellCheck={false}
-          className="relative min-h-48 resize-y whitespace-pre-wrap bg-transparent font-mono leading-6 text-transparent caret-foreground selection:bg-primary/20"
-        />
+          <Maximize2 />
+        </Button>
       </div>
-
-      <FieldDescription>
-        Use <code>#tool_name</code> to invoke tools and <code>{"{{ variable }}"}</code> for dynamic contact & temporal fields.
-      </FieldDescription>
-      <p className="text-xs text-muted-foreground">
-        This field: {value.length} characters · roughly {roughTokens} tokens. Estimate only;
-        actual model usage also includes system instructions, tools, and conversation history.
-      </p>
+      {!expanded && <EditorContent editor={editor} />}
+      <Dialog open={expanded} onOpenChange={setExpanded}>
+        <DialogContent className="max-h-[90svh] w-[calc(100%-2rem)] max-w-7xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{label}</DialogTitle>
+            <DialogDescription>
+              Edit the same prompt in an expanded view. Changes remain in your
+              draft until saved.
+            </DialogDescription>
+          </DialogHeader>
+          {expanded && (
+            <EditorContent
+              editor={editor}
+              className="[&_.tiptap]:min-h-[45svh] [&_.tiptap]:max-h-[65svh]"
+            />
+          )}
+          <dl className="flex gap-5 text-xs">
+            <div className="flex gap-2">
+              <dt className="text-muted-foreground">Chars</dt>
+              <dd>{value.length.toLocaleString()}</dd>
+            </div>
+            <div className="flex gap-2">
+              <dt className="text-muted-foreground">Tokens</dt>
+              <dd>~{roughTokens.toLocaleString()}</dd>
+            </div>
+          </dl>
+        </DialogContent>
+      </Dialog>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <FieldDescription>
+          Insert <code>#tools</code> and <code>{"{{ variables }}"}</code>.
+        </FieldDescription>
+        <dl
+          className="flex gap-4 text-xs"
+          title="Tokens are estimated; model usage also includes context and tools."
+        >
+          <div className="flex gap-1.5">
+            <dt className="text-muted-foreground">Chars</dt>
+            <dd className="font-medium tabular-nums">
+              {value.length.toLocaleString()}
+            </dd>
+          </div>
+          <div className="flex gap-1.5">
+            <dt className="text-muted-foreground">Tokens</dt>
+            <dd className="font-medium tabular-nums">
+              ~{roughTokens.toLocaleString()}
+            </dd>
+          </div>
+        </dl>
+      </div>
 
       {unresolvedTools.length > 0 && (
         <p className="text-xs text-destructive">
-          Unbound tool references: {unresolvedTools.map((name) => `#${name}`).join(", ")}.{" "}
+          Unbound tool references:{" "}
+          {unresolvedTools.map((name) => `#${name}`).join(", ")}.{" "}
           {unresolvedTools.some((name) => registeredTools.includes(name))
             ? "Bind published tool versions first."
             : "Check tool registry and spelling."}
@@ -166,8 +218,10 @@ export function PromptEditor({
 
       {unresolvedVariables.length > 0 && (
         <p className="text-xs text-destructive">
-          Unbound variable references: {unresolvedVariables.map((name) => `{{ ${name} }}`).join(", ")}.{" "}
-          Ensure variables match available temporal tags or configured contact variables.
+          Unbound variable references:{" "}
+          {unresolvedVariables.map((name) => `{{ ${name} }}`).join(", ")}.{" "}
+          Ensure variables match available temporal tags or configured contact
+          variables.
         </p>
       )}
 
@@ -176,26 +230,31 @@ export function PromptEditor({
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span className="font-medium">Variables (click to insert)</span>
             <span>
-              {usedVariables.filter((v) => availableVariables.includes(v)).length} / {availableVariables.length} active
+              {
+                usedVariables.filter((v) => availableVariables.includes(v))
+                  .length
+              }{" "}
+              / {availableVariables.length} active
             </span>
           </div>
           <div className="flex flex-wrap gap-1.5">
             {availableVariables.map((name) => {
               const isUsed = usedVariables.includes(name);
               return (
-                <Badge
+                <Button
                   key={name}
-                  variant={isUsed ? "default" : "outline"}
-                  className={`cursor-pointer select-none transition-all ${
-                    isUsed
-                      ? "bg-primary font-medium text-primary-foreground shadow-xs"
-                      : "border-dashed text-muted-foreground hover:border-solid hover:text-foreground"
-                  }`}
-                  onClick={() => insertVariable(name)}
-                  title={isUsed ? `Used in prompt (click to insert again)` : `Click to insert {{ ${name} }}`}
+                  type="button"
+                  variant={isUsed ? "highlight" : "outline"}
+                  size="sm"
+                  disabled={disabled || !editor || editor.isDestroyed}
+                  className="font-mono"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => insertReference(`{{ ${name} }}`)}
+                  title={`Insert {{ ${name} }} at the cursor`}
                 >
-                  {isUsed ? "✓ " : ""}{`{{ ${name} }}`}
-                </Badge>
+                  {isUsed ? "✓ " : ""}
+                  {`{{ ${name} }}`}
+                </Button>
               );
             })}
           </div>
@@ -204,12 +263,23 @@ export function PromptEditor({
 
       {availableTools.length > 0 && (
         <div className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-muted-foreground">Bound tools</span>
+          <span className="text-xs font-medium text-muted-foreground">
+            Bound tools
+          </span>
           <div className="flex flex-wrap gap-1">
             {availableTools.map((name) => (
-              <Badge key={name} variant="secondary">
+              <Button
+                key={name}
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={disabled || !editor || editor.isDestroyed}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => insertReference(`#${name}`)}
+                title={`Insert #${name} at the cursor`}
+              >
                 #{name}
-              </Badge>
+              </Button>
             ))}
           </div>
         </div>

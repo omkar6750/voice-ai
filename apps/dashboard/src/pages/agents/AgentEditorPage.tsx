@@ -1,12 +1,19 @@
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { ChevronDown, Settings2 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { useApi } from "@/app/api";
 import { useOrganizationAccess } from "@/app/access";
 import {
   LoadState,
   PageBody,
-  PageHeader,
   ReadOnlyValue,
   StatusBadge,
 } from "@/components/record-page";
@@ -15,6 +22,7 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { useResource } from "@/lib/resources";
+import { ChatTestPanel } from "./ChatTestPanel";
 import { AudioPanel } from "./AudioPanel";
 import { CallbackSchedulingPanel } from "./CallbackSchedulingPanel";
 import { ClassifierPanel } from "./ClassifierPanel";
@@ -33,8 +41,9 @@ import type {
 } from "./types";
 
 const sections = [
-  "Prompts",
   "Flow",
+  "Chat test",
+  "Prompts",
   "Models",
   "Audio",
   "Classifier",
@@ -44,7 +53,6 @@ const sections = [
   "Logging",
   "Callback Scheduling",
 ] as const;
-
 
 export function AgentEditorPage() {
   const { agentId = "", versionId = "" } = useParams();
@@ -56,15 +64,18 @@ export function AgentEditorPage() {
   );
   const providers = useResource<ProviderCatalog>("/providers");
   const tools = useResource<{ tools: ToolSummary[] }>("/tools");
-  const variables = useResource<ContactVariablesResponse>("/contacts/variables");
+  const variables = useResource<ContactVariablesResponse>(
+    "/contacts/variables",
+  );
   const stored = resource.data?.versions.find((item) => item.id === versionId);
   const [draft, setDraft] = useState<AgentConfig | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const section =
     sections.find((item) => item.toLowerCase() === params.get("section")) ??
-    "Prompts";
+    "Flow";
 
   useEffect(() => {
     if (stored) {
@@ -93,17 +104,21 @@ export function AgentEditorPage() {
   const unboundToolReferences: string[] = [];
   if (draft) {
     draft.background_hooks?.forEach((h) => {
-      if (!boundKeys.includes(h) && !unboundToolReferences.includes(h)) unboundToolReferences.push(h);
+      if (!boundKeys.includes(h) && !unboundToolReferences.includes(h))
+        unboundToolReferences.push(h);
     });
     draft.flow?.nodes?.forEach((node) => {
       node.tool_bindings?.forEach((t) => {
-        if (!boundKeys.includes(t) && !unboundToolReferences.includes(t)) unboundToolReferences.push(t);
+        if (!boundKeys.includes(t) && !unboundToolReferences.includes(t))
+          unboundToolReferences.push(t);
       });
       node.entry_actions?.forEach((t) => {
-        if (!boundKeys.includes(t) && !unboundToolReferences.includes(t)) unboundToolReferences.push(t);
+        if (!boundKeys.includes(t) && !unboundToolReferences.includes(t))
+          unboundToolReferences.push(t);
       });
       node.exit_actions?.forEach((t) => {
-        if (!boundKeys.includes(t) && !unboundToolReferences.includes(t)) unboundToolReferences.push(t);
+        if (!boundKeys.includes(t) && !unboundToolReferences.includes(t))
+          unboundToolReferences.push(t);
       });
     });
   }
@@ -113,7 +128,9 @@ export function AgentEditorPage() {
     const bound = Object.keys(draft.tool_bindings);
     setDraft({
       ...draft,
-      background_hooks: (draft.background_hooks ?? []).filter((h) => bound.includes(h)),
+      background_hooks: (draft.background_hooks ?? []).filter((h) =>
+        bound.includes(h),
+      ),
       flow: {
         ...draft.flow,
         nodes: draft.flow.nodes.map((n) => ({
@@ -129,22 +146,14 @@ export function AgentEditorPage() {
 
   async function save() {
     if (!stored || !draft || stored.status !== "draft") return;
-    const initialNode = draft.flow.nodes.find(
-      (item) => item.id === draft.flow.initial_node,
-    );
-    if (draft.greeting.trim() && initialNode?.respond_immediately) {
-      toast.error(
-        "A verbatim opening requires the initial node to wait for the caller.",
-      );
-      return;
-    }
     if (unboundToolReferences.length > 0) {
       toast.error(
-        `Cannot save draft: flow references unbound tools [${unboundToolReferences.join(", ")}]. Remove them or bind them in Tools first.`
+        `Cannot save draft: flow references unbound tools [${unboundToolReferences.join(", ")}]. Remove them or bind them in Tools first.`,
       );
       return;
     }
     setBusy(true);
+    setSaveError(null);
     try {
       await api(`/agent-versions/${stored.id}`, {
         method: "PATCH",
@@ -157,6 +166,9 @@ export function AgentEditorPage() {
       toast.success("Draft saved");
       await resource.reload();
     } catch (cause) {
+      setSaveError(
+        cause instanceof Error ? cause.message : "Could not save draft",
+      );
       if (cause instanceof Error && /changed|409/i.test(cause.message))
         setConflict(true);
       toast.error(
@@ -170,44 +182,43 @@ export function AgentEditorPage() {
   const disabled = stored?.status !== "draft" || !canManage;
   const registeredTools = tools.data?.tools.map((tool) => tool.name) ?? [];
   return (
-    <PageBody>
-      <PageHeader
-        title={draft ? `${draft.name} · v${stored?.version}` : "Agent version"}
-        description={
-          stored
-            ? `Revision ${stored.revision}. Published versions cannot be edited.`
-            : "Loading version"
-        }
-        action={
-          <div className="flex items-center gap-2">
-            {stored && <StatusBadge value={stored.status} />}
-            {dirty && (
-              <span className="text-xs text-muted-foreground">
-                Unsaved changes
-              </span>
-            )}
-            {!disabled && (
-              <Button
-                disabled={busy || !dirty || conflict}
-                onClick={() => void save()}
-              >
-                {busy ? "Saving…" : "Save draft"}
-              </Button>
-            )}
-            <Button asChild variant="outline">
-              <Link to={`/agents/${agentId}`}>Versions</Link>
+    <PageBody wide>
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          <h1 className="truncate text-lg font-semibold">
+            {draft?.name ?? "Agent version"}
+          </h1>
+          {stored && <StatusBadge value={stored.status} />}
+          {stored && (
+            <span className="text-xs text-muted-foreground">
+              v{stored.version} · Revision {stored.revision}
+              {disabled ? " · Read only" : ""}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          {stored && (
+            <span className="text-xs text-muted-foreground" role="status">
+              {busy
+                ? "Saving…"
+                : dirty
+                  ? "Unsaved changes"
+                  : "All changes saved"}
+            </span>
+          )}
+          {!disabled && (
+            <Button
+              disabled={busy || !dirty || conflict}
+              onClick={() => void save()}
+            >
+              {busy ? "Saving…" : "Save changes"}
             </Button>
-          </div>
-        }
-        readOnlyAction={
-          <div className="flex items-center gap-2">
-            {stored && <StatusBadge value={stored.status} />}
-            <Button asChild variant="outline">
-              <Link to={`/agents/${agentId}`}>Versions</Link>
-            </Button>
-          </div>
-        }
-      />
+          )}
+          <Button asChild variant="outline" size="sm">
+            <Link to={`/agents/${agentId}`}>Versions</Link>
+          </Button>
+        </div>
+      </header>
       <LoadState
         loading={resource.loading}
         error={resource.error}
@@ -225,6 +236,11 @@ export function AgentEditorPage() {
                 attempted.
               </div>
             )}
+            {saveError && (
+              <p role="alert" className="text-sm text-destructive">
+                Save failed: {saveError}
+              </p>
+            )}
             {providers.error && (
               <p className="text-sm text-destructive">
                 Provider catalog unavailable: {providers.error}. Stored values
@@ -234,10 +250,15 @@ export function AgentEditorPage() {
             {unboundToolReferences.length > 0 && !disabled && (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm">
                 <div>
-                  <strong className="text-destructive">Unbound tool references detected:</strong>{" "}
-                  <span className="font-mono text-xs">{unboundToolReferences.join(", ")}</span>
+                  <strong className="text-destructive">
+                    Unbound tool references detected:
+                  </strong>{" "}
+                  <span className="font-mono text-xs">
+                    {unboundToolReferences.join(", ")}
+                  </span>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    These tools are assigned to flow nodes or hooks but not bound under Tools. Saving will fail until resolved.
+                    These tools are assigned to flow nodes or hooks but not
+                    bound under Tools. Saving will fail until resolved.
                   </p>
                 </div>
                 <Button
@@ -253,21 +274,98 @@ export function AgentEditorPage() {
             )}
             <nav
               aria-label="Version configuration"
-              className="flex flex-wrap gap-1 border-b pb-2"
+              className="flex flex-wrap gap-1 bg-transparent px-2 py-1"
             >
-              {sections.map((item) => (
-                <Button
-                  key={item}
-                  type="button"
-                  size="sm"
-                  variant={section === item ? "secondary" : "ghost"}
-                  aria-current={section === item ? "page" : undefined}
-                  onClick={() => setParams({ section: item.toLowerCase() })}
-                >
-                  {item}
-                </Button>
-              ))}
+              {sections
+                .filter((item) =>
+                  [
+                    "Flow",
+                    "Chat test",
+                    "Prompts",
+                    "Tools",
+                    "Knowledge",
+                  ].includes(item),
+                )
+                .map((item) => (
+                  <Button
+                    key={item}
+                    type="button"
+                    size="sm"
+                    variant="tab"
+                    aria-current={section === item ? "page" : undefined}
+                    onClick={() => setParams({ section: item.toLowerCase() })}
+                  >
+                    {item === "Prompts" ? "Global prompt" : item}
+                  </Button>
+                ))}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="tab"
+                    aria-current={
+                      [
+                        "Models",
+                        "Audio",
+                        "Classifier",
+                        "Context",
+                        "Logging",
+                        "Callback Scheduling",
+                      ].includes(section)
+                        ? "page"
+                        : undefined
+                    }
+                  >
+                    <Settings2 data-icon="inline-start" />
+                    {[
+                      "Models",
+                      "Audio",
+                      "Classifier",
+                      "Context",
+                      "Logging",
+                      "Callback Scheduling",
+                    ].includes(section)
+                      ? `Settings: ${section}`
+                      : "Settings"}
+                    <ChevronDown data-icon="inline-end" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuGroup>
+                    {sections
+                      .filter(
+                        (item) =>
+                          ![
+                            "Flow",
+                            "Chat test",
+                            "Prompts",
+                            "Tools",
+                            "Knowledge",
+                          ].includes(item),
+                      )
+                      .map((item) => (
+                        <DropdownMenuItem
+                          key={item}
+                          onSelect={() =>
+                            setParams({ section: item.toLowerCase() })
+                          }
+                        >
+                          {item}
+                        </DropdownMenuItem>
+                      ))}
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </nav>
+            {section === "Chat test" && stored && (
+              <ChatTestPanel
+                key={stored.id}
+                version={stored}
+                dirty={dirty}
+                save={save}
+              />
+            )}
             {section === "Prompts" && (
               <PromptsPanel
                 config={draft}
@@ -284,6 +382,7 @@ export function AgentEditorPage() {
                 change={setDraft}
                 registeredTools={registeredTools}
                 variablesCatalog={variables.data}
+                classifierContract={providers.data?.classifier_contract}
                 disabled={disabled}
               />
             )}
@@ -334,7 +433,11 @@ export function AgentEditorPage() {
               />
             )}
             {section === "Callback Scheduling" && (
-              <CallbackSchedulingPanel config={draft} change={setDraft} disabled={disabled} />
+              <CallbackSchedulingPanel
+                config={draft}
+                change={setDraft}
+                disabled={disabled}
+              />
             )}
             {section === "Logging" && (
               <section className="flex max-w-2xl flex-col gap-4">

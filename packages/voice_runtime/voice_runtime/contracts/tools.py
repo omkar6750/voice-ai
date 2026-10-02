@@ -62,6 +62,7 @@ class ToolConfig(ConfigModel):
     handler: Identifier | None = None
     http: HTTPToolConfig | None = None
     whatsapp: WhatsAppTemplateConfig | None = None
+    whatsapp_connection_id: Identifier | None = None
     knowledge_base_id: Identifier | None = None
     parameters: dict[str, Any] = Field(default_factory=lambda: {"type": "object", "properties": {}})
 
@@ -77,6 +78,33 @@ class ToolConfig(ConfigModel):
             raise ValueError("WhatsApp settings require the send_whatsapp_template handler")
         if self.handler == "send_whatsapp_template" and self.whatsapp is None:
             raise ValueError("send_whatsapp_template requires WhatsApp settings")
+        if self.whatsapp_connection_id is not None and self.handler not in {
+            "check_whatsapp_window",
+            "send_whatsapp_message",
+        }:
+            raise ValueError("whatsapp_connection_id is only valid for direct WhatsApp tools")
+        if (
+            self.handler in {"check_whatsapp_window", "send_whatsapp_message"}
+            and not self.whatsapp_connection_id
+        ):
+            raise ValueError("direct WhatsApp tools require a pinned whatsapp_connection_id")
+        if self.name == "classify_lead" or self.handler == "classify_lead":
+            if (
+                self.name != "classify_lead"
+                or self.kind != "registered"
+                or self.handler != "classify_lead"
+            ):
+                raise ValueError("classify_lead is a reserved registered tool")
+            object.__setattr__(
+                self,
+                "description",
+                "Classify the live transcript into fixed lead_temperature, service_fit and tone labels; also returns classification_key in temperature|fit|tone order.",
+            )
+            object.__setattr__(
+                self,
+                "parameters",
+                {"type": "object", "properties": {}, "additionalProperties": False},
+            )
         if self.handler != "query_knowledge_base" and self.knowledge_base_id is not None:
             raise ValueError("knowledge_base_id requires the query_knowledge_base handler")
         return self

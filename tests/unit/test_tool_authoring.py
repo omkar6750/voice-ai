@@ -49,6 +49,21 @@ def test_template_handler_requires_account_scoped_configuration() -> None:
         )
 
 
+def test_direct_whatsapp_tools_require_an_explicit_connection_pin() -> None:
+    with pytest.raises(ValidationError, match="pinned whatsapp_connection_id"):
+        ToolConfig.model_validate(
+            {"name": "send_whatsapp_message", "handler": "send_whatsapp_message"}
+        )
+    config = ToolConfig.model_validate(
+        {
+            "name": "send_whatsapp_message",
+            "handler": "send_whatsapp_message",
+            "whatsapp_connection_id": "connection-1",
+        }
+    )
+    assert config.whatsapp_connection_id == "connection-1"
+
+
 def test_http_tool_cannot_carry_whatsapp_settings() -> None:
     with pytest.raises(ValidationError, match="HTTP tools cannot contain WhatsApp"):
         ToolConfig.model_validate(
@@ -68,6 +83,7 @@ def test_removed_wait_fields_are_rejected_by_strict_contracts() -> None:
                 "name": "send_message",
                 "kind": "registered",
                 "handler": "send_whatsapp_message",
+                "whatsapp_connection_id": "connection-1",
                 "wait": {"mode": "acknowledge_then_wait", "acknowledgement": "Please wait"},
             }
         )

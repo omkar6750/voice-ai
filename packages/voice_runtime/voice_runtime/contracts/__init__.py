@@ -1,6 +1,14 @@
 """Public, strict configuration contracts shared by API and runtime."""
 
-from .agent import AgentConfig, ContextConfig, FlowConfig, FlowNodeConfig, LanguageConfig
+from .agent import (
+    AgentConfig,
+    ContextConfig,
+    FactSlotConfig,
+    FlowConfig,
+    FlowMessageConfig,
+    FlowNodeConfig,
+    LanguageConfig,
+)
 from .base import ConfigModel
 from .cadence import CadenceConfig, ClassifierConfig, ClassifierLLMConfig, SummarizerConfig
 from .diagnostics import DiagnosticInput, DiagnosticPayload
@@ -46,7 +54,9 @@ __all__ = [
     "ContextConfig",
     "DiagnosticInput",
     "DiagnosticPayload",
+    "FactSlotConfig",
     "FlowConfig",
+    "FlowMessageConfig",
     "FlowNodeConfig",
     "HTTPToolConfig",
     "KnowledgeConfig",

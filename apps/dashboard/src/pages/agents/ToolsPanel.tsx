@@ -90,11 +90,20 @@ export function ToolsPanel({
       background_hooks: config.background_hooks.filter((name) => name !== key),
       flow: {
         ...config.flow,
+        global_functions: (config.flow.global_functions ?? []).filter(
+          (name) => name.name !== key,
+        ),
         nodes: config.flow.nodes.map((node) => ({
           ...node,
           tool_bindings: node.tool_bindings.filter((name) => name !== key),
           entry_actions: node.entry_actions.filter((name) => name !== key),
           exit_actions: node.exit_actions.filter((name) => name !== key),
+          pre_actions: node.pre_actions.filter(
+            (action) => action.type !== "function" || action.handler !== key,
+          ),
+          post_actions: node.post_actions.filter(
+            (action) => action.type !== "function" || action.handler !== key,
+          ),
         })),
       },
     });

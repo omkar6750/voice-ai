@@ -3,6 +3,14 @@
 from pipecat.services.openai.llm import OpenAILLMService
 
 
+class IsoquantStreamError(ConnectionError):
+    """Incomplete provider response; eligible for fallback only before output."""
+
+    def __init__(self, message, response=None):
+        super().__init__(message)
+        self.response = response
+
+
 class IsoquantLLMService(OpenAILLMService):
     """Use Isoquant chat completions while retaining Pipecat context and tool handling."""
 
@@ -40,8 +48,9 @@ class IsoquantLLMService(OpenAILLMService):
                         if choice.finish_reason in {"stop", "tool_calls"}:
                             completed = True
                         elif choice.finish_reason:
-                            raise RuntimeError(
-                                f"Isoquant chat response ended with {choice.finish_reason}"
+                            raise IsoquantStreamError(
+                                f"Isoquant chat response ended with {choice.finish_reason}",
+                                response=getattr(stream, "response", None),
                             )
                     yield chunk
                 if not completed:
@@ -49,7 +58,10 @@ class IsoquantLLMService(OpenAILLMService):
                         "x-request-id"
                     )
                     detail = f" (x-request-id: {request_id})" if request_id else ""
-                    raise RuntimeError(f"Isoquant chat stream ended before completion{detail}")
+                    raise IsoquantStreamError(
+                        f"Isoquant chat stream ended before completion{detail}",
+                        response=getattr(stream, "response", None),
+                    )
             finally:
                 await stream.close()
 

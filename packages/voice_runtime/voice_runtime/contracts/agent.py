@@ -1,20 +1,114 @@
 """Agent-owned graphs, prompts, exact tool bindings, and runtime settings."""
 
-from typing import Literal
+from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, field_validator, model_validator
 
 from .base import ConfigModel, Identifier
-from .cadence import ClassifierConfig, SummarizerConfig
+from .cadence import ClassifierConfig, SummarizerConfig, lead_classifier_contract
 from .knowledge import RetrievalConfig
 from .prompt_references import tool_references
 from .providers import AudioConfig, CallLimits, MainLLMConfig, STTConfig, TTSConfig, VADConfig
 from .tools import ToolBinding
 
 
+class FlowMessageConfig(ConfigModel):
+    """A context message intentionally added when entering a Pipecat flow node."""
+
+    role: Literal["system", "developer", "user", "assistant"]
+    content: str = ""
+
+
+class FlowBranchConfig(ConfigModel):
+    field: str = Field(min_length=1)
+    cases: dict[str, Identifier] = Field(default_factory=dict)
+    default: Identifier | None = None
+
+
+class FlowFunctionConfig(ConfigModel):
+    name: Identifier
+    transition_only: bool = False
+    description: str | None = None
+    transition_to: Identifier | FlowBranchConfig | None = None
+
+    @model_validator(mode="after")
+    def validate_transition_only(self):
+        if self.transition_only and (
+            not self.description or not isinstance(self.transition_to, str)
+        ):
+            raise ValueError(
+                "transition_only functions require a description and fixed transition_to"
+            )
+        if not self.transition_only and self.description is not None:
+            raise ValueError("description is only supported for transition_only functions")
+        if self.name == "classify_lead" and isinstance(self.transition_to, FlowBranchConfig):
+            fields = lead_classifier_contract()["fields"]
+            branch = self.transition_to
+            if branch.field not in fields or set(branch.cases) - set(fields[branch.field]):
+                raise ValueError(
+                    "classify_lead routing requires a fixed output field and enum cases"
+                )
+        return self
+
+
+class FactSlotConfig(ConfigModel):
+    """Operator-declared, fixed-key values the caller can ask the agent to capture."""
+
+    key: Identifier
+    description: str = Field(min_length=1, max_length=500)
+    value_type: Literal["string", "integer", "number", "boolean"] = "string"
+    enum: list[str | int | float | bool] | None = None
+    minimum: float | None = None
+    maximum: float | None = None
+    nodes: list[Identifier] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_constraints(self):
+        if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
+            raise ValueError("fact slot minimum must not exceed maximum")
+        if self.value_type not in {"integer", "number"} and (
+            self.minimum is not None or self.maximum is not None
+        ):
+            raise ValueError("fact slot ranges require an integer or number value_type")
+        if self.enum is not None and not self.enum:
+            raise ValueError("fact slot enum must not be empty")
+        if self.enum is not None:
+            for value in self.enum:
+                self.validate_value(value)
+        return self
+
+    def validate_value(self, value: Any) -> Any:
+        valid_type = {
+            "string": lambda v: isinstance(v, str),
+            "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
+            "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+            "boolean": lambda v: isinstance(v, bool),
+        }[self.value_type](value)
+        if not valid_type:
+            raise ValueError(f"fact slot '{self.key}' expects {self.value_type}")
+        if self.minimum is not None and value < self.minimum:
+            raise ValueError(f"fact slot '{self.key}' is below its minimum")
+        if self.maximum is not None and value > self.maximum:
+            raise ValueError(f"fact slot '{self.key}' exceeds its maximum")
+        if self.enum is not None and value not in self.enum:
+            raise ValueError(f"fact slot '{self.key}' is outside its allowed values")
+        return value
+
+
 class FlowNodeConfig(ConfigModel):
     id: Identifier
+    # Native Pipecat name: FlowManager sends this as the provider system instruction.
+    role_message: str | None = None
+    # Explicit context messages. Do not use these for node objectives that must
+    # retain system-instruction priority across providers.
+    task_messages: list[FlowMessageConfig] = Field(default_factory=list)
+    functions: list[FlowFunctionConfig] = Field(default_factory=list)
+    # Native Pipecat action names and payloads. The runtime validates these
+    # again through Pipecat's FlowConfig before a call starts.
+    pre_actions: list[dict[str, Any]] = Field(default_factory=list)
+    post_actions: list[dict[str, Any]] = Field(default_factory=list)
+    # Legacy fields are retained so existing published snapshots remain readable.
     prompt: str = ""
     role_prompt: str | None = None
     context_strategy: Literal["append", "reset"] = "append"
@@ -29,7 +123,15 @@ class FlowNodeConfig(ConfigModel):
 class FlowConfig(ConfigModel):
     initial_node: Identifier
     nodes: list[FlowNodeConfig] = Field(min_length=1)
+    global_functions: list[FlowFunctionConfig] = Field(default_factory=list)
     prompt_composition: Literal["node_only", "global_plus_node"] = "node_only"
+
+    @field_validator("global_functions", mode="before")
+    @classmethod
+    def accept_legacy_global_function_names(cls, value):
+        if isinstance(value, list):
+            return [{"name": item} if isinstance(item, str) else item for item in value]
+        return value
 
     @model_validator(mode="after")
     def valid_graph(self):
@@ -45,21 +147,62 @@ class FlowConfig(ConfigModel):
                 raise ValueError(f"unknown transition from {node.id}")
             if node.terminal and node.transitions:
                 raise ValueError("terminal nodes cannot have outgoing transitions")
+            if len({function.name for function in node.functions}) != len(node.functions):
+                raise ValueError(f"duplicate function in node '{node.id}'")
+            if set(node.tool_bindings) & {function.name for function in node.functions}:
+                raise ValueError(f"duplicate tool binding in node '{node.id}'")
+            for function in node.functions:
+                if isinstance(function.transition_to, str):
+                    targets = {function.transition_to}
+                elif function.transition_to is not None:
+                    targets = set(function.transition_to.cases.values())
+                    if function.transition_to.default:
+                        targets.add(function.transition_to.default)
+                else:
+                    targets = set()
+                if targets - nodes.keys():
+                    raise ValueError(
+                        f"function '{function.name}' in node '{node.id}' targets an unknown node"
+                    )
+        for function in self.global_functions:
+            if function.transition_only:
+                raise ValueError("global functions cannot be transition_only")
+            targets = set()
+            if isinstance(function.transition_to, str):
+                targets.add(function.transition_to)
+            elif function.transition_to is not None:
+                targets.update(function.transition_to.cases.values())
+                if function.transition_to.default:
+                    targets.add(function.transition_to.default)
+            if targets - nodes.keys():
+                raise ValueError(f"global function '{function.name}' targets an unknown node")
+        if len({function.name for function in self.global_functions}) != len(self.global_functions):
+            raise ValueError("duplicate global function")
+        edges = {node.id: set(node.transitions) for node in self.nodes}
+        for node in self.nodes:
+            for function in node.functions:
+                target = function.transition_to
+                if isinstance(target, str):
+                    edges[node.id].add(target)
+                elif target is not None:
+                    edges[node.id].update(target.cases.values())
+                    if target.default:
+                        edges[node.id].add(target.default)
+            if node.terminal and edges[node.id]:
+                raise ValueError("terminal nodes cannot have outgoing transitions")
         reached = set()
         pending = [self.initial_node]
         while pending:
             current = pending.pop()
             if current not in reached:
                 reached.add(current)
-                pending.extend(nodes[current].transitions)
+                pending.extend(edges[current])
         if reached != nodes.keys():
             raise ValueError("all nodes must be reachable from initial_node")
         terminating = {node.id for node in self.nodes if node.terminal}
         while True:
             previous = terminating.copy()
-            terminating.update(
-                node.id for node in self.nodes if set(node.transitions) & terminating
-            )
+            terminating.update(node.id for node in self.nodes if edges[node.id] & terminating)
             if previous == terminating:
                 break
         if terminating != nodes.keys():
@@ -132,10 +275,16 @@ class CallbackSchedulingConfig(ConfigModel):
 class AgentConfig(ConfigModel):
     name: str = Field(min_length=1)
     system_prompt: str = ""
+    # Deprecated compatibility input. The runtime folds this into the initial
+    # node role_message; new configurations should put the opening in the flow.
     greeting: str = ""
+    idle_reprompt_text: str = Field(default="Are you still there?", max_length=500)
+    idle_reprompt_limit: int = Field(default=1, ge=0, le=5)
+    filter_incomplete_user_turns: bool = False
     contact_variables: list[Identifier] = Field(default_factory=list)
     language: LanguageConfig = Field(default_factory=LanguageConfig)
     flow: FlowConfig
+    fact_slots: list[FactSlotConfig] = Field(default_factory=list)
     tool_bindings: dict[Identifier, ToolBinding] = Field(default_factory=dict)
     background_hooks: list[Identifier] = Field(default_factory=list)
     knowledge_base_ids: list[Identifier] = Field(default_factory=list)
@@ -160,9 +309,31 @@ class AgentConfig(ConfigModel):
         references = set(self.background_hooks)
         for node in self.flow.nodes:
             references.update(node.tool_bindings + node.entry_actions + node.exit_actions)
-            unbound = tool_references(node.prompt) - set(node.tool_bindings)
-            if node.role_prompt:
-                unbound |= tool_references(node.role_prompt) - set(node.tool_bindings)
+            for function in node.functions:
+                if function.name == "change_node":
+                    raise ValueError("change_node is replaced by native transition functions")
+                if not function.transition_only:
+                    references.add(function.name)
+            for action in [*node.pre_actions, *node.post_actions]:
+                action_type = action.get("type")
+                if action_type not in {"tts_say", "end_conversation", "function"}:
+                    raise ValueError(f"unsupported Pipecat action type: {action_type}")
+                if action_type == "function":
+                    handler = action.get("handler")
+                    if not isinstance(handler, str) or not handler:
+                        raise ValueError("function actions require a handler")
+                    references.add(handler)
+            prompt_texts = [node.prompt]
+            prompt_texts.extend(
+                text for text in (node.role_prompt, node.role_message) if text is not None
+            )
+            prompt_texts.extend(message.content for message in node.task_messages)
+            unbound = set().union(*(tool_references(text) for text in prompt_texts))
+            unbound -= (
+                set(node.tool_bindings)
+                | {function.name for function in self.flow.global_functions}
+                | {function.name for function in node.functions}
+            )
             if unbound:
                 raise ValueError(
                     f"unbound prompt tool references in node '{node.id}': {sorted(unbound)}"
@@ -170,6 +341,49 @@ class AgentConfig(ConfigModel):
         if references - self.tool_bindings.keys():
             raise ValueError(
                 f"unknown tool bindings: {sorted(references - self.tool_bindings.keys())}"
+            )
+        global_refs = {function.name for function in self.flow.global_functions}
+        if global_refs - self.tool_bindings.keys():
+            raise ValueError(
+                f"unknown global tool bindings: {sorted(global_refs - self.tool_bindings.keys())}"
+            )
+        node_refs = {name for node in self.flow.nodes for name in node.tool_bindings}
+        node_refs.update(
+            function.name
+            for node in self.flow.nodes
+            for function in node.functions
+            if not function.transition_only
+        )
+        if global_refs & node_refs:
+            raise ValueError("a global function cannot also be bound to an individual node")
+        node_function_refs = {
+            function.name
+            for node in self.flow.nodes
+            for function in node.functions
+            if not function.transition_only
+        }
+        if node_function_refs & global_refs:
+            raise ValueError("a function cannot be both node-scoped and global")
+        if node_function_refs - self.tool_bindings.keys():
+            raise ValueError(
+                f"unknown tool bindings: {sorted(node_function_refs - self.tool_bindings.keys())}"
+            )
+        slot_keys = [slot.key for slot in self.fact_slots]
+        if len(set(slot_keys)) != len(slot_keys):
+            raise ValueError("fact slot keys must be unique")
+        node_ids = {node.id for node in self.flow.nodes}
+        for slot in self.fact_slots:
+            if set(slot.nodes) - node_ids:
+                raise ValueError(f"fact slot '{slot.key}' references an unknown node")
+        generated_fact_tools = {f"record_{key}" for key in slot_keys}
+        generated_transition_tools = {
+            f"go_to_{target}" for node in self.flow.nodes for target in node.transitions
+        }
+        collisions = (generated_fact_tools | generated_transition_tools) & set(self.tool_bindings)
+        collisions |= generated_fact_tools & global_refs
+        if collisions:
+            raise ValueError(
+                f"generated flow functions collide with tool bindings: {sorted(collisions)}"
             )
         return self
 
@@ -181,15 +395,3 @@ class AgentConfig(ConfigModel):
             value = dict(value)
             value.pop("persona", None)
         return value
-
-    @model_validator(mode="after")
-    def validate_verbatim_opening_timing(self):
-        if self.greeting.strip():
-            nodes = {node.id: node for node in self.flow.nodes}
-            initial = nodes[self.flow.initial_node]
-            if initial.respond_immediately:
-                raise ValueError(
-                    "A verbatim opening requires the initial node to wait for caller speech "
-                    "(respond_immediately=false)"
-                )
-        return self

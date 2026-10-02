@@ -204,11 +204,11 @@ async def download(artifact_id: str, session: AsyncSession = Session):
             raise HTTPException(503, "Recording unavailable") from None
         return Response(
             data,
-            media_type="application/x-ndjson" if row.kind == "pipeline_log" else "audio/wav",
+            media_type="application/x-ndjson" if row.kind in {"pipeline_log", "runtime_log"} else "audio/wav",
             headers={
                 "Cache-Control": "no-store",
                 "Content-Disposition": 'inline; filename="pipeline.jsonl"'
-                if row.kind == "pipeline_log"
+                if row.kind in {"pipeline_log", "runtime_log"}
                 else f'inline; filename="{row.kind}.wav"',
             },
         )

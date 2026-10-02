@@ -18,14 +18,18 @@ def test_normalizer_removes_provider_padding_and_unknown_fields():
         "lead_temperature": "warm",
         "service_fit": "strong_fit",
         "tone": "receptive",
+        "classification_key": "warm|strong_fit|receptive",
     }
 
 
 def test_normalizer_returns_bounded_error_for_invalid_or_oversized_output():
     assert classifier.normalize_classifier_result("not json") == classifier.DEFAULT_RESULT
-    assert classifier.normalize_classifier_result(
-        {"lead_temperature": "warm"}, {"lead_temperature": ["warm"]}, max_result_chars=5
-    ) == classifier.DEFAULT_RESULT
+    assert (
+        classifier.normalize_classifier_result(
+            {"lead_temperature": "warm"}, {"lead_temperature": ["warm"]}, max_result_chars=5
+        )
+        == classifier.DEFAULT_RESULT
+    )
 
 
 @pytest.mark.asyncio
@@ -45,9 +49,11 @@ async def test_pipecat_runner_uses_public_context_and_provider_service(monkeypat
         async def run_inference(self, context, *, max_tokens):
             captured["messages"] = context.get_messages()
             captured["max_tokens"] = max_tokens
-            return '{"lead_temperature":"warm","extra":"ignored"}'
+            return '{"lead_temperature":"warm","service_fit":"strong_fit","tone":"receptive","extra":"ignored"}'
 
-    monkeypatch.setattr(classifier, "build_llm_service", lambda *args, **kwargs: FakeService(**kwargs))
+    monkeypatch.setattr(
+        classifier, "build_llm_service", lambda *args, **kwargs: FakeService(**kwargs)
+    )
     result = await classifier.PipecatLLMClassifierRunner().run(
         settings=SimpleNamespace(groq_api_key="test"),
         config={
@@ -60,10 +66,15 @@ async def test_pipecat_runner_uses_public_context_and_provider_service(monkeypat
         transcript="Caller: interested",
     )
 
-    assert result == {"lead_temperature": "warm"}
+    assert result == {
+        "lead_temperature": "warm",
+        "service_fit": "strong_fit",
+        "tone": "receptive",
+        "classification_key": "warm|strong_fit|receptive",
+    }
     assert captured["messages"] == [{"role": "user", "content": "Caller: interested"}]
-    assert captured["max_tokens"] == 96
-    assert captured["service"]["system_instruction"].startswith("Classify")
+    assert captured["max_tokens"] == 256
+    assert captured["service"]["system_instruction"].startswith(classifier.LEAD_CLASSIFIER_PROMPT)
 
 
 def test_classifier_operation_not_interrupted_by_caller_barge_in():

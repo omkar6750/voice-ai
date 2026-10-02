@@ -251,7 +251,24 @@ def test_node_configuration_is_scoped_to_published_bindings(tmp_path):
     host = NativePipelineHost("run-1", tmp_path, object())
     host._snapshot = {
         "system_prompt": "Global",
-        "flow": {"initial_node": "greeting"},
+        "flow": {
+            "initial_node": "greeting",
+            "nodes": [
+                {
+                    "id": "greeting",
+                    "prompt": "Say hello",
+                    "tool_bindings": [],
+                    "transitions": ["closing"],
+                },
+                {
+                    "id": "closing",
+                    "prompt": "Goodbye",
+                    "tool_bindings": [],
+                    "transitions": [],
+                    "context_strategy": "reset",
+                },
+            ],
+        },
         "_resolved": {
             "tools": {
                 "change_node": {
@@ -277,21 +294,24 @@ def test_node_configuration_is_scoped_to_published_bindings(tmp_path):
         "greeting": {
             "id": "greeting",
             "prompt": "Say hello",
-            "tool_bindings": ["change_node"],
+            "tool_bindings": [],
             "transitions": ["closing"],
             "respond_immediately": True,
         }
     }
+    from voice_runtime.execution.pipecat_flow import compile_pipecat_flow
+
+    host._pipecat_flow = compile_pipecat_flow(host._snapshot)
     node = host._node("greeting")
-    assert node["role_message"] == "Global"
-    assert node["task_messages"] == [{"role": "user", "content": "Say hello"}]
-    assert [tool.name for tool in node["functions"]] == ["change_node"]
-    assert node["functions"][0].description == "Move"
-    assert node["functions"][0].properties["node"]["description"] == ("Destination node identifier")
+    assert node["role_message"] == "Global\n\nCurrent node objective:\nSay hello"
+    assert node["task_messages"] == []
+    assert [tool.name for tool in node["functions"]] == ["go_to_closing"]
     host._nodes["greeting"]["role_prompt"] = "Node role"
     host._nodes["greeting"]["context_strategy"] = "reset"
+    host._snapshot["flow"]["nodes"][0].update(host._nodes["greeting"])
+    host._pipecat_flow = compile_pipecat_flow(host._snapshot)
     overridden = host._node("greeting")
-    assert overridden["role_message"] == "Node role"
+    assert overridden["role_message"] == "Global\n\nNode role\n\nCurrent node objective:\nSay hello"
     assert overridden["context_strategy"].strategy.value == "reset"
 
 
@@ -349,6 +369,13 @@ def test_callback_role_schema_uses_enabled_agent_roles_without_mutating_registry
             "respond_immediately": False,
         }
     }
+    host._snapshot["flow"] = {
+        "initial_node": "callback",
+        "nodes": [{**host._nodes["callback"], "id": "callback"}],
+    }
+    from voice_runtime.execution.pipecat_flow import compile_pipecat_flow
+
+    host._pipecat_flow = compile_pipecat_flow(host._snapshot)
 
     function = host._node("callback")["functions"][0]
 
@@ -392,6 +419,13 @@ def test_callback_tools_are_hidden_when_no_enabled_role_has_a_bookable_person(tm
             "respond_immediately": False,
         }
     }
+    host._snapshot["flow"] = {
+        "initial_node": "callback",
+        "nodes": [{**host._nodes["callback"], "id": "callback"}],
+    }
+    from voice_runtime.execution.pipecat_flow import compile_pipecat_flow
+
+    host._pipecat_flow = compile_pipecat_flow(host._snapshot)
 
     assert host._node("callback")["functions"] == []
 

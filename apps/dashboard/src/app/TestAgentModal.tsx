@@ -316,13 +316,13 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
       clientRef.current = client;
       debugLifecycle("initializing-devices", { sessionId: session.id });
       await client.initDevices();
-      const { ticket } = await api<{ ticket: string }>(
+      const { ticket, ws_url } = await api<{ ticket: string; ws_url?: string }>(
         `/browser-sessions/${session.id}/ticket`,
         { method: "POST" },
       );
       debugLifecycle("ticket-issued", { sessionId: session.id });
       await client.connect({
-        wsUrl: websocketUrl(`/browser-sessions/${session.id}/ws?ticket=${encodeURIComponent(ticket)}`),
+        wsUrl: ws_url ?? websocketUrl(`/browser-sessions/${session.id}/ws?ticket=${encodeURIComponent(ticket)}`),
       });
       debugLifecycle("connected", { sessionId: session.id });
       setCallState("connected");

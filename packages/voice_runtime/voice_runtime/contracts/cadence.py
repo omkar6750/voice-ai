@@ -88,7 +88,59 @@ def default_jev_questions() -> dict[str, JevQuestion]:
     }
 
 
+LEAD_OUTPUT_FIELDS = {
+    key: list(question.criteria) for key, question in default_jev_questions().items()
+}
+LEAD_CLASSIFIER_PROMPT = (
+    "Classify the supplied conversation using only observed evidence. "
+    "Do not invent intent, needs, consent or confirmed actions. Short acknowledgements "
+    "alone are not negative. When evidence is uncertain, use warm, possible_fit or hesitant "
+    "as appropriate. An inferred label is not permission to send messages or book a call.\n"
+    + "\n".join(
+        f"{key}: {question.instructions}\n"
+        + "\n".join(f"- {label}: {meaning}" for label, meaning in question.criteria.items())
+        for key, question in default_jev_questions().items()
+    )
+)
+
+
+def lead_classifier_contract() -> dict:
+    from itertools import product
+
+    return {
+        "version": 1,
+        "tool": "classify_lead",
+        "prompt": LEAD_CLASSIFIER_PROMPT,
+        "questions": {k: v.model_dump() for k, v in default_jev_questions().items()},
+        "fields": {
+            **LEAD_OUTPUT_FIELDS,
+            "classification_key": [
+                "|".join(values) for values in product(*LEAD_OUTPUT_FIELDS.values())
+            ],
+            "followup_route": [
+                "hot_followup",
+                "warm_nurture",
+                "cold_check",
+                "fit_clarification",
+                "stay",
+            ],
+        },
+    }
+
+
 class JevClassifierConfig(ConfigModel):
+    @model_validator(mode="before")
+    @classmethod
+    def fixed_lead_questions(cls, value):
+        value = dict(value or {})
+        value.update(
+            questions=default_jev_questions(),
+            output_fields=list(LEAD_OUTPUT_FIELDS),
+            model="jev-latest",
+            api_url="https://api.typesafe.ai/v1/systemone",
+        )
+        return value
+
     model: str = "jev-latest"
     api_url: str = "https://api.typesafe.ai/v1/systemone"
     questions: dict[str, JevQuestion] = Field(default_factory=default_jev_questions)
@@ -99,7 +151,20 @@ class JevClassifierConfig(ConfigModel):
 
 
 class ClassifierLLMConfig(LLMConfig):
-    prompt: str = "Classify the supplied conversation using only observed evidence."
+    @model_validator(mode="before")
+    @classmethod
+    def fixed_lead_instructions(cls, value):
+        value = dict(value or {})
+        value.update(
+            prompt=LEAD_CLASSIFIER_PROMPT,
+            output_fields=LEAD_OUTPUT_FIELDS,
+            temperature=0.1,
+            max_output_tokens=256,
+            max_tokens=256,
+        )
+        return value
+
+    prompt: str = LEAD_CLASSIFIER_PROMPT
     output_fields: dict[str, list[str]] = Field(
         default_factory=lambda: {
             "lead_temperature": ["hot", "warm", "cold"],
@@ -107,10 +172,11 @@ class ClassifierLLMConfig(LLMConfig):
             "tone": ["receptive", "hesitant", "resistant"],
         }
     )
-    max_output_tokens: int = Field(default=96, gt=0, le=512)
+    max_output_tokens: int = Field(default=256, gt=0, le=512)
 
 
 class ClassifierConfig(CadenceConfig):
+    routing_policy: Literal["lead_followup"] | None = None
     classifier_type: Literal["llm", "jev"] = "llm"
     node_exits: list[Identifier] = Field(default_factory=lambda: ["discovery", "qualification"])
     llm: ClassifierLLMConfig | None = Field(default_factory=ClassifierLLMConfig)

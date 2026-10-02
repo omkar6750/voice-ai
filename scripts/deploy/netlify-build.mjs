@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 const publicKeys = [
   "VITE_CLERK_PUBLISHABLE_KEY",
   "VITE_API_ORIGIN",
+  "VITE_RUNTIME_ORIGIN",
   "VITE_CLERK_SIGN_IN_URL",
   "VITE_CLERK_SIGN_UP_URL",
   "VITE_CLERK_AFTER_SIGN_IN_URL",
@@ -38,6 +39,16 @@ if (
   origin.protocol !== "https:" || origin.username || origin.password ||
   origin.pathname !== "/" || origin.search || origin.hash
 ) fail("API origin must be HTTPS without credentials, path, query, or fragment");
+
+if (process.env.VITE_RUNTIME_ORIGIN) {
+  let runtimeOrigin;
+  try { runtimeOrigin = new URL(process.env.VITE_RUNTIME_ORIGIN); }
+  catch { fail("An HTTPS runtime origin is required"); }
+  if (runtimeOrigin.protocol !== "https:" || runtimeOrigin.username || runtimeOrigin.password ||
+      runtimeOrigin.pathname !== "/" || runtimeOrigin.search || runtimeOrigin.hash) {
+    fail("Runtime origin must be HTTPS without credentials, path, query, or fragment");
+  }
+}
 
 // Backend credentials cannot reach npm or Vite through inherited process env.
 const buildEnv = {};

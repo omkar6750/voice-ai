@@ -382,22 +382,25 @@ async def test_create_and_patch_contact_with_metadata(monkeypatch) -> None:
         app.dependency_overrides.pop(get_session, None)
 
 
-def test_flow_node_config_allows_role_prompt_and_context_strategy() -> None:
+def test_flow_node_config_exposes_pipecat_role_and_task_messages() -> None:
     from voice_runtime.contracts.agent import FlowNodeConfig
 
     node = FlowNodeConfig(
         id="greeting",
         prompt="Hello!",
         role_prompt="You are a helpful assistant.",
+        role_message="Be warm and concise.",
+        task_messages=[{"role": "assistant", "content": "Previous context."}],
         context_strategy="reset",
         terminal=True,
     )
     assert node.role_prompt == "You are a helpful assistant."
+    assert node.role_message == "Be warm and concise."
+    assert node.task_messages[0].role == "assistant"
     assert node.context_strategy == "reset"
 
 
-def test_verbatim_opening_requires_initial_node_to_wait() -> None:
-    from pydantic import ValidationError
+def test_legacy_opening_config_accepts_immediate_initial_node_for_flow_migration() -> None:
     from voice_runtime.contracts.agent import AgentConfig
 
     config = {
@@ -410,8 +413,9 @@ def test_verbatim_opening_requires_initial_node_to_wait() -> None:
             ],
         },
     }
-    with pytest.raises(ValidationError, match="verbatim opening"):
-        AgentConfig.model_validate(config)
+    validated = AgentConfig.model_validate(config)
+    assert validated.greeting == "Hello {{name}}"
+    assert validated.flow.nodes[0].respond_immediately is True
 
 
 def test_legacy_persona_is_ignored_and_empty_greeting_keeps_immediate_default() -> None:

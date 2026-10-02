@@ -60,6 +60,7 @@ export function AgentsPage() {
   );
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
+  const [initialNode, setInitialNode] = useState("opening");
   const [busy, setBusy] = useState(false);
 
   // Deletion state
@@ -71,7 +72,8 @@ export function AgentsPage() {
   async function create(event: FormEvent) {
     event.preventDefault();
     const trimmed = name.trim();
-    if (!trimmed) return;
+    const nodeId = initialNode.trim();
+    if (!trimmed || !/^[a-z][a-z0-9_]*$/.test(nodeId)) return;
     setBusy(true);
     try {
       const result = await api<{ agent_id: string; version_id: string }>(
@@ -83,8 +85,8 @@ export function AgentsPage() {
             config: {
               name: trimmed,
               flow: {
-                initial_node: "greeting",
-                nodes: [{ id: "greeting", prompt: "", terminal: true }],
+                initial_node: nodeId,
+                nodes: [{ id: nodeId, role_message: "", task_messages: [], terminal: true }],
               },
             },
           }),
@@ -93,6 +95,7 @@ export function AgentsPage() {
       toast.success("Draft agent created");
       setOpen(false);
       setName("");
+      setInitialNode("opening");
       await reload();
       navigate(`/agents/${result.agent_id}/versions/${result.version_id}`);
     } catch (cause) {
@@ -174,9 +177,26 @@ export function AgentsPage() {
                       Visible in agent list and run references.
                     </FieldDescription>
                   </Field>
+                  <Field>
+                    <FieldLabel htmlFor="initial-node-id">Initial node ID</FieldLabel>
+                    <Input
+                      id="initial-node-id"
+                      value={initialNode}
+                      onChange={(event) => setInitialNode(event.target.value)}
+                      maxLength={64}
+                      pattern="[a-z][a-z0-9_]*"
+                      required
+                    />
+                    <FieldDescription>
+                      This node opens the call. Use lowercase letters, numbers, and underscores.
+                    </FieldDescription>
+                  </Field>
                 </FieldGroup>
                 <SheetFooter className="mt-auto">
-                  <Button type="submit" disabled={busy || !name.trim()}>
+                  <Button
+                    type="submit"
+                    disabled={busy || !name.trim() || !/^[a-z][a-z0-9_]*$/.test(initialNode.trim())}
+                  >
                     {busy ? "Creating…" : "Create draft"}
                   </Button>
                 </SheetFooter>

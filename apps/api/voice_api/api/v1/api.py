@@ -25,6 +25,7 @@ from voice_api.api.v1.endpoints.openrouter import router as openrouter_router
 from voice_api.api.v1.endpoints.organizations import router as organizations_router
 from voice_api.api.v1.endpoints.platform import router as platform_router
 from voice_api.api.v1.endpoints.recordings import router as recordings_router
+from voice_api.core.runtime_config import use_separate_runtime
 
 api_router = APIRouter()
 
@@ -52,3 +53,13 @@ api_router.include_router(integrations_router)
 api_router.include_router(calendar_router)
 api_router.include_router(telephony_router)
 api_router.include_router(browser_sessions_router)
+
+
+if use_separate_runtime():
+    from voice_api.api.v1.endpoints.runtime import router as runtime_router
+    from voice_api.api.v1.endpoints.runtime_artifacts import router as runtime_artifacts_router
+
+    from voice_api.api.v1.endpoints.chat import router as chat_router
+    api_router.include_router(chat_router)
+    api_router.include_router(runtime_router)
+    api_router.include_router(runtime_artifacts_router)

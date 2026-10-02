@@ -308,6 +308,14 @@ def _patch_loguru(record: dict) -> None:
     )
 
 
+_event_sink = None
+
+
+def set_event_sink(sink):
+    global _event_sink
+    _event_sink = sink
+
+
 def _sink(stream):
     def write(message):
         record = message.record
@@ -334,8 +342,11 @@ def _sink(stream):
         safe = safe_event_payload(event, **fields)
         severity = record["level"].name
         safe["level"] = severity if severity in _LEVELS else "INFO"
-        stream.write(json.dumps(safe, separators=(",", ":")) + "\n")
-        stream.flush()
+        if _event_sink is not None:
+            _event_sink(safe)
+        else:
+            stream.write(json.dumps(safe, separators=(",", ":")) + "\n")
+            stream.flush()
 
     return write
 

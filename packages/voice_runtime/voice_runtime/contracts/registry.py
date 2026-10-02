@@ -104,7 +104,8 @@ _HANDLER_SPECS: tuple[RegisteredHandlerSpec, ...] = (
     ),
     RegisteredHandlerSpec(
         name="classify_lead",
-        description="Classify the live lead using the classifier backend configured for this agent.",
+        description="Classify the live transcript into fixed lead_temperature (hot/warm/cold), service_fit (strong_fit/possible_fit/poor_fit) and tone (receptive/hesitant/resistant). Takes no arguments; also returns classification_key in temperature|fit|tone order.",
+        parameters={"type": "object", "properties": {}, "additionalProperties": False},
         category="classification",
     ),
     RegisteredHandlerSpec(

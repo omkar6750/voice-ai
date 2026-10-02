@@ -37,6 +37,21 @@ export function ToolVersionPage() {
     "/tools/handlers",
     editing && section === "execution",
   );
+  const integrations = useToolResource<{
+    connections: {
+      id: string;
+      label: string;
+      provider: string;
+      enabled: boolean;
+      deleted_at: string | null;
+    }[];
+  }>("/integrations", editing && section === "execution");
+  const whatsappConnections = (integrations.data?.connections ?? []).filter(
+    (connection) =>
+      connection.provider === "whatsapp" &&
+      connection.enabled &&
+      !connection.deleted_at,
+  );
   const [candidate, setCandidate] = useState<Version | null>(null);
   const version = resource.data;
   const base = "/tools/" + toolId + "/versions/" + versionId;
@@ -120,6 +135,7 @@ export function ToolVersionPage() {
                 version={version}
                 onDirtyChange={setHasUnsavedEdits}
                 handlers={handlers.data?.handlers ?? []}
+                whatsappConnections={whatsappConnections}
                 onSectionChange={onSectionChange}
                 onSaved={(next) => {
                   resource.setData(next);
@@ -129,6 +145,9 @@ export function ToolVersionPage() {
                   void resource.refetch();
                 }}
               />
+              {section === "execution" && integrations.error && (
+                <p role="alert">{integrations.error.message}</p>
+              )}
               {section === "execution" && handlers.error && (
                 <p role="alert">{handlers.error.message}</p>
               )}

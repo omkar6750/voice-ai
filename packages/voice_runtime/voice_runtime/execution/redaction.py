@@ -5,7 +5,8 @@ from collections.abc import Iterable
 
 _SECRET_FIELD = re.compile(
     r"(?:^|_)(?:api_key|access_token|refresh_token|authorization|password|"
-    r"app_secret|client_secret|verify_token|operator_token|runtime_service_token|integration_keys|ciphertext)$",
+    r"app_secret|client_secret|verify_token|operator_token|runtime_service_token|integration_keys|ciphertext|"
+    r"cookie|set_cookie|ticket|grant|upload_grant|signed_url|auth_token|api_key_secret|decrypted_byok)$",
     re.IGNORECASE,
 )
 
