@@ -119,12 +119,18 @@ export function ModelsPanel({
                     model: available[0] ?? config.llm.model,
                     fallback: config.llm.fallback,
                     reasoning_effort:
-                      provider === "gemini" || provider === "openrouter"
+                      provider === "isoquant"
+                        ? ("low" as const)
+                        : provider === "gemini" || provider === "openrouter"
                         ? ("provider_default" as const)
                         : ("none" as const),
+                    max_tokens: provider === "isoquant" ? 1024 : config.llm.max_tokens,
+                    models: provider === "openrouter" ? config.llm.models : [],
+                    provider_preferences:
+                      provider === "openrouter" ? config.llm.provider_preferences : null,
                   },
                 };
-                change(next);
+                change(bindCredential(next, "llm", null));
               }}
             >
               {llmProviders.map((item) => {
@@ -203,7 +209,7 @@ export function ModelsPanel({
             min={0}
             max={2}
             step={0.1}
-            disabled={disabled}
+            disabled={disabled || config.llm.provider === "isoquant"}
             onChange={(temperature) =>
               change({ ...config, llm: { ...config.llm, temperature } })
             }
@@ -228,7 +234,7 @@ export function ModelsPanel({
               step={0.01}
               value={config.llm.top_p ?? ""}
               placeholder="Provider default"
-              disabled={disabled}
+              disabled={disabled || config.llm.provider === "isoquant"}
               onChange={(event) =>
                 change({
                   ...config,
@@ -243,6 +249,33 @@ export function ModelsPanel({
               }
             />
           </Field>
+          {config.llm.provider === "isoquant" && (
+            <Field>
+              <FieldLabel htmlFor="llm-reasoning-effort">Reasoning effort</FieldLabel>
+              <NativeSelect
+                id="llm-reasoning-effort"
+                value={config.llm.reasoning_effort}
+                disabled={disabled}
+                onChange={(event) =>
+                  change({
+                    ...config,
+                    llm: {
+                      ...config.llm,
+                      reasoning_effort: event.target.value as "low" | "high" | "max",
+                    },
+                  })
+                }
+              >
+                <option value="low">Low</option>
+                <option value="high">High</option>
+                <option value="max">Max</option>
+              </NativeSelect>
+              <FieldDescription>
+                Reasoning is always on. This effort and the answer share the output token limit.
+                Temperature and top-p are unavailable for this provider.
+              </FieldDescription>
+            </Field>
+          )}
         </FieldGroup>
         <div className="rounded-md border p-4">
           <label className="flex items-start gap-3 text-sm font-medium">
@@ -397,11 +430,13 @@ export function ModelsPanel({
             </FieldGroup>
           )}
         </div>
-        <ReadOnlyValue
-          label="Reasoning"
-          value={config.llm.reasoning_effort}
-          reason="Reasoning behavior is provider- and model-specific."
-        />
+        {config.llm.provider !== "isoquant" && (
+          <ReadOnlyValue
+            label="Reasoning"
+            value={config.llm.reasoning_effort}
+            reason="Reasoning behavior is provider- and model-specific."
+          />
+        )}
       </div>
 
       <div className="flex flex-col gap-4">

@@ -64,8 +64,16 @@ export function ContextPanel({
 
   function updateSummaryModel(
     partial: Partial<NonNullable<SummarizerConfig["model"]>>,
+    clearCredential = false,
   ) {
-    updateSummarizer({ model: { ...summaryModel, ...partial } });
+    const next = {
+      ...config,
+      context: {
+        ...config.context,
+        summarizer: { ...summarizer, model: { ...summaryModel, ...partial } },
+      },
+    };
+    change(clearCredential ? bindCredential(next, "summarizer", null) : next);
   }
 
   return (
@@ -192,10 +200,15 @@ export function ContextPanel({
                   provider,
                   model: models[0] ?? summaryModel.model,
                   reasoning_effort:
-                    provider === "gemini" || provider === "openrouter"
+                    provider === "isoquant"
+                      ? "low"
+                      : provider === "gemini" || provider === "openrouter"
                       ? "provider_default"
                       : "none",
-                });
+                  models: provider === "openrouter" ? summaryModel.models : [],
+                  provider_preferences:
+                    provider === "openrouter" ? summaryModel.provider_preferences : null,
+                }, true);
               }}
             >
               {llmProviders.map((item) => {

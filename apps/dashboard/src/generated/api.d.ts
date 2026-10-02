@@ -4564,7 +4564,7 @@ export interface components {
              * @default groq
              * @enum {string}
              */
-            provider: "groq" | "gemini" | "openrouter" | "sarvam";
+            provider: "groq" | "gemini" | "openrouter" | "sarvam" | "isoquant";
             /**
              * Model
              * @default qwen/qwen3.8-27b
@@ -4587,7 +4587,7 @@ export interface components {
              * @default none
              * @enum {string}
              */
-            reasoning_effort: "none" | "provider_default" | "low" | "medium" | "high";
+            reasoning_effort: "none" | "provider_default" | "low" | "medium" | "high" | "max";
             /** Models */
             models?: string[];
             provider_preferences?: components["schemas"]["OpenRouterProviderPreferences"] | null;
@@ -4818,7 +4818,7 @@ export interface components {
              * Provider
              * @enum {string}
              */
-            provider: "groq" | "gemini" | "openrouter" | "sarvam" | "cartesia" | "jev" | "twilio" | "whatsapp";
+            provider: "groq" | "gemini" | "openrouter" | "sarvam" | "isoquant" | "cartesia" | "jev" | "twilio" | "whatsapp";
             /** Api Key */
             api_key?: string | null;
             /** Account Sid */
@@ -4850,7 +4850,7 @@ export interface components {
              * Provider
              * @enum {string}
              */
-            provider: "groq" | "gemini" | "openrouter" | "sarvam" | "cartesia" | "jev" | "twilio" | "whatsapp";
+            provider: "groq" | "gemini" | "openrouter" | "sarvam" | "isoquant" | "cartesia" | "jev" | "twilio" | "whatsapp";
             /** Api Key */
             api_key?: string | null;
             /** Account Sid */
@@ -4874,7 +4874,7 @@ export interface components {
              * Provider
              * @enum {string}
              */
-            provider: "groq" | "gemini" | "openrouter" | "sarvam" | "cartesia" | "jev" | "twilio" | "whatsapp";
+            provider: "groq" | "gemini" | "openrouter" | "sarvam" | "isoquant" | "cartesia" | "jev" | "twilio" | "whatsapp";
             /** Purpose */
             purpose: string;
             /** Version */
@@ -5586,7 +5586,7 @@ export interface components {
              * @default groq
              * @enum {string}
              */
-            provider: "groq" | "gemini" | "openrouter" | "sarvam";
+            provider: "groq" | "gemini" | "openrouter" | "sarvam" | "isoquant";
             /**
              * Model
              * @default qwen/qwen3.8-27b
@@ -5609,7 +5609,7 @@ export interface components {
              * @default none
              * @enum {string}
              */
-            reasoning_effort: "none" | "provider_default" | "low" | "medium" | "high";
+            reasoning_effort: "none" | "provider_default" | "low" | "medium" | "high" | "max";
             /** Models */
             models?: string[];
             provider_preferences?: components["schemas"]["OpenRouterProviderPreferences"] | null;
@@ -5623,7 +5623,7 @@ export interface components {
              * Provider
              * @enum {string}
              */
-            provider: "groq" | "gemini" | "openrouter" | "sarvam";
+            provider: "groq" | "gemini" | "openrouter" | "sarvam" | "isoquant";
             /** Model */
             model: string;
             /**
@@ -5663,7 +5663,7 @@ export interface components {
              * @default groq
              * @enum {string}
              */
-            provider: "groq" | "gemini" | "openrouter" | "sarvam";
+            provider: "groq" | "gemini" | "openrouter" | "sarvam" | "isoquant";
             /**
              * Model
              * @default qwen/qwen3.8-27b
@@ -5686,7 +5686,7 @@ export interface components {
              * @default none
              * @enum {string}
              */
-            reasoning_effort: "none" | "provider_default" | "low" | "medium" | "high";
+            reasoning_effort: "none" | "provider_default" | "low" | "medium" | "high" | "max";
             /** Models */
             models?: string[];
             provider_preferences?: components["schemas"]["OpenRouterProviderPreferences"] | null;
