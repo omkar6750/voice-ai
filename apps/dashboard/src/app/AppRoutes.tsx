@@ -6,7 +6,11 @@ import { PendingPage } from "@/pages/PendingPage";
 const RunsPage = lazy(() =>
   import("@/pages/runs").then((page) => ({ default: page.RunsPage })),
 );
-const RecordingsPage = lazy(() => import("@/pages/recordings").then(page => ({ default: page.RecordingsPage })));
+const RecordingsPage = lazy(() =>
+  import("@/pages/recordings").then((page) => ({
+    default: page.RecordingsPage,
+  })),
+);
 const RunDetailPage = lazy(() =>
   import("@/pages/runs/detail").then((page) => ({
     default: page.RunDetailPage,
@@ -49,6 +53,11 @@ const ToolDetailPage = lazy(() =>
     default: page.ToolDetailPage,
   })),
 );
+const ToolVersionPage = lazy(() =>
+  import("@/pages/tools/ToolVersionPage").then((page) => ({
+    default: page.ToolVersionPage,
+  })),
+);
 const IntegrationsPage = lazy(() =>
   import("@/pages/integrations").then((page) => ({
     default: page.IntegrationsPage,
@@ -69,7 +78,6 @@ const SettingsPage = lazy(() =>
   import("@/pages/settings").then((page) => ({ default: page.SettingsPage })),
 );
 
-
 export function AppRoutes({ platformAdmin }: { platformAdmin: boolean }) {
   return (
     <Suspense
@@ -82,7 +90,10 @@ export function AppRoutes({ platformAdmin }: { platformAdmin: boolean }) {
     >
       <Routes>
         <Route path="/" element={<Navigate to="/runs" replace />} />
-        <Route path="/platform/support" element={<Navigate to="/runs" replace />} />
+        <Route
+          path="/platform/support"
+          element={<Navigate to="/runs" replace />}
+        />
         <Route path="/runs" element={<RunsPage />} />
         <Route path="/recordings" element={<RecordingsPage />} />
         <Route path="/runs/:runId" element={<RunDetailPage />} />
@@ -98,16 +109,32 @@ export function AppRoutes({ platformAdmin }: { platformAdmin: boolean }) {
         <Route path="/knowledge/:baseId" element={<KnowledgeDetailPage />} />
         <Route path="/tools" element={<ToolsPage />} />
         <Route path="/tools/:toolId" element={<ToolDetailPage />} />
+        <Route
+          path="/tools/:toolId/versions/:versionId"
+          element={<ToolVersionPage />}
+        />
+        <Route
+          path="/tools/:toolId/versions/:versionId/edit"
+          element={<ToolVersionPage />}
+        />
         <Route path="/integrations" element={<IntegrationsPage />} />
         <Route
           path="/integrations/:connectionId"
           element={<IntegrationDetailPage />}
         />
         <Route path="/callbacks" element={<CallbacksPage />} />
-        <Route path="/endpoints" element={platformAdmin ? <EndpointsPage /> : <Navigate to="/runs" replace />} />
+        <Route
+          path="/endpoints"
+          element={
+            platformAdmin ? <EndpointsPage /> : <Navigate to="/runs" replace />
+          }
+        />
 
         <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/orgs/:orgId/*" element={<Navigate to="/organizations/profile" replace />} />
+        <Route
+          path="/orgs/:orgId/*"
+          element={<Navigate to="/organizations/profile" replace />}
+        />
         <Route
           path="*"
           element={

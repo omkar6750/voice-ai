@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
-import { AlertTriangle, Lock, Trash2 } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
+import { AlertTriangle, Lock, MoreHorizontal, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
 import { useOrganizationAccess } from "@/app/access";
@@ -24,16 +24,30 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useResource } from "@/lib/resources";
+import { CopyId, useToolResource } from "./workspace";
+import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 
-type Tool = components["schemas"]["ToolSummaryResponse"];
+type Tool = components["schemas"]["ToolCatalogSummary"];
 type ToolImpact = components["schemas"]["ToolImpactResponse"];
 
 export function ToolsPage() {
   const api = useApi();
   const { canManage } = useOrganizationAccess();
-  const { data, loading, error, reload } = useResource<{ tools: Tool[] }>(
-    "/tools",
+  const resource = useToolResource<
+    components["schemas"]["ToolCatalogResponse"]
+  >("/tools?view=summary");
+  const { data } = resource;
+  const [params, setParams] = useSearchParams();
+  const search = params.get("q") ?? "";
+  const visible = data?.tools.filter((tool) =>
+    (tool.name + " " + tool.id).toLowerCase().includes(search.toLowerCase()),
   );
 
   const [toolToDelete, setToolToDelete] = useState<Tool | null>(null);
@@ -68,7 +82,7 @@ export function ToolsPage() {
       });
       toast.success(`Tool "${toolToDelete.name}" deleted`);
       setToolToDelete(null);
-      await reload();
+      await resource.invalidate();
     } catch (cause) {
       toast.error(
         cause instanceof Error ? cause.message : "Could not delete tool",
@@ -84,11 +98,26 @@ export function ToolsPage() {
         title="Tools"
         description="Published tool versions can be pinned to agent drafts. Node access is configured in each flow."
       />
+      <Input
+        aria-label="Search tools"
+        placeholder="Search name or Tool ID"
+        value={search}
+        onChange={(event) => {
+          const next = new URLSearchParams(params);
+          if (event.target.value) next.set("q", event.target.value);
+          else next.delete("q");
+          setParams(next, { replace: true });
+        }}
+      />
       <LoadState
-        loading={loading}
-        error={error}
+        loading={resource.isPending}
+        error={resource.error?.message ?? null}
         empty={
-          data?.tools.length === 0 ? "No tools registered yet." : undefined
+          visible?.length === 0
+            ? search
+              ? "No matching tools."
+              : "No tools registered yet."
+            : undefined
         }
       >
         <Table>
@@ -96,17 +125,27 @@ export function ToolsPage() {
             <TableRow>
               <TableHead>Tool</TableHead>
               <TableHead>Type</TableHead>
+              <TableHead>Latest published</TableHead>
+              <TableHead>Drafts</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data?.tools.map((tool) => {
+            {visible?.map((tool) => {
               const isSystemTool =
                 tool.name === "change_node" || tool.name === "end_call";
               return (
                 <TableRow key={tool.id}>
                   <TableCell className="font-medium">
-                    <span className="font-mono text-sm">{tool.name}</span>
+                    <Link
+                      className="font-mono text-sm text-primary hover:underline"
+                      to={`/tools/${tool.id}`}
+                    >
+                      {tool.name}
+                    </Link>
+                    <div>
+                      <CopyId label="Tool ID" value={tool.id} />
+                    </div>
                   </TableCell>
                   <TableCell>
                     {isSystemTool ? (
@@ -123,22 +162,42 @@ export function ToolsPage() {
                       </Badge>
                     )}
                   </TableCell>
+                  <TableCell className="tabular-nums">
+                    {tool.latest_published_version
+                      ? "v" + tool.latest_published_version
+                      : "None"}
+                  </TableCell>
+                  <TableCell className="tabular-nums">
+                    {tool.draft_count}
+                  </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
                       <Button asChild variant="link">
                         <Link to={`/tools/${tool.id}`}>Versions</Link>
                       </Button>
                       {canManage && !isSystemTool && (
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          className="text-destructive hover:bg-destructive/10"
-                          onClick={() => openDeleteModal(tool)}
-                          title={`Delete ${tool.name}`}
-                        >
-                          <Trash2 className="size-4" />
-                          <span className="sr-only">Delete</span>
-                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label={`Actions for ${tool.name}`}
+                            >
+                              <MoreHorizontal />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuGroup>
+                              <DropdownMenuItem
+                                variant="destructive"
+                                onSelect={() => void openDeleteModal(tool)}
+                              >
+                                <Trash2 />
+                                Delete tool
+                              </DropdownMenuItem>
+                            </DropdownMenuGroup>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       )}
                     </div>
                   </TableCell>

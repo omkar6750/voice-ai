@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "test:tools": "node --test scripts/tools-workspace.test.mjs",
     "generate": "openapi-typescript ../../data/openapi.json -o src/generated/api.d.ts && node scripts/generate-schema.mjs",
     "dev": "vite --configLoader runner",
     "build": "tsc -b && vite --configLoader runner build",
@@ -30,10 +31,12 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/react": "^16.3.3",
     "@types/node": "^26.6.2",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "@vitejs/plugin-react": "^5.0.4",
+    "jsdom": "^29.1.1",
     "openapi-typescript": "^7.13.0",
     "prettier": "^3.9.9",
     "tailwindcss": "^4.3.3",

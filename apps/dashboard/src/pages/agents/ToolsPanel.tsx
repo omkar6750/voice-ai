@@ -6,6 +6,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { useResource } from "@/lib/resources";
+import { CopyId } from "@/pages/tools/workspace";
 import type { AgentConfig, ToolSummary, ToolVersion } from "./types";
 
 function VersionPicker({
@@ -110,10 +111,15 @@ export function ToolsPanel({
             >
               <div>
                 <strong>{key}</strong>
-                <p className="text-xs text-muted-foreground">
-                  Tool {binding.tool_id.slice(0, 8)} · version{" "}
-                  {binding.tool_version_id.slice(0, 8)}
-                </p>
+                <div>
+                  <CopyId label="Tool ID" value={binding.tool_id} />
+                </div>
+                <div>
+                  <CopyId
+                    label="Tool Version ID"
+                    value={binding.tool_version_id}
+                  />
+                </div>
               </div>
               {!disabled && (
                 <Button

@@ -608,7 +608,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get Tool Version */
+        get: operations["get_tool_version_api_v1_tool_versions__version_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -616,6 +617,23 @@ export interface paths {
         head?: never;
         /** Update Tool Version */
         patch: operations["update_tool_version_api_v1_tool_versions__version_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/tools/{tool_id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Tool Usage */
+        get: operations["tool_usage_api_v1_tools__tool_id__usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/tool-versions/{version_id}/validate": {
@@ -2568,7 +2586,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get Tool Version */
+        get: operations["get_tool_version_api_tool_versions__version_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2576,6 +2595,23 @@ export interface paths {
         head?: never;
         /** Update Tool Version */
         patch: operations["update_tool_version_api_tool_versions__version_id__patch"];
+        trace?: never;
+    };
+    "/api/tools/{tool_id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Tool Usage */
+        get: operations["tool_usage_api_tools__tool_id__usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/tool-versions/{version_id}/validate": {
@@ -6946,6 +6982,22 @@ export interface components {
             /** Tool Version Id */
             tool_version_id: string;
         };
+        /** ToolCatalogResponse */
+        ToolCatalogResponse: {
+            /** Tools */
+            tools: components["schemas"]["ToolCatalogSummary"][];
+        };
+        /** ToolCatalogSummary */
+        ToolCatalogSummary: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Latest Published Version */
+            latest_published_version: number | null;
+            /** Draft Count */
+            draft_count: number;
+        };
         /** ToolCleanupRequest */
         ToolCleanupRequest: {
             /**
@@ -7210,6 +7262,34 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** ToolUsagePage */
+        ToolUsagePage: {
+            /** Bindings */
+            bindings: components["schemas"]["ToolUsageRow"][];
+            /** Has More */
+            has_more: boolean;
+        };
+        /** ToolUsageRow */
+        ToolUsageRow: {
+            /** Agent Id */
+            agent_id: string;
+            /** Agent Name */
+            agent_name: string;
+            /** Agent Version Id */
+            agent_version_id: string;
+            /** Agent Version */
+            agent_version: number;
+            /** Agent Status */
+            agent_status: string;
+            /** Binding Key */
+            binding_key: string;
+            /** Tool Id */
+            tool_id: string;
+            /** Tool Version Id */
+            tool_version_id: string;
+            /** Tool Version */
+            tool_version: number;
+        };
         /** ToolValidationIssue */
         ToolValidationIssue: {
             /**
@@ -7270,6 +7350,19 @@ export interface components {
             status?: ("draft" | "published") | null;
             config?: components["schemas"]["ToolConfig"] | null;
         };
+        /** ToolVersionPage */
+        ToolVersionPage: {
+            /** Tool Id */
+            tool_id: string;
+            /** Tool Name */
+            tool_name: string;
+            /** Versions */
+            versions: components["schemas"]["ToolVersionSummary"][];
+            /** Has More */
+            has_more: boolean;
+            /** Next Before Version */
+            next_before_version: number | null;
+        };
         /** ToolVersionResponse */
         ToolVersionResponse: {
             /** Id */
@@ -7284,6 +7377,33 @@ export interface components {
              */
             status: "draft" | "published";
             config: components["schemas"]["ToolConfig"];
+        };
+        /** ToolVersionSummary */
+        ToolVersionSummary: {
+            /** Id */
+            id: string;
+            /** Tool Id */
+            tool_id: string;
+            /** Version */
+            version: number;
+            /** Revision */
+            revision: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "published";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Published At */
+            published_at: string | null;
+            /** Parent Id */
+            parent_id: string | null;
+            /** Parent Version */
+            parent_version: number | null;
         };
         /** ToolVersionsResponse */
         ToolVersionsResponse: {
@@ -8550,7 +8670,9 @@ export interface operations {
     };
     tools_api_v1_tools_get: {
         parameters: {
-            query?: never;
+            query?: {
+                view?: "full" | "summary";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8563,7 +8685,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ToolListResponse"];
+                    "application/json": components["schemas"]["ToolListResponse"] | components["schemas"]["ToolCatalogResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -8676,7 +8807,12 @@ export interface operations {
     };
     tool_versions_api_v1_tools__tool_id__versions_get: {
         parameters: {
-            query?: never;
+            query?: {
+                view?: "full" | "summary";
+                status?: ("draft" | "published") | null;
+                before_version?: number | null;
+                limit?: number;
+            };
             header?: never;
             path: {
                 tool_id: string;
@@ -8691,7 +8827,40 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ToolVersionsResponse"];
+                    "application/json": components["schemas"]["ToolVersionsResponse"] | components["schemas"]["ToolVersionPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_tool_version_api_v1_tool_versions__version_id__get: {
+        parameters: {
+            query: {
+                tool_id: string;
+            };
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolVersionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8727,6 +8896,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ToolVersionMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tool_usage_api_v1_tools__tool_id__usage_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                tool_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolUsagePage"];
                 };
             };
             /** @description Validation Error */
@@ -12890,7 +13093,9 @@ export interface operations {
     };
     tools_api_tools_get: {
         parameters: {
-            query?: never;
+            query?: {
+                view?: "full" | "summary";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12903,7 +13108,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ToolListResponse"];
+                    "application/json": components["schemas"]["ToolListResponse"] | components["schemas"]["ToolCatalogResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -13016,7 +13230,12 @@ export interface operations {
     };
     tool_versions_api_tools__tool_id__versions_get: {
         parameters: {
-            query?: never;
+            query?: {
+                view?: "full" | "summary";
+                status?: ("draft" | "published") | null;
+                before_version?: number | null;
+                limit?: number;
+            };
             header?: never;
             path: {
                 tool_id: string;
@@ -13031,7 +13250,40 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ToolVersionsResponse"];
+                    "application/json": components["schemas"]["ToolVersionsResponse"] | components["schemas"]["ToolVersionPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_tool_version_api_tool_versions__version_id__get: {
+        parameters: {
+            query: {
+                tool_id: string;
+            };
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolVersionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13067,6 +13319,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ToolVersionMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tool_usage_api_tools__tool_id__usage_get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                tool_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolUsagePage"];
                 };
             };
             /** @description Validation Error */

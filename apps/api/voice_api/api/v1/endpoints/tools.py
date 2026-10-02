@@ -1,9 +1,11 @@
 import re
 from datetime import UTC, datetime
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import delete, select, text, update
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.core.development import require_development_cleanup
 from voice_api.core.security import allow_organization_member
@@ -20,6 +22,7 @@ from voice_api.models import (
 from voice_api.models.common import new_id
 from voice_api.schemas.agent import ExpectedRevision
 from voice_api.schemas.tools import (
+    ToolCatalogResponse,
     ToolCleanupRequest,
     ToolCreateBody,
     ToolCreateResponse,
@@ -28,9 +31,11 @@ from voice_api.schemas.tools import (
     ToolListResponse,
     ToolRevisionBody,
     ToolSummaryResponse,
+    ToolUsagePage,
     ToolValidationReport,
     ToolValidationResponse,
     ToolVersionMutationResponse,
+    ToolVersionPage,
     ToolVersionResponse,
     ToolVersionsResponse,
 )
@@ -149,9 +154,34 @@ def _remove_deleted_tool_references(
     return config, changed
 
 
-@router.get("/tools", response_model=ToolListResponse)
+@router.get("/tools", response_model=ToolListResponse | ToolCatalogResponse)
 @allow_organization_member
-async def tools(session: AsyncSession = Session, _: None = Operator) -> ToolListResponse:
+async def tools(
+    session: AsyncSession = Session, _: None = Operator, view: Literal["full", "summary"] = "full"
+):
+    if view == "summary":
+        rows = (
+            (
+                await session.execute(
+                    select(
+                        Tool.id,
+                        Tool.name,
+                        func.max(ToolVersion.version)
+                        .filter(ToolVersion.status == "published")
+                        .label("latest_published_version"),
+                        func.count(ToolVersion.id)
+                        .filter(ToolVersion.status == "draft")
+                        .label("draft_count"),
+                    )
+                    .outerjoin(ToolVersion, ToolVersion.tool_id == Tool.id)
+                    .group_by(Tool.id, Tool.name)
+                    .order_by(Tool.name)
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return ToolCatalogResponse(tools=[dict(row) for row in rows])
     rows = (await session.scalars(select(Tool).order_by(Tool.name))).all()
     return ToolListResponse(tools=[ToolSummaryResponse(id=row.id, name=row.name) for row in rows])
 
@@ -385,11 +415,58 @@ async def create_tool(
     return ToolCreateResponse(tool_id=tool.id, version_id=version.id)
 
 
-@router.get("/tools/{tool_id}/versions", response_model=ToolVersionsResponse)
+@router.get("/tools/{tool_id}/versions", response_model=ToolVersionsResponse | ToolVersionPage)
 @allow_organization_member
 async def tool_versions(
-    tool_id: str, session: AsyncSession = Session, _: None = Operator
-) -> ToolVersionsResponse:
+    tool_id: str,
+    session: AsyncSession = Session,
+    _: None = Operator,
+    view: Literal["full", "summary"] = "full",
+    status: Literal["draft", "published"] | None = None,
+    before_version: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    if view == "summary":
+        tool = await session.get(Tool, tool_id)
+        if tool is None:
+            raise HTTPException(404, "Tool not found")
+        parent = aliased(ToolVersion)
+        query = (
+            select(
+                ToolVersion.id,
+                ToolVersion.tool_id,
+                ToolVersion.version,
+                ToolVersion.revision,
+                ToolVersion.status,
+                ToolVersion.created_at,
+                ToolVersion.published_at,
+                ToolVersion.parent_id,
+                parent.version.label("parent_version"),
+            )
+            .outerjoin(
+                parent,
+                (parent.id == ToolVersion.parent_id) & (parent.tool_id == ToolVersion.tool_id),
+            )
+            .where(ToolVersion.tool_id == tool_id)
+        )
+        if status:
+            query = query.where(ToolVersion.status == status)
+        if before_version:
+            query = query.where(ToolVersion.version < before_version)
+        rows = (
+            (await session.execute(query.order_by(ToolVersion.version.desc()).limit(limit + 1)))
+            .mappings()
+            .all()
+        )
+        more = len(rows) > limit
+        page = rows[:limit]
+        return ToolVersionPage(
+            tool_id=tool.id,
+            tool_name=tool.name,
+            versions=[dict(row) for row in page],
+            has_more=more,
+            next_before_version=page[-1]["version"] if more else None,
+        )
     rows = (
         await session.scalars(
             select(ToolVersion).where(ToolVersion.tool_id == tool_id).order_by(ToolVersion.version)
@@ -407,6 +484,66 @@ async def tool_versions(
             )
         )
     return ToolVersionsResponse(versions=versions)
+
+
+@router.get("/tool-versions/{version_id}", response_model=ToolVersionResponse)
+@allow_organization_member
+async def get_tool_version(
+    version_id: str, tool_id: str, session: AsyncSession = Session, _: None = Operator
+):
+    row = await session.get(ToolVersion, version_id)
+    if row is None or row.tool_id != tool_id:
+        raise HTTPException(404, "Tool version not found")
+    return ToolVersionResponse(
+        id=row.id,
+        version=row.version,
+        revision=row.revision,
+        status=row.status,
+        config=ToolConfig.model_validate(row.config),
+    )
+
+
+@router.get("/tools/{tool_id}/usage", response_model=ToolUsagePage)
+@allow_organization_member
+async def tool_usage(
+    tool_id: str,
+    session: AsyncSession = Session,
+    _: None = Operator,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    if await session.get(Tool, tool_id) is None:
+        raise HTTPException(404, "Tool not found")
+    rows = (
+        (
+            await session.execute(
+                select(
+                    Agent.id.label("agent_id"),
+                    Agent.name.label("agent_name"),
+                    AgentVersion.id.label("agent_version_id"),
+                    AgentVersion.version.label("agent_version"),
+                    AgentVersion.status.label("agent_status"),
+                    AgentVersionTool.binding_key,
+                    ToolVersion.tool_id,
+                    ToolVersion.id.label("tool_version_id"),
+                    ToolVersion.version.label("tool_version"),
+                )
+                .select_from(AgentVersionTool)
+                .join(ToolVersion, ToolVersion.id == AgentVersionTool.tool_version_id)
+                .join(AgentVersion, AgentVersion.id == AgentVersionTool.agent_version_id)
+                .join(Agent, Agent.id == AgentVersion.agent_id)
+                .where(ToolVersion.tool_id == tool_id)
+                .order_by(
+                    Agent.name, Agent.id, AgentVersion.version.desc(), AgentVersionTool.binding_key
+                )
+                .offset(offset)
+                .limit(limit + 1)
+            )
+        )
+        .mappings()
+        .all()
+    )
+    return ToolUsagePage(bindings=[dict(row) for row in rows[:limit]], has_more=len(rows) > limit)
 
 
 @router.patch("/tool-versions/{version_id}")

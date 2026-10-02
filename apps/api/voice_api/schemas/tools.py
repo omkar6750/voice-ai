@@ -18,6 +18,52 @@ class ToolListResponse(BaseModel):
     tools: list[ToolSummaryResponse]
 
 
+class ToolCatalogSummary(ToolSummaryResponse):
+    latest_published_version: int | None
+    draft_count: int
+
+
+class ToolCatalogResponse(BaseModel):
+    tools: list[ToolCatalogSummary]
+
+
+class ToolVersionSummary(BaseModel):
+    id: str
+    tool_id: str
+    version: int
+    revision: int
+    status: Literal["draft", "published"]
+    created_at: datetime
+    published_at: datetime | None
+    parent_id: str | None
+    parent_version: int | None
+
+
+class ToolVersionPage(BaseModel):
+    tool_id: str
+    tool_name: str
+    versions: list[ToolVersionSummary]
+    has_more: bool
+    next_before_version: int | None
+
+
+class ToolUsageRow(BaseModel):
+    agent_id: str
+    agent_name: str
+    agent_version_id: str
+    agent_version: int
+    agent_status: str
+    binding_key: str
+    tool_id: str
+    tool_version_id: str
+    tool_version: int
+
+
+class ToolUsagePage(BaseModel):
+    bindings: list[ToolUsageRow]
+    has_more: bool
+
+
 class ToolVersionResponse(BaseModel):
     id: str
     version: int
