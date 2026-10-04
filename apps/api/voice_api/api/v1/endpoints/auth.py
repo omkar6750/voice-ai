@@ -128,11 +128,15 @@ async def app_context(
     Protected resource endpoints repeat their own live authorization checks.
     """
     # Await Clerk before opening a database read transaction.
-    membership = (
-        await directory.membership(principal.org_id, principal.user_id)
-        if principal.org_id
-        else None
-    )
+    membership = None
+    membership_error = None
+    if principal.org_id:
+        try:
+            membership = await directory.membership(principal.org_id, principal.user_id)
+        except HTTPException as exc:
+            if exc.status_code != 503:
+                raise
+            membership_error = exc
     user = await session.scalar(select(User).where(User.clerk_user_id == principal.user_id))
     disabled = bool(user and user.disabled_at is not None)
     platform_admin = bool(
@@ -141,6 +145,8 @@ async def app_context(
             select(PlatformAdministrator.user_id).where(PlatformAdministrator.user_id == user.id)
         )
     )
+    if membership_error is not None and not platform_admin:
+        raise membership_error
     organization = (
         await session.scalar(
             select(Organization).where(Organization.clerk_org_id == principal.org_id)
