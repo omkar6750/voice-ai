@@ -220,8 +220,8 @@ export function PromptEditor({
         <p className="text-xs text-destructive">
           Unbound variable references:{" "}
           {unresolvedVariables.map((name) => `{{ ${name} }}`).join(", ")}.{" "}
-          Ensure variables match available temporal tags or configured contact
-          variables.
+          Use an available time variable, configured contact field or conversation
+          fact key.
         </p>
       )}
 
@@ -264,7 +264,7 @@ export function PromptEditor({
       {availableTools.length > 0 && (
         <div className="flex flex-col gap-1">
           <span className="text-xs font-medium text-muted-foreground">
-            Bound tools
+            Available tools
           </span>
           <div className="flex flex-wrap gap-1">
             {availableTools.map((name) => (

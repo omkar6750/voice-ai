@@ -208,7 +208,13 @@ async def test_config_schema():
 
 
 def test_classifier_contracts_and_trimmer():
-    from voice_runtime.contracts.cadence import ClassifierConfig, JevClassifierConfig, JevQuestion
+    from voice_runtime.contracts.cadence import (
+        LEAD_CLASSIFIER_PROMPT,
+        ClassifierConfig,
+        JevClassifierConfig,
+        JevQuestion,
+        default_jev_questions,
+    )
     from voice_runtime.execution.native import trim_classifier_result
 
     # Test default LLM classifier
@@ -216,7 +222,7 @@ def test_classifier_contracts_and_trimmer():
         classifier_type="llm", llm={"prompt": "Test prompt", "provider": "groq"}
     )
     assert cfg_llm.classifier_type == "llm"
-    assert cfg_llm.llm.prompt == "Test prompt"
+    assert cfg_llm.llm.prompt == LEAD_CLASSIFIER_PROMPT
     assert cfg_llm.jev is None
 
     # Test Jev classifier
@@ -234,9 +240,9 @@ def test_classifier_contracts_and_trimmer():
     )
     assert cfg_jev.classifier_type == "jev"
     assert cfg_jev.llm is None
-    assert cfg_jev.jev.model == "jev-v2"
-    assert "custom_q" in cfg_jev.jev.questions
-    assert cfg_jev.jev.questions["custom_q"].criteria["yes"] == "Customer said yes"
+    assert cfg_jev.jev.model == "jev-latest"
+    assert cfg_jev.jev.questions == default_jev_questions()
+    assert "custom_q" not in cfg_jev.jev.questions
 
     # Test compact trimmer
     raw_res = {
@@ -246,6 +252,7 @@ def test_classifier_contracts_and_trimmer():
             "confidence": 0.85,
         },
         "service_fit": {"choice": "strong_fit", "confidence": 0.9},
+        "tone": {"choice": "receptive", "confidence": 0.9},
         "notes": "Fast caller",
     }
     trimmed = trim_classifier_result(raw_res)
@@ -433,3 +440,81 @@ def test_legacy_persona_is_ignored_and_empty_greeting_keeps_immediate_default() 
     )
     assert config.flow.nodes[0].respond_immediately is True
     assert "persona" not in config.model_dump()
+
+
+@pytest.mark.asyncio
+async def test_validation_response_identifies_field_and_keeps_inputs_private(monkeypatch):
+    import json
+
+    from fastapi.exceptions import RequestValidationError
+    from voice_api import main
+
+    monkeypatch.setattr(
+        main, "get_settings", lambda: SimpleNamespace(env="production", debug_diagnostics=False)
+    )
+    secret = "sk-private-secret-value"
+    validation = RequestValidationError(
+        [
+            {
+                "loc": ("body", "config", "flow", "nodes", 0, "role_message"),
+                "type": "unbound_prompt_tool",
+                "input": secret,
+                "msg": secret,
+                "ctx": {"error": secret},
+            },
+            {
+                "loc": ("body", "config", "tool_bindings", secret, "tool_id"),
+                "type": "value_error",
+                "msg": secret,
+                "input": secret,
+            },
+            {
+                "loc": ("body", "config", "llm", "max_tokens"),
+                "type": "greater_than",
+                "ctx": {"gt": secret},
+                "input": secret,
+            },
+        ]
+    )
+    response = await main.validation_error(None, validation)
+    body = json.loads(response.body)
+    assert secret not in response.body.decode()
+    assert body["detail"][0]["loc"] == ["body", "config", "flow", "nodes", 0, "role_message"]
+    assert "unavailable in this node" in body["detail"][0]["msg"]
+    assert "[key]" in body["detail"][1]["loc"]
+    assert "minimum" in body["detail"][2]["msg"]
+    assert len(body["diagnostic_id"]) == 32 and body["stage"] == "validation"
+    assert body["timestamp"]
+
+
+@pytest.mark.asyncio
+async def test_real_request_validation_reports_scoped_fact_prompt_location():
+    payload = {
+        "name": "Test",
+        "config": {
+            "name": "Ritu",
+            "fact_slots": [
+                {"key": "recipient_name", "description": "Caller name", "nodes": ["closing"]}
+            ],
+            "flow": {
+                "initial_node": "greeting",
+                "nodes": [
+                    {
+                        "id": "greeting",
+                        "role_message": "Call #record_recipient_name",
+                        "transitions": ["closing"],
+                    },
+                    {"id": "closing", "terminal": True},
+                ],
+            },
+        },
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post("/api/v1/agents", json=payload)
+    assert response.status_code == 422
+    detail = response.json()["detail"][0]
+    assert detail["loc"] == ["body", "config", "flow", "nodes", 0, "role_message"]
+    assert detail["type"] == "fact_tool_unavailable"
+    assert "Enable the fact" in detail["msg"]

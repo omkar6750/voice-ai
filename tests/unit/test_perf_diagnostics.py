@@ -57,3 +57,46 @@ def test_perf_log_allowlist_omits_content():
         "duration_ms": 45,
         "at_ms": 1_790_000_000_000,
     }
+
+
+async def test_loop_monitor_ignores_normal_jitter_but_reports_slow_windows(monkeypatch):
+    import asyncio
+
+    import pytest
+
+    emitted = []
+    monkeypatch.setattr(
+        perf_diagnostics, "timing", lambda *args, **kwargs: emitted.append((args, kwargs))
+    )
+
+    class Clock:
+        now = 0.0
+
+        def time(self):
+            return self.now
+
+    clock = Clock()
+    monkeypatch.setattr(asyncio, "get_running_loop", lambda: clock)
+    perf_diagnostics.configure(env="dev", enabled=True)
+    try:
+        for lag in (0.027, 0.050):
+            calls = 0
+
+            async def sleep(interval, delay=lag):
+                nonlocal calls
+                calls += 1
+                if calls > 120:
+                    raise asyncio.CancelledError
+                clock.now += interval + delay
+
+            monkeypatch.setattr(asyncio, "sleep", sleep)
+            with pytest.raises(asyncio.CancelledError):
+                await perf_diagnostics.loop_lag_monitor()
+            if lag < 0.04:
+                assert emitted == []
+            else:
+                assert emitted
+                assert emitted[0][0][:2] == ("loop", "lag")
+                assert emitted[0][1]["count"] > 0
+    finally:
+        perf_diagnostics.configure(env="dev", enabled=False)

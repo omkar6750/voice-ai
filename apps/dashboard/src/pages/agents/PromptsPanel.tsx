@@ -33,6 +33,7 @@ export function PromptsPanel({
     ...temporalKeys,
     ...contactVariables,
     ...contactVariables.map((v) => `contact.${v}`),
+    ...(config.fact_slots ?? []).filter((slot) => slot.key).map((slot) => slot.key),
   ];
 
   function toggleContactVar(key: string) {
@@ -70,7 +71,14 @@ export function PromptsPanel({
           label="Global system instruction"
           value={config.system_prompt}
           onChange={(system_prompt) => change({ ...config, system_prompt })}
-          availableTools={boundTools}
+          availableTools={[
+            ...new Set([
+              ...boundTools,
+              ...(config.fact_slots ?? [])
+                .filter((slot) => slot.key)
+                .map((slot) => `record_${slot.key}`),
+            ]),
+          ]}
           registeredTools={registeredTools}
           availableVariables={availableVariables}
           disabled={disabled}
@@ -89,7 +97,9 @@ export function PromptsPanel({
             id="idle-reprompt-text"
             value={config.idle_reprompt_text}
             disabled={disabled}
-            onChange={(event) => change({ ...config, idle_reprompt_text: event.target.value })}
+            onChange={(event) =>
+              change({ ...config, idle_reprompt_text: event.target.value })
+            }
           />
         </Field>
         <Field>
@@ -101,7 +111,15 @@ export function PromptsPanel({
             max={5}
             value={config.idle_reprompt_limit}
             disabled={disabled}
-            onChange={(event) => change({ ...config, idle_reprompt_limit: Math.max(0, Math.min(5, Number(event.target.value))) })}
+            onChange={(event) =>
+              change({
+                ...config,
+                idle_reprompt_limit: Math.max(
+                  0,
+                  Math.min(5, Number(event.target.value)),
+                ),
+              })
+            }
           />
         </Field>
       </section>

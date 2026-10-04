@@ -80,3 +80,12 @@ Local agent version editor now opens Flow by default. The workspace has handle-b
 
 ## 2026-10-02 — Fixed classify_lead contract
 Locked three questions, prompts, schemas and JEV endpoint/model; enum routing uses individual labels or all 27 combinations. Existing followup_route mappings preserved. See ADR-0048. Local only.
+
+
+## 2026-10-03 — Selective local worktree integration
+
+Read optimization, latency diagnostics and modem cleanup changes adapted to the
+current separate runtime and editor. No membership authorization cache, Storybook,
+main merge or deployment. See ADR-0049 and docs/deployment/WORKTREE-INTEGRATION.md.
+Migration 0047_dashboard_read_index follows 0046_text_tests. Live provider/modem
+acceptance remains operator-run.

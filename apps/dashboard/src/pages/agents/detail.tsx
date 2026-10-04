@@ -55,7 +55,7 @@ export function AgentDetailPage() {
   const navigate = useNavigate();
   const agents = useResource<{ agents: Agent[] }>("/agents");
   const versions = useResource<{ versions: Version[] }>(
-    `/agents/${agentId}/versions`,
+    `/agents/${agentId}/versions?view=summary`,
   );
   const [busy, setBusy] = useState<string | null>(null);
   const agent = agents.data?.agents.find((item) => item.id === agentId);

@@ -33,20 +33,31 @@ async def lifespan(_app: FastAPI):
         "data/logs" if settings.env.casefold() in {"dev", "development", "local"} else None,
         env_files=settings.model_config.get("env_file", ()),
     )
+    from voice_runtime.safe_logs import set_event_sink
+    from voice_shared.logging import emit
+
+    set_event_sink(lambda event: emit({"service": "voice-api", **event}))
     install_http_logging("voice-api")
     perf_diagnostics.configure(env=settings.env, enabled=settings.debug_perf)
     monitor = asyncio.create_task(perf_diagnostics.loop_lag_monitor())
     try:
         yield
     finally:
+        set_event_sink(None)
         monitor.cancel()
         await asyncio.gather(monitor, return_exceptions=True)
         from voice_api.services.runtime_dispatch import close_client
 
         await close_client()
+        from voice_api.core.clerk_client import close_clerk_clients
+
+        await close_clerk_clients()
 
 
 app = FastAPI(title="Voice AI API", version="0.2.0", lifespan=lifespan)
+from voice_api.core.read_metrics import ReadMetricsMiddleware  # noqa: E402
+
+app.add_middleware(ReadMetricsMiddleware)
 app.add_middleware(HttpLoggingMiddleware, service="voice-api")
 
 
@@ -118,6 +129,7 @@ app.add_middleware(
         part.strip() for part in get_settings().clerk_authorized_parties.split(",") if part.strip()
     ],
     allow_credentials=False,
+    expose_headers=["Server-Timing", "X-Request-ID"],
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Platform-Support-Session"],
 )
@@ -126,16 +138,37 @@ app.add_middleware(
 @app.exception_handler(RequestValidationError)
 @app.exception_handler(ValidationError)
 async def validation_error(_request, error):
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from voice_api.core.validation import public_validation_errors
+
     # Validation responses must not echo write-only credential inputs.
     settings = get_settings()
     if settings.debug_diagnostics and settings.env.casefold() in {"dev", "development", "local"}:
         _log_safe_validation_diagnostics(error)
+    from voice_shared.logging import emit, trace_id
+
+    diagnostic_id = uuid4().hex
+    details = public_validation_errors(error)
+    emit(
+        {
+            "event": "request_validation_failed",
+            "service": "voice-api",
+            "level": "WARNING",
+            "diagnostic_id": diagnostic_id,
+            "trace_id": trace_id.get(),
+            "validation_errors": details,
+        },
+        forward=False,
+    )
     return JSONResponse(
         status_code=422,
         content={
-            # Custom validator messages and arbitrary mapping keys in `loc`
-            # can contain submitted secrets. Do not serialize either.
-            "detail": [{"type": "validation_error", "msg": "Request validation failed"}]
+            "detail": details,
+            "diagnostic_id": diagnostic_id,
+            "stage": "validation",
+            "timestamp": datetime.now(UTC).isoformat(),
         },
     )
 

@@ -4,6 +4,7 @@ import asyncio
 import re
 import time
 from collections.abc import Callable
+from dataclasses import replace
 
 import serial
 
@@ -13,6 +14,10 @@ from voice_runtime.telephony.status import ModemStatus, ModemStatusReader, parse
 
 
 class ModemCommandError(RuntimeError):
+    pass
+
+
+class ModemCommandTimeoutError(ModemCommandError):
     pass
 
 
@@ -32,6 +37,7 @@ class Sim7600Modem(TelephonyTransport):
         baudrate: int = 115200,
         serial_factory: Callable[..., object] = serial.Serial,
         command_timeout: float = 5.0,
+        trace=None,
     ) -> None:
         self.port = port
         self.baudrate = baudrate
@@ -39,6 +45,9 @@ class Sim7600Modem(TelephonyTransport):
         self._serial: object | None = None
         self.command_timeout = command_timeout
         self._command_lock = asyncio.Lock()
+        self.trace = trace
+        self._disconnect_observed = False
+        self._last_call_state: CallState | None = None
 
     async def open(self) -> None:
         if self._serial is None:
@@ -53,10 +62,12 @@ class Sim7600Modem(TelephonyTransport):
 
     async def dial(self, phone_number: str) -> None:
         await self.open()
+        self._disconnect_observed = False
         await self._command(f"ATD{phone_number};")
 
     async def answer(self) -> None:
         await self.open()
+        self._disconnect_observed = False
         await self._command("ATA")
 
     async def hangup(self) -> None:
@@ -68,7 +79,29 @@ class Sim7600Modem(TelephonyTransport):
 
     async def state(self) -> CallState:
         await self.open()
-        return parse_call_state(await self._command("AT+CLCC"))
+        try:
+            result = parse_call_state(await self._command("AT+CLCC"))
+        except ModemCommandError:
+            if not self._disconnect_observed:
+                raise
+            result = CallState.DISCONNECTED
+        previous_state = self._last_call_state
+        if self.trace is not None and result != previous_state:
+            self.trace.record(
+                "modem_state", component="modem", call_state=result.value, source="poll"
+            )
+            if previous_state == CallState.ACTIVE and result in (
+                CallState.IDLE,
+                CallState.DISCONNECTED,
+            ):
+                self.trace.record(
+                    "call_disconnect_detected",
+                    component="modem",
+                    call_state=result.value,
+                    source="poll",
+                )
+        self._last_call_state = result
+        return result
 
     async def start_usb_audio(self) -> None:
         await self.open()
@@ -123,6 +156,32 @@ class Sim7600Modem(TelephonyTransport):
             )
         )
 
+    async def disconnect_status(self) -> ModemStatus:
+        """Read the small, relevant disconnect snapshot under a fixed time budget."""
+        await self.open()
+        commands = ("AT", "AT+CREG?", "AT+CSQ", "AT+CLCC", "AT+CPCMREG?")
+        results: dict[str, list[str]] = {}
+        errors: list[str] = []
+        try:
+            async with asyncio.timeout(5):
+                for command in commands:
+                    try:
+                        results[command] = await self._command(command, timeout_secs=0.8)
+                    except Exception as exc:
+                        errors.append(
+                            "timeout"
+                            if isinstance(exc, (TimeoutError, ModemCommandTimeoutError))
+                            else "command_error"
+                        )
+        except TimeoutError:
+            errors.append("snapshot_timeout")
+        status = ModemStatusReader().from_results(
+            results, serial_connected=self._serial is not None, errors=errors
+        )
+        if self._disconnect_observed:
+            return replace(status, call_state=CallState.DISCONNECTED)
+        return status
+
     async def probe_status(self) -> ModemStatus:
         """Read the connection and SIM fields needed for a live endpoint card."""
         await self.open()
@@ -153,47 +212,95 @@ class Sim7600Modem(TelephonyTransport):
             results, serial_connected=self._serial is not None, errors=errors
         )
 
-    async def _command(self, command: str) -> list[str]:
+    async def _command(self, command: str, *, timeout_secs: float | None = None) -> list[str]:
         if self._serial is None:
             raise ModemCommandError("modem is not open")
         async with self._command_lock:
-            return await asyncio.to_thread(self._command_sync, command)
+            command_task = asyncio.create_task(
+                asyncio.to_thread(self._command_sync, command, timeout_secs)
+            )
+            try:
+                return await asyncio.shield(command_task)
+            except asyncio.CancelledError:
+                try:
+                    await command_task
+                except Exception:
+                    pass
+                raise
 
-    def _command_sync(self, command: str) -> list[str]:
+    def _command_sync(self, command: str, timeout: float | None = None) -> list[str]:
         serial_port = self._serial
         label = "ATD<number>;" if command.startswith("ATD") else command
+        safe_command = "ATD" if command.startswith("ATD") else command
+        started = time.monotonic()
+        if self.trace is not None:
+            self.trace.record("command_started", component="modem", command=safe_command)
         operational_event(RuntimeEvent.MODEM_COMMAND, status="started")
-        serial_port.write((command + "\r").encode("ascii"))
         lines: list[str] = []
         pending = bytearray()
-        deadline = time.monotonic() + self.command_timeout
-        while time.monotonic() < deadline:
-            raw = serial_port.readline()
-            if not raw:
-                continue
-            pending.extend(raw)
-            if len(pending) > 8192:
-                raise ModemCommandError("AT response exceeded 8192 bytes")
-            while b"\n" in pending:
-                raw_line, _, rest = pending.partition(b"\n")
-                pending[:] = rest
-                line = raw_line.decode("ascii", errors="replace").strip()
-                if not line or line == command:
+        outcome = "unknown"
+        response_bytes = 0
+        try:
+            serial_port.write((command + "\r").encode("ascii"))
+            deadline = time.monotonic() + (timeout or self.command_timeout)
+            while time.monotonic() < deadline:
+                raw = serial_port.readline()
+                if not raw:
                     continue
-                operational_event(
-                    RuntimeEvent.MODEM_RESPONSE,
-                    response="ok"
-                    if line == "OK"
-                    else "rejected"
-                    if line in {"ERROR", "NO CARRIER", "BUSY", "NO ANSWER"}
-                    or line.startswith(("+CME ERROR", "+CMS ERROR"))
-                    else "data",
+                response_bytes += len(raw)
+                pending.extend(raw)
+                if response_bytes > 8192:
+                    outcome = "io"
+                    raise ModemCommandError("AT response exceeded 8192 bytes")
+                while b"\n" in pending:
+                    raw_line, _, rest = pending.partition(b"\n")
+                    pending[:] = rest
+                    line = raw_line.decode("ascii", errors="replace").strip()
+                    if not line or line == command:
+                        continue
+                    if line in {"NO CARRIER", "BUSY", "NO ANSWER"}:
+                        self._disconnect_observed = True
+                        response = {
+                            "NO CARRIER": "no_carrier",
+                            "BUSY": "busy",
+                            "NO ANSWER": "no_answer",
+                        }[line]
+                        outcome = response
+                        if self.trace is not None:
+                            self.trace.record(
+                                "call_disconnect_detected",
+                                component="modem",
+                                response=response,
+                                source="urc",
+                            )
+                        operational_event(RuntimeEvent.MODEM_RESPONSE, response="rejected")
+                        raise ModemCommandError(f"modem rejected {label}: {line}")
+                    response_class = (
+                        "ok"
+                        if line == "OK"
+                        else "rejected"
+                        if line == "ERROR" or line.startswith(("+CME ERROR", "+CMS ERROR"))
+                        else "data"
+                    )
+                    operational_event(RuntimeEvent.MODEM_RESPONSE, response=response_class)
+                    lines.append(line)
+                    if line == "OK":
+                        outcome = "ok"
+                        return lines
+                    if line == "ERROR" or line.startswith(("+CME ERROR", "+CMS ERROR")):
+                        outcome = "rejected"
+                        raise ModemCommandError(f"modem rejected {label}: {line}")
+            outcome = "timeout"
+            raise ModemCommandTimeoutError(f"timed out waiting for response to {label}")
+        except OSError:
+            outcome = "io"
+            raise
+        finally:
+            if self.trace is not None:
+                self.trace.record(
+                    "command_finished",
+                    component="modem",
+                    command=safe_command,
+                    response=outcome,
+                    duration_ms=(time.monotonic() - started) * 1000,
                 )
-                lines.append(line)
-                if line == "OK":
-                    return lines
-                if line in {"ERROR", "NO CARRIER", "BUSY", "NO ANSWER"} or line.startswith(
-                    ("+CME ERROR", "+CMS ERROR")
-                ):
-                    raise ModemCommandError(f"modem rejected {label}: {line}")
-        raise ModemCommandError(f"timed out waiting for response to {label}")

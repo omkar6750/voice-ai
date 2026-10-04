@@ -216,9 +216,15 @@ async def sync(body: RuntimeSync, session=Session):
         from voice_runtime.execution.termination import TerminationSummary
 
         termination = TerminationSummary.model_validate(lifecycle["termination"])
-        if run.status in {"queued", "claimed", "running"}:
-            run.status = termination.execution_status
-            run.ended_at = run.ended_at or now()
+        if run.status in {"queued", "claimed", "running", "uncertain"}:
+            run.status = (
+                termination.execution_status
+                if termination.cleanup_status == "confirmed"
+                else "uncertain"
+            )
+            run.ended_at = (
+                (run.ended_at or now()) if termination.cleanup_status == "confirmed" else None
+            )
         run.final_state = safe_evidence({**(run.final_state or {}), **lifecycle})
         assignment.state = "ended" if termination.cleanup_status == "confirmed" else "uncertain"
         browser = await session.scalar(
@@ -227,6 +233,9 @@ async def sync(body: RuntimeSync, session=Session):
         if browser:
             browser.status = "disconnected"
             browser.disconnected_at = browser.disconnected_at or now()
+        if call and call.provider != "twilio" and termination.cleanup_status != "confirmed":
+            call.status = "uncertain"
+            call.ended_at = None
         if call and call.provider != "twilio" and termination.cleanup_status == "confirmed":
             call.status = "completed" if termination.execution_status == "completed" else "failed"
             call.ended_at = call.ended_at or now()
@@ -247,7 +256,10 @@ async def sync(body: RuntimeSync, session=Session):
     text_accepted = 0
     if run.channel == "text_test":
         from voice_api.services.chat_service import persist_batch
-        text_accepted = await persist_batch(session, run, body.text_records, body.text_checkpoint, lifecycle)
+
+        text_accepted = await persist_batch(
+            session, run, body.text_records, body.text_checkpoint, lifecycle
+        )
     elif body.text_records or body.text_checkpoint:
         raise HTTPException(422, "Text records require a text execution")
     await session.commit()

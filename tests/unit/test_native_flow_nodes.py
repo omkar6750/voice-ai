@@ -289,7 +289,14 @@ async def test_operator_fact_slot_tool_writes_only_its_validated_state_key():
             "nodes": ["opening"],
         }
     ]
+    host._nodes["opening"]["prompt"] = "When given a budget, call #record_budget."
+    host._snapshot["flow"]["nodes"][0]["prompt"] = host._nodes["opening"]["prompt"]
+    from voice_runtime.execution.pipecat_flow import compile_pipecat_flow
+
+    host._pipecat_flow = compile_pipecat_flow(host._snapshot)
     node = host._node("opening")
+    assert "call record_budget." in node["role_message"]
+    assert "#record_budget" not in node["role_message"]
     capture = next(function for function in node["functions"] if function.name == "record_budget")
     manager = SimpleNamespace(state={"existing_fact": "keep"})
 
@@ -299,6 +306,14 @@ async def test_operator_fact_slot_tool_writes_only_its_validated_state_key():
     assert result == {"status": "ok", "key": "budget", "value": 2500}
     assert rejected["status"] == "error"
     assert manager.state == {"existing_fact": "keep", "budget": 2500}
+    from pipecat.flows import FlowManager
+
+    rendered = FlowManager._render_node(
+        manager,
+        "closing",
+        {"role_message": "Confirmed budget: {{budget}}", "task_messages": []},
+    )
+    assert rendered["role_message"] == "Confirmed budget: 2500"
 
 
 @pytest.mark.asyncio
@@ -329,3 +344,28 @@ def test_legacy_change_node_objective_maps_to_native_transition_name():
 
     assert "change_node" not in node["role_message"]
     assert "go_to_closing" in node["role_message"]
+
+
+@pytest.mark.parametrize("precompiled", [False, True])
+def test_explicit_transition_is_not_duplicated_by_allowed_transitions(precompiled):
+    from voice_runtime.execution.pipecat_flow import compile_pipecat_flow
+    from voice_shared.compiler import compile_flow_json
+
+    snapshot = _host()._snapshot
+    snapshot["flow"]["nodes"][0]["functions"] = [
+        {
+            "name": "go_to_closing",
+            "description": "Explicit closing transition",
+            "transition_only": True,
+            "transition_to": "closing",
+        }
+    ]
+    compiled = compile_flow_json(snapshot)
+    assert [f["name"] for f in compiled["nodes"]["opening"]["functions"]] == ["go_to_closing"]
+    assert (
+        compiled["nodes"]["opening"]["functions"][0]["description"] == "Explicit closing transition"
+    )
+    if precompiled:
+        snapshot["_compiled_flow"] = compiled
+    node = compile_pipecat_flow(snapshot).node("opening")
+    assert [f.name for f in node["functions"]] == ["go_to_closing"]

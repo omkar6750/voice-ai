@@ -54,6 +54,16 @@ def route_label(path):
     return SafePreview("/".join(part if part in known else ":id" for part in path.split("/")))
 
 
+def request_preview(request, metadata_only=False):
+    # Request has no is_stream_consumed flag. Its content accessor is safe only
+    # for an already-buffered body; never read a stream for diagnostics.
+    try:
+        body = request.content
+    except httpx.RequestNotRead:
+        return {"body": "[metadata-only]"}
+    return body_preview(body, "outbound", metadata_only)
+
+
 def install(service):
     global _installed
     if _installed:
@@ -86,9 +96,8 @@ def install(service):
             "parent_span_id": parent,
             "http_status": response.status_code,
             "duration_ms": (time.monotonic() - started) * 1000,
-            "input": body_preview(
-                request.content if request.is_stream_consumed else b"",
-                "outbound",
+            "input": request_preview(
+                request,
                 metadata or "application/json" not in request.headers.get("content-type", ""),
             ),
             "output": body_preview(

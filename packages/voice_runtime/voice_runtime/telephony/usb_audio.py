@@ -24,9 +24,10 @@ class Sim7600UsbAudioParams(TransportParams):
 
 
 class _SerialPcmOwner:
-    def __init__(self, params: Sim7600UsbAudioParams, capture=None) -> None:
+    def __init__(self, params: Sim7600UsbAudioParams, capture=None, trace=None) -> None:
         self.params = params
         self.capture = capture
+        self.trace = trace
         self._serial: serial.Serial | None = None
         self._open_lock = asyncio.Lock()
 
@@ -140,6 +141,14 @@ class _Sim7600AudioInput(BaseInputTransport):
         except asyncio.CancelledError:
             pass
         except Exception as exc:
+            if self._owner.trace is not None:
+                self._owner.trace.record(
+                    "pcm_transport_failure",
+                    component="transport",
+                    error_category=error_category(exc),
+                    processor="input",
+                    event_source="pipeline",
+                )
             operational_event(
                 RuntimeEvent.PCM_READ_FAILED, level="ERROR", error_category=error_category(exc)
             )
@@ -190,6 +199,14 @@ class _Sim7600AudioOutput(BaseOutputTransport):
             try:
                 await self._owner.write(chunk)
             except Exception as exc:
+                if self._owner.trace is not None:
+                    self._owner.trace.record(
+                        "pcm_transport_failure",
+                        component="transport",
+                        error_category=error_category(exc),
+                        processor="output",
+                        event_source="pipeline",
+                    )
                 operational_event(
                     RuntimeEvent.PCM_WRITE_FAILED, level="ERROR", error_category=error_category(exc)
                 )
@@ -203,10 +220,10 @@ class _Sim7600AudioOutput(BaseOutputTransport):
 class Sim7600UsbAudioTransport(BaseTransport):
     """Pipecat transport for SIM7600 COM-port USB PCM audio."""
 
-    def __init__(self, params: Sim7600UsbAudioParams, capture=None) -> None:
+    def __init__(self, params: Sim7600UsbAudioParams, capture=None, trace=None) -> None:
         super().__init__()
         self._params = params
-        self._owner = _SerialPcmOwner(params, capture)
+        self._owner = _SerialPcmOwner(params, capture, trace)
         self._input: FrameProcessor | None = None
         self._output: FrameProcessor | None = None
 
@@ -232,6 +249,7 @@ class Sim7600UsbAudioBridge:
         channels: int = 1,
         capture=None,
         frame_ms: int = 20,
+        trace=None,
     ) -> None:
         self.params = Sim7600UsbAudioParams(
             audio_frame_ms=frame_ms,
@@ -247,8 +265,9 @@ class Sim7600UsbAudioBridge:
         )
         self._transport: Sim7600UsbAudioTransport | None = None
         self.capture = capture
+        self.trace = trace
 
     def transport(self) -> Sim7600UsbAudioTransport:
         if self._transport is None:
-            self._transport = Sim7600UsbAudioTransport(self.params, self.capture)
+            self._transport = Sim7600UsbAudioTransport(self.params, self.capture, self.trace)
         return self._transport

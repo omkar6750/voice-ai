@@ -105,7 +105,7 @@ function decorate(doc: import("@tiptap/pm/model").Node, catalog: Catalog) {
             "data-prompt-reference": match[1] ? "tool" : "variable",
             title: valid
               ? match[1]
-                ? "Bound tool"
+                ? "Available tool"
                 : "Available variable"
               : "Unbound reference",
           },

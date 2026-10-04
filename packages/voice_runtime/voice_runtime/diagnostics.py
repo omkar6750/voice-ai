@@ -112,6 +112,23 @@ def provider_error_diagnostic(
             f"{provider} throttled the request",
             True,
         )
+    elif status_code == 400:
+        if error_map.get("code") == "tool_use_failed":
+            code, message = (
+                "provider_tool_call_invalid",
+                f"{provider} could not generate a valid tool call",
+            )
+        elif "no user query found" in lower:
+            code, message = (
+                "provider_context_invalid",
+                f"{provider} requires a user query in the conversation context",
+            )
+        else:
+            code, message = (
+                "provider_invalid_request",
+                f"{provider} rejected the request configuration or context",
+            )
+        category, retryable = "provider_request_failed", False
     elif status_code is not None and status_code >= 500:
         category, code, message, retryable = (
             "provider_unavailable",

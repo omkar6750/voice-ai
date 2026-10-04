@@ -422,3 +422,32 @@ def test_runtime_browser_single_use_ticket_and_binary_round_trip(settings, monke
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect(url, headers={"origin": "http://localhost:5173"}):
                 pass
+
+
+async def test_uncertain_modem_cleanup_retains_ports_after_secret_snapshot_release(settings):
+    from unittest.mock import AsyncMock
+
+    m = await manager_for(settings)
+    try:
+        first = await m.prepare(
+            prepared(
+                "sim7600", {"_resolved": {"endpoint": {"at_port": "COM3", "audio_port": "COM4"}}}
+            )
+        )
+        first.driver = type(
+            "Driver", (), {"close": AsyncMock(return_value={"release_confirmed": False})}
+        )()
+        await first.finish({})
+        assert first.state == "uncertain" and first.closed.is_set()
+        assert not first.request.snapshot and not first.request.credentials
+        assert first.modem_ports == {"com3", "com4"}
+        with pytest.raises(HTTPException) as error:
+            await m.prepare(
+                prepared(
+                    "sim7600",
+                    {"_resolved": {"endpoint": {"at_port": "com4", "audio_port": "COM5"}}},
+                )
+            )
+        assert error.value.status_code == 409
+    finally:
+        await m.close()

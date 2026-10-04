@@ -11,6 +11,8 @@ const buttonVariants = cva(
         default: "bg-primary text-primary-foreground hover:bg-primary/80",
         outline:
           "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
+        choice:
+          "border-border bg-card text-card-foreground hover:bg-accent hover:text-accent-foreground",
         tab: "rounded-none border-0 border-b-2 border-transparent bg-transparent text-muted-foreground hover:bg-primary/5 hover:text-primary aria-[current=page]:border-primary aria-[current=page]:bg-primary/10 aria-[current=page]:text-primary",
         highlight:
           "border-primary/50 bg-primary/25 text-foreground hover:bg-primary/30",

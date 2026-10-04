@@ -13,6 +13,7 @@ import {
   FileText,
   MessagesSquare,
   Eye,
+  Check,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { LeadClassifierRouting } from "./LeadClassifierRouting";
@@ -59,6 +60,9 @@ export function FlowPanel({
     ...temporalKeys,
     ...contactVariables,
     ...contactVariables.map((v) => `contact.${v}`),
+    ...(config.fact_slots ?? [])
+      .filter((slot) => slot.key)
+      .map((slot) => slot.key),
   ];
   const [selectedId, setSelectedId] = useState(config.flow.initial_node);
   const [newId, setNewId] = useState("");
@@ -146,6 +150,24 @@ export function FlowPanel({
   function toggleIn(key: "transitions" | "tool_bindings", value: string) {
     const current = node[key];
     if (key === "tool_bindings" && globalFunctionNames.includes(value)) return;
+    if (key === "tool_bindings") {
+      const routed = (node.functions ?? []).some(
+        (fn) => fn.name === value && !fn.transition_only,
+      );
+      const enabled = current.includes(value) || routed;
+      updateNode({
+        ...node,
+        tool_bindings: enabled
+          ? current.filter((item) => item !== value)
+          : [...current, value],
+        functions: enabled
+          ? (node.functions ?? []).filter(
+              (fn) => fn.name !== value || fn.transition_only,
+            )
+          : node.functions,
+      });
+      return;
+    }
     updateNode({
       ...node,
       [key]: current.includes(value)
@@ -444,7 +466,7 @@ export function FlowPanel({
           aria-label="Node prompt workspace"
           className="flex min-w-0 flex-col rounded-xl bg-editor-surface"
         >
-          <header className="flex flex-col gap-3 border-b p-4">
+          <header className="flex flex-col gap-3 p-4">
             <div className="flex items-center justify-between gap-2">
               <div className="flex min-w-0 items-center gap-2">
                 <h2 className="truncate text-lg font-semibold" title={node.id}>
@@ -512,7 +534,7 @@ export function FlowPanel({
                 <Eye className="size-4" /> Preview
               </TabsTrigger>
             </TabsList>
-            <TabsContent value="prompt" className="min-w-0 border-t p-4">
+            <TabsContent value="prompt" className="min-w-0 p-4">
               <FieldGroup>
                 <PromptEditor
                   id={`node-prompt-${node.id}`}
@@ -530,6 +552,17 @@ export function FlowPanel({
                     ...new Set([
                       ...node.tool_bindings,
                       ...globalFunctionNames,
+                      ...(node.transitions ?? []).map(
+                        (target) => `go_to_${target}`,
+                      ),
+                      ...(config.fact_slots ?? [])
+                        .filter(
+                          (slot) =>
+                            slot.key &&
+                            (!slot.nodes?.length ||
+                              slot.nodes.includes(node.id)),
+                        )
+                        .map((slot) => `record_${slot.key}`),
                       ...(node.functions ?? [])
                         .filter((fn) => !fn.transition_only)
                         .map((fn) => fn.name),
@@ -541,7 +574,7 @@ export function FlowPanel({
                 />
               </FieldGroup>
             </TabsContent>
-            <TabsContent value="tasks" className="min-w-0 border-t p-4">
+            <TabsContent value="tasks" className="min-w-0 p-4">
               <FieldGroup>
                 <Field>
                   <FieldLabel>Task messages (task_messages)</FieldLabel>
@@ -632,7 +665,7 @@ export function FlowPanel({
                 </Field>
               </FieldGroup>
             </TabsContent>
-            <TabsContent value="preview" className="min-w-0 border-t p-4">
+            <TabsContent value="preview" className="min-w-0 p-4">
               <p className="mb-3 text-xs text-muted-foreground">
                 Saved instructions for this node, before runtime variable
                 substitution and conversation history.
@@ -757,14 +790,15 @@ export function FlowPanel({
                         type="button"
                         size="sm"
                         variant={
-                          node.transitions.includes(id)
-                            ? "secondary"
-                            : "outline"
+                          node.transitions.includes(id) ? "secondary" : "choice"
                         }
                         aria-pressed={node.transitions.includes(id)}
                         disabled={disabled}
                         onClick={() => toggleIn("transitions", id)}
                       >
+                        {node.transitions.includes(id) && (
+                          <Check data-icon="inline-start" />
+                        )}
                         {id}
                       </Button>
                     ))}
@@ -784,7 +818,7 @@ export function FlowPanel({
                   variant={
                     (config.classifier.node_entries ?? []).includes(node.id)
                       ? "default"
-                      : "outline"
+                      : "choice"
                   }
                   aria-pressed={(config.classifier.node_entries ?? []).includes(
                     node.id,
@@ -811,7 +845,7 @@ export function FlowPanel({
                   variant={
                     (config.classifier.node_exits ?? []).includes(node.id)
                       ? "default"
-                      : "outline"
+                      : "choice"
                   }
                   aria-pressed={(config.classifier.node_exits ?? []).includes(
                     node.id,
@@ -867,14 +901,26 @@ export function FlowPanel({
                       type="button"
                       size="sm"
                       variant={
-                        node.tool_bindings.includes(name)
+                        node.tool_bindings.includes(name) ||
+                        (node.functions ?? []).some(
+                          (fn) => fn.name === name && !fn.transition_only,
+                        )
                           ? "secondary"
-                          : "outline"
+                          : "choice"
                       }
-                      aria-pressed={node.tool_bindings.includes(name)}
+                      aria-pressed={
+                        node.tool_bindings.includes(name) ||
+                        (node.functions ?? []).some(
+                          (fn) => fn.name === name && !fn.transition_only,
+                        )
+                      }
                       disabled={disabled}
                       onClick={() => toggleIn("tool_bindings", name)}
                     >
+                      {(node.tool_bindings.includes(name) ||
+                        (node.functions ?? []).some(
+                          (fn) => fn.name === name && !fn.transition_only,
+                        )) && <Check data-icon="inline-start" />}
                       {name}
                     </Button>
                   ))}
@@ -1208,7 +1254,7 @@ export function FlowPanel({
               </div>
               {(config.fact_slots ?? []).map((slot, index) => (
                 <div
-                  key={`${slot.key}-${index}`}
+                  key={index}
                   className="grid gap-3 rounded-md bg-muted/40 p-3"
                 >
                   <div className="flex items-end gap-2">
@@ -1326,7 +1372,7 @@ export function FlowPanel({
                             key={nodeId}
                             type="button"
                             size="sm"
-                            variant={available ? "secondary" : "outline"}
+                            variant={available ? "secondary" : "choice"}
                             aria-pressed={available}
                             disabled={disabled}
                             onClick={() => {
@@ -1376,8 +1422,9 @@ export function FlowPanel({
                 Available in every step
               </h3>
               <p className="mb-2 text-xs text-muted-foreground">
-                Use this for shared tools such as saving a caller fact. They
-                become callable from all steps.
+                Selected tools are callable from every node. Click a chip to
+                enable or disable shared availability. Node-specific tools and
+                routing remain configured in the Tools section above.
               </p>
               <div className="flex flex-wrap gap-2">
                 {boundTools.map((name) => (
@@ -1390,14 +1437,22 @@ export function FlowPanel({
                         (item) => item.name === name,
                       )
                         ? "secondary"
-                        : "outline"
+                        : "choice"
                     }
                     aria-pressed={(config.flow.global_functions ?? []).some(
                       (item) => item.name === name,
                     )}
                     disabled={disabled}
+                    title={
+                      globalFunctionNames.includes(name)
+                        ? "Disable shared tool"
+                        : "Enable in every node"
+                    }
                     onClick={() => toggleGlobalFunction(name)}
                   >
+                    {globalFunctionNames.includes(name) && (
+                      <Check data-icon="inline-start" />
+                    )}
                     {name}
                   </Button>
                 ))}
@@ -1424,9 +1479,26 @@ export function FlowPanel({
                     });
                   return (
                     <section key={fn.name} className="mt-3 grid gap-3">
-                      <h4 className="text-sm font-semibold">
-                        classify_lead · Shared routing
-                      </h4>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h4 className="text-sm font-semibold">
+                          classify_lead · Shared routing
+                        </h4>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          disabled={disabled}
+                          aria-label="Disable shared tool classify_lead"
+                          onClick={() => toggleGlobalFunction(fn.name)}
+                        >
+                          Disable shared tool
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        This routing applies wherever the shared classifier is
+                        called. Use node-specific routing when only discovery
+                        should choose the follow-up node.
+                      </p>
                       <NativeSelect
                         aria-label="Shared classifier routing mode"
                         disabled={disabled}
@@ -1461,6 +1533,15 @@ export function FlowPanel({
                           </option>
                         ))}
                       </NativeSelect>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={disabled || fn.transition_to == null}
+                        onClick={() => update(null)}
+                      >
+                        Clear shared routing
+                      </Button>
                       {branch && (
                         <LeadClassifierRouting
                           branch={branch}

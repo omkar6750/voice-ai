@@ -29,7 +29,9 @@ class TelephonySession:
 
     async def end_call(self) -> None:
         try:
-            await self.modem.hangup()
+            state = await self.modem.state()
+            if state not in (CallState.IDLE, CallState.DISCONNECTED):
+                await self.modem.hangup()
         finally:
             if self._audio_started:
                 self._audio_started = False

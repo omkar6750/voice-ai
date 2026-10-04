@@ -6,11 +6,11 @@ import { useApi, useSupportSession } from "@/app/api";
 
 export function useResource<T>(path: string, enabled = true) {
   const api = useApi();
-  const { orgId } = useAuth();
+  const { orgId, userId } = useAuth();
   const supportSession = useSupportSession();
   const query = useQuery<T, Error>({
-    queryKey: ["resource", orgId ?? "no-organization", supportSession ?? "no-support-session", path],
-    queryFn: () => api<T>(path),
+    queryKey: ["resource", orgId ?? "no-organization", supportSession ?? "no-support-session", path, userId],
+    queryFn: ({ signal }) => api<T>(path, { signal }),
     enabled,
   });
 

@@ -81,6 +81,9 @@ const { reorderFlowNodes } = await vite.ssrLoadModule(
 const { LeadClassifierDetails } = await vite.ssrLoadModule(
   "/src/pages/agents/ClassifierPanel.tsx",
 );
+const { ChatTranscriptEntry, ChatInspection, transcriptEntries } =
+  await vite.ssrLoadModule("/src/pages/agents/ChatEvidence.tsx");
+
 afterEach(cleanup);
 after(async () => {
   await vite.close();
@@ -429,4 +432,444 @@ test("classifier settings expose locked questions without prompt or question edi
   assert.ok(screen.getByText("lead_temperature"));
   assert.ok(screen.getByText("service_fit"));
   assert.ok(screen.getByText("tone"));
+});
+
+test("conversation fact state key retains focus through consecutive edits", () => {
+  let latest;
+  function Harness() {
+    const [config, setConfig] = React.useState(flowFixture);
+    latest = config;
+    return React.createElement(FlowPanel, {
+      config,
+      change: setConfig,
+      registeredTools: [],
+      disabled: false,
+    });
+  }
+  render(React.createElement(Harness));
+  fireEvent.click(screen.getByRole("button", { name: /Conversation facts/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Add fact slot" }));
+  const input = screen.getByDisplayValue(latest.fact_slots[0].key);
+  input.focus();
+  let value = "";
+  for (const character of "caller_name") {
+    value += character;
+    fireEvent.change(input, { target: { value } });
+    assert.equal(document.activeElement, input);
+    assert.equal(screen.getByDisplayValue(value), input);
+    assert.equal(latest.fact_slots[0].key, value);
+  }
+  assert.equal(latest.fact_slots[0].key, "caller_name");
+});
+
+test("generated fact tools appear immediately and follow node scopes, rename and deletion", async () => {
+  let latest, update;
+  function Harness() {
+    const [config, setConfig] = React.useState(() => {
+      const initial = flowFixture();
+      initial.flow.nodes[0].role_message =
+        "Save the name with #record_recepient_name";
+      initial.flow.nodes[1].role_message =
+        "Save the name with #record_recepient_name";
+      return initial;
+    });
+    latest = config;
+    update = setConfig;
+    return React.createElement(FlowPanel, {
+      config,
+      change: setConfig,
+      registeredTools: [],
+      disabled: false,
+    });
+  }
+  render(React.createElement(Harness));
+  let prompt = await screen.findByRole("textbox", {
+    name: "System instruction (role_message)",
+  });
+  assert.equal(prompt.getAttribute("aria-invalid"), "true");
+  fireEvent.click(screen.getByRole("button", { name: /Conversation facts/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Add fact slot" }));
+  fireEvent.change(screen.getByDisplayValue("caller_fact"), {
+    target: { value: "recepient_name" },
+  });
+  await waitFor(() =>
+    assert.equal(prompt.getAttribute("aria-invalid"), "false"),
+  );
+  const insert = screen.getByRole("button", { name: "#record_recepient_name" });
+  fireEvent.click(insert);
+  await waitFor(() =>
+    assert.ok(
+      latest.flow.nodes[0].role_message.endsWith("#record_recepient_name"),
+    ),
+  );
+  assert.ok(
+    prompt.querySelector('[data-prompt-reference="tool"]').title ===
+      "Available tool",
+  );
+  await act(async () =>
+    update({
+      ...latest,
+      fact_slots: latest.fact_slots.map((slot) => ({
+        ...slot,
+        nodes: ["greeting"],
+      })),
+    }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Next node" }));
+  prompt = await screen.findByRole("textbox", {
+    name: "System instruction (role_message)",
+  });
+  await waitFor(() =>
+    assert.equal(prompt.getAttribute("aria-invalid"), "true"),
+  );
+  assert.equal(
+    screen.queryByRole("button", { name: "#record_recepient_name" }),
+    null,
+  );
+  await act(async () =>
+    update({
+      ...latest,
+      fact_slots: latest.fact_slots.map((slot) => ({ ...slot, nodes: [] })),
+    }),
+  );
+  await waitFor(() =>
+    assert.equal(prompt.getAttribute("aria-invalid"), "false"),
+  );
+  fireEvent.change(screen.getByDisplayValue("recepient_name"), {
+    target: { value: "recipient_name" },
+  });
+  await waitFor(() =>
+    assert.ok(screen.getByRole("button", { name: "#record_recipient_name" })),
+  );
+  assert.equal(
+    screen.queryByRole("button", { name: "#record_recepient_name" }),
+    null,
+  );
+  assert.equal(prompt.getAttribute("aria-invalid"), "true");
+  fireEvent.click(
+    screen.getByRole("button", { name: "Remove fact slot recipient_name" }),
+  );
+  assert.equal(
+    screen.queryByRole("button", { name: "#record_recipient_name" }),
+    null,
+  );
+});
+
+test("global prompt recognizes configured generated fact tools", async () => {
+  const { PromptsPanel } = await vite.ssrLoadModule(
+    "/src/pages/agents/PromptsPanel.tsx",
+  );
+  const cfg = flowFixture();
+  cfg.language = { default_language: "en", supported_languages: ["en"] };
+  cfg.idle_reprompt_text = "";
+  cfg.idle_reprompt_limit = 1;
+  cfg.system_prompt = "Use #record_recipient_name when they give their name.";
+  cfg.fact_slots = [
+    {
+      key: "recipient_name",
+      description: "Caller name",
+      value_type: "string",
+      nodes: ["greeting"],
+    },
+  ];
+  render(
+    React.createElement(PromptsPanel, {
+      config: cfg,
+      change: () => {},
+      boundTools: [],
+      registeredTools: [],
+      disabled: false,
+    }),
+  );
+  const prompt = await screen.findByRole("textbox", {
+    name: "Global system instruction",
+  });
+  await waitFor(() =>
+    assert.equal(prompt.getAttribute("aria-invalid"), "false"),
+  );
+  assert.ok(screen.getByRole("button", { name: "#record_recipient_name" }));
+});
+
+test("saved fact variables remain readable in nodes without the recording tool", async () => {
+  const cfg = flowFixture();
+  cfg.fact_slots = [
+    {
+      key: "recepient_name",
+      description: "Caller name",
+      value_type: "string",
+      nodes: ["greeting"],
+    },
+  ];
+  cfg.flow.nodes[1].role_message = "Confirmed caller name: {{recepient_name}}";
+  render(
+    React.createElement(FlowPanel, {
+      config: cfg,
+      change: () => {},
+      registeredTools: [],
+      disabled: false,
+    }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Next node" }));
+  const prompt = await screen.findByRole("textbox", {
+    name: "System instruction (role_message)",
+  });
+  await waitFor(() =>
+    assert.equal(prompt.getAttribute("aria-invalid"), "false"),
+  );
+  assert.ok(screen.getByRole("button", { name: /recepient_name/ }));
+  assert.equal(
+    screen.queryByRole("button", { name: "#record_recepient_name" }),
+    null,
+  );
+});
+
+test("generated go-to references follow the node direct transition settings", async () => {
+  let latest, update;
+  function Harness() {
+    const [config, setConfig] = React.useState(() => {
+      const cfg = flowFixture();
+      cfg.flow.nodes[0].role_message = "If refused, call #go_to_closing.";
+      cfg.flow.nodes[0].transitions = ["closing"];
+      return cfg;
+    });
+    latest = config;
+    update = setConfig;
+    return React.createElement(FlowPanel, {
+      config,
+      change: setConfig,
+      registeredTools: [],
+      disabled: false,
+    });
+  }
+  render(React.createElement(Harness));
+  const prompt = await screen.findByRole("textbox", {
+    name: "System instruction (role_message)",
+  });
+  await waitFor(() =>
+    assert.equal(prompt.getAttribute("aria-invalid"), "false"),
+  );
+  assert.ok(screen.getByRole("button", { name: "#go_to_closing" }));
+  await act(async () =>
+    update({
+      ...latest,
+      flow: {
+        ...latest.flow,
+        nodes: latest.flow.nodes.map((node, index) =>
+          index === 0 ? { ...node, transitions: [] } : node,
+        ),
+      },
+    }),
+  );
+  await waitFor(() =>
+    assert.equal(prompt.getAttribute("aria-invalid"), "true"),
+  );
+  assert.equal(screen.queryByRole("button", { name: "#go_to_closing" }), null);
+});
+
+test("routed tool chips reflect availability and toggle routed functions", async () => {
+  let latest;
+  function Harness() {
+    const [config, setConfig] = React.useState(() => {
+      const cfg = flowFixture();
+      cfg.tool_bindings = { classify_lead: {} };
+      cfg.flow.nodes[0].functions = [
+        { name: "classify_lead", transition_only: false, transition_to: null },
+      ];
+      return cfg;
+    });
+    latest = config;
+    return React.createElement(FlowPanel, {
+      config,
+      change: setConfig,
+      registeredTools: [],
+      disabled: false,
+    });
+  }
+  render(React.createElement(Harness));
+  fireEvent.click(screen.getByRole("button", { name: /^Tools/ }));
+  const chip = screen.getByRole("button", { name: "classify_lead" });
+  assert.equal(chip.getAttribute("aria-pressed"), "true");
+  assert.equal(chip.getAttribute("data-variant"), "secondary");
+  fireEvent.click(chip);
+  assert.equal(chip.getAttribute("aria-pressed"), "false");
+  assert.equal(chip.getAttribute("data-variant"), "choice");
+  assert.equal(latest.flow.nodes[0].functions.length, 0);
+  fireEvent.click(chip);
+  assert.deepEqual(latest.flow.nodes[0].tool_bindings, ["classify_lead"]);
+});
+
+test("shared classifier routing can be cleared and availability disabled", async () => {
+  let latest;
+  function Harness() {
+    const [config, setConfig] = React.useState(() => {
+      const cfg = flowFixture();
+      cfg.tool_bindings = { classify_lead: {} };
+      cfg.flow.global_functions = [
+        {
+          name: "classify_lead",
+          transition_only: false,
+          transition_to: "discovery",
+        },
+      ];
+      return cfg;
+    });
+    latest = config;
+    return React.createElement(FlowPanel, {
+      config,
+      change: setConfig,
+      registeredTools: [],
+      disabled: false,
+    });
+  }
+  render(React.createElement(Harness));
+  fireEvent.click(screen.getByRole("button", { name: /^Shared tools/ }));
+  const chip = screen.getByRole("button", { name: "classify_lead" });
+  assert.equal(chip.getAttribute("aria-pressed"), "true");
+  fireEvent.click(screen.getByRole("button", { name: "Clear shared routing" }));
+  assert.equal(latest.flow.global_functions[0].transition_to, null);
+  assert.equal(
+    screen.getByLabelText("Shared classifier routing mode").value,
+    "__stay__",
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Disable shared tool classify_lead" }),
+  );
+  assert.deepEqual(latest.flow.global_functions, []);
+  assert.equal(chip.getAttribute("aria-pressed"), "false");
+  assert.equal(chip.getAttribute("data-variant"), "choice");
+  assert.equal(screen.queryByLabelText("Shared classifier routing mode"), null);
+});
+
+
+test("chat shows one completed tool call and opens its actual evidence", () => {
+  const entries = [
+    {
+      id: "start",
+      run_id: "run",
+      sequence: 1,
+      kind: "evidence",
+      saved: true,
+      payload: {
+        kind: "tool_started",
+        invocation_id: "fact",
+        binding_key: "record_caller_name",
+        started_ns: 1000000,
+      },
+    },
+    {
+      id: "end",
+      run_id: "run",
+      sequence: 2,
+      kind: "evidence",
+      saved: true,
+      payload: {
+        kind: "tool_ended",
+        invocation_id: "fact",
+        status: "completed",
+        ended_ns: 6000000,
+      },
+    },
+  ];
+  const visible = transcriptEntries(entries);
+  assert.equal(visible.length, 1);
+  let selected;
+  render(
+    React.createElement(ChatTranscriptEntry, {
+      entry: visible[0],
+      entries,
+      inspect: (e) => {
+        selected = e;
+      },
+    }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Inspect record_caller_name details" }),
+  );
+  assert.equal(selected.id, "end");
+  assert.ok(screen.getByText(/Called record_caller_name/));
+  assert.ok(screen.getByText(/5 ms/));
+});
+test("chat inspector reports actual model usage and separates missing metrics", () => {
+  render(
+    React.createElement(ChatInspection, {
+      value: {
+        message: { kind: "span" },
+        operations: [
+          {
+            id: "llm",
+            name: "inference",
+            category: "llm",
+            model: "test-model",
+            provider: "test-provider",
+            status: "completed",
+            duration_ms: 45,
+            prompt_tokens: 12,
+            completion_tokens: 3,
+            total_tokens: 15,
+            input_payload: { messages: [] },
+            output_payload: { text: "Hello" },
+          },
+          {
+            id: "summary",
+            name: "summary",
+            category: "summarizer",
+            status: "completed",
+          },
+        ],
+      },
+    }),
+  );
+  assert.ok(screen.getByText("test-model"));
+  assert.ok(screen.getByText("45 ms"));
+  assert.ok(screen.getByText("12"));
+  assert.ok(screen.getByText("3"));
+  assert.ok(screen.getByText("15"));
+  assert.ok(screen.getAllByText("Not reported").length);
+});
+
+test("chat distinguishes agent classifier calls from automatic cadence", () => {
+  const tool = {
+    id: "tool",
+    run_id: "run",
+    sequence: 1,
+    kind: "evidence",
+    payload: {
+      kind: "tool_started",
+      invocation_id: "classifier-tool",
+      binding_key: "classify_lead",
+    },
+  };
+  const automatic = {
+    id: "auto",
+    run_id: "run",
+    sequence: 2,
+    kind: "evidence",
+    payload: {
+      kind: "classifier_result",
+      phase: "cadence",
+      status: "completed",
+    },
+  };
+  render(
+    React.createElement(
+      React.Fragment,
+      null,
+      React.createElement(ChatTranscriptEntry, {
+        entry: tool,
+        entries: [tool, automatic],
+        inspect: () => {},
+      }),
+      React.createElement(ChatTranscriptEntry, {
+        entry: automatic,
+        entries: [tool, automatic],
+        inspect: () => {},
+      }),
+    ),
+  );
+  assert.ok(screen.getByText("Agent called classifier tool"));
+  assert.ok(
+    screen.getByRole("button", {
+      name: "Automatic classifier (cadence) - completed",
+    }),
+  );
 });

@@ -1,13 +1,16 @@
 """Verify Clerk session tokens for user-facing endpoints."""
 
+import asyncio
 from dataclasses import dataclass
+from time import perf_counter
 
-from clerk_backend_api import Clerk
 from clerk_backend_api.security.types import AuthenticateRequestOptions
 from fastapi import HTTPException, Request
 from voice_runtime.perf_diagnostics import measure
 
+from voice_api.core.clerk_client import get_clerk_clients
 from voice_api.core.config import get_settings
+from voice_api.core.read_metrics import record
 
 
 @dataclass(frozen=True)
@@ -32,10 +35,12 @@ async def require_clerk_user(request: Request) -> ClerkPrincipal:
     if not parties:
         raise HTTPException(503, "Clerk authorized parties are not configured")
 
+    started = perf_counter()
     try:
         with measure("clerk", "verify"):
-            async with Clerk(bearer_auth=settings.clerk_secret_key) as clerk:
-                state = await clerk.authenticate_request_async(
+            clients = get_clerk_clients()
+            async with asyncio.timeout(3), clients.verification_lock:
+                state = await clients.sdk.authenticate_request_async(
                     request,
                     AuthenticateRequestOptions(
                         secret_key=settings.clerk_secret_key,
@@ -45,6 +50,8 @@ async def require_clerk_user(request: Request) -> ClerkPrincipal:
                 )
     except Exception as exc:
         raise HTTPException(503, "Clerk verification unavailable") from exc
+    finally:
+        record("token_verify", (perf_counter() - started) * 1000)
     if not state.is_signed_in or not state.payload:
         raise HTTPException(401, "Sign in required")
     user_id = state.payload.get("sub")

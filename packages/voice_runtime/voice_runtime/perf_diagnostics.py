@@ -94,7 +94,8 @@ async def loop_lag_monitor() -> None:
         worst_ms = max(worst_ms, lag_ms)
         over_40_ms += lag_ms >= 40
         if loop.time() - window_started >= 5:
-            timing("loop", "lag", worst_ms, count=over_40_ms)
+            if over_40_ms:
+                timing("loop", "lag", worst_ms, count=over_40_ms)
             window_started = loop.time()
             worst_ms = 0.0
             over_40_ms = 0

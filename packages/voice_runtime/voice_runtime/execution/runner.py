@@ -156,7 +156,9 @@ async def execute_call(
             await asyncio.gather(call_task, return_exceptions=True)
         try:
             async with asyncio.timeout(15):
-                await driver.close()
+                cleanup = await driver.close()
+                if isinstance(cleanup, dict) and not cleanup.get("release_confirmed", False):
+                    raise RuntimeError("Transport release unconfirmed")
             released = True
             if isinstance(final_state, dict) and isinstance(final_state.get("termination"), dict):
                 final_state = {

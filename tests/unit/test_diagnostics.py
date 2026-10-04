@@ -92,7 +92,7 @@ def test_groq_failed_generation_and_request_id_are_discarded():
     assert diagnostic["provider_request_id"] is None
     assert diagnostic["http_status"] == 400
     assert "failed_generation" not in diagnostic["metadata"]
-    assert diagnostic["code"] == "provider_request_failed"
+    assert diagnostic["code"] == "provider_tool_call_invalid"
     assert diagnostic["metadata"]["operation"] == "llm"
 
 
@@ -208,3 +208,14 @@ def test_text_errors_keep_only_fixed_categories(hint, category):
     assert diagnostic["detail"] is None
     assert "unknown-secret-Z73" not in json.dumps(diagnostic)
     assert "vendor.invalid" not in json.dumps(diagnostic)
+
+
+def test_missing_user_query_is_actionable_without_retaining_provider_text():
+    diagnostic = provider_error_diagnostic(
+        provider="groq",
+        status_code=400,
+        body={"error": {"message": "No user query found in messages. secret-canary"}},
+    )
+    assert diagnostic["code"] == "provider_context_invalid"
+    assert "requires a user query" in diagnostic["message"]
+    assert "secret-canary" not in json.dumps(diagnostic)

@@ -1,7 +1,5 @@
 import { dehydrate, hydrate, QueryClient } from "@tanstack/react-query";
 
-// Keep server-state policy in one place. Individual resources can opt into
-// different behavior later without adding a second fetching abstraction.
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -13,52 +11,141 @@ export const queryClient = new QueryClient({
   },
 });
 
-const CACHE_VERSION = "dashboard-query-cache-v1";
+const CACHE_VERSION = "dashboard-query-cache-v2";
+const MAX_BYTES = 1024 * 1024;
+const MAX_AGE = 30 * 60_000;
+const catalogs = new Set([
+  "/providers",
+  "/tools",
+  "/contacts/variables",
+  "/agents",
+]);
+const cacheKey = (userId: string) => `${CACHE_VERSION}:${userId}`;
 
-function cacheKey(userId: string): string {
-  return `${CACHE_VERSION}:${userId}`;
-}
-
-function isSafeQuery(query: { queryKey: readonly unknown[] }): boolean {
-  const [scope, userOrOrg, supportSession] = query.queryKey;
-  // Never persist support-session data or anything that is not scoped to the
-  // current authenticated user/org. Clerk tokens are never part of query data.
-  if (scope === "account") return Boolean(userOrOrg);
-  const path = typeof query.queryKey[3] === "string" ? query.queryKey[3] : "";
-  const containsSensitiveData = /credentials|secrets/i.test(path);
-  return scope === "resource" && supportSession === "no-support-session" && Boolean(userOrOrg) && !containsSensitiveData;
+export function isSafeQuery(query: { queryKey: readonly unknown[] }): boolean {
+  const [scope, userOrOrg, supportSession, path] = query.queryKey;
+  if (scope === "resource") {
+    return (
+      Boolean(userOrOrg && query.queryKey[4]) &&
+      supportSession === "no-support-session" &&
+      typeof path === "string" &&
+      catalogs.has(path)
+    );
+  }
+  if (scope === "runs")
+    return (
+      Boolean(userOrOrg && query.queryKey[2]) && query.queryKey[3] === null
+    );
+  return false;
 }
 
 export function restoreQueryCache(userId: string): void {
   try {
+    for (let i = sessionStorage.length - 1; i >= 0; i--) {
+      const key = sessionStorage.key(i);
+      if (
+        key?.startsWith("dashboard-query-cache-") &&
+        !key.startsWith(CACHE_VERSION + ":")
+      )
+        sessionStorage.removeItem(key);
+    }
     const raw = sessionStorage.getItem(cacheKey(userId));
     if (!raw) return;
-    const parsed = JSON.parse(raw) as Parameters<typeof hydrate>[1];
-    hydrate(queryClient, parsed);
+    if (new TextEncoder().encode(raw).byteLength > MAX_BYTES)
+      throw new Error("Cache too large");
+    const envelope = JSON.parse(raw);
+    if (
+      envelope.version !== CACHE_VERSION ||
+      Date.now() - envelope.savedAt > MAX_AGE ||
+      envelope.savedAt > Date.now()
+    )
+      throw new Error("Cache expired");
+    const state = envelope.state as Parameters<typeof hydrate>[1];
+    state.queries = (state.queries ?? []).filter(
+      (query) =>
+        isSafeQuery(query) &&
+        (query.queryKey[0] === "resource"
+          ? query.queryKey[4] === userId
+          : query.queryKey[1] === userId) &&
+        query.state.status === "success" &&
+        Date.now() - query.state.dataUpdatedAt <= MAX_AGE,
+    );
+    hydrate(queryClient, state);
   } catch {
     sessionStorage.removeItem(cacheKey(userId));
   }
 }
 
 export function persistQueryCache(userId: string): () => void {
+  let debounce: ReturnType<typeof setTimeout> | undefined;
+  let idle: number | undefined;
+  let fallback: ReturnType<typeof setTimeout> | undefined;
+  let disposed = false;
   const persist = () => {
+    if (disposed) return;
+    idle = undefined;
+    fallback = undefined;
     try {
-      const dehydrated = dehydrate(queryClient, {
-        shouldDehydrateQuery: isSafeQuery,
+      const state = dehydrate(queryClient, {
+        shouldDehydrateQuery: (query) =>
+          isSafeQuery(query) &&
+          (query.queryKey[0] === "resource"
+            ? query.queryKey[4] === userId
+            : query.queryKey[1] === userId) &&
+          query.state.status === "success" &&
+          Date.now() - query.state.dataUpdatedAt <= MAX_AGE,
       });
-      sessionStorage.setItem(cacheKey(userId), JSON.stringify(dehydrated));
+      state.mutations = [];
+      let raw = "";
+      while (true) {
+        raw = JSON.stringify({
+          version: CACHE_VERSION,
+          savedAt: Date.now(),
+          state,
+        });
+        if (new TextEncoder().encode(raw).byteLength <= MAX_BYTES) break;
+        if (!state.queries.length) return;
+        state.queries.sort(
+          (a, b) => b.state.dataUpdatedAt - a.state.dataUpdatedAt,
+        );
+        state.queries.pop();
+      }
+      sessionStorage.setItem(cacheKey(userId), raw);
     } catch {
-      // Storage can be unavailable or full. The in-memory cache still works.
+      /* An unavailable cache must not prevent rendering. */
     }
   };
-  persist();
-  return queryClient.getQueryCache().subscribe(persist);
+  const cancel = () => {
+    clearTimeout(debounce);
+    clearTimeout(fallback);
+    if (idle !== undefined) window.cancelIdleCallback(idle);
+  };
+  const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+    if (
+      event.type !== "updated" ||
+      event.action.type !== "success" ||
+      !isSafeQuery(event.query)
+    )
+      return;
+    cancel();
+    debounce = setTimeout(() => {
+      if ("requestIdleCallback" in window)
+        idle = window.requestIdleCallback(persist, { timeout: 2000 });
+      else fallback = setTimeout(persist, 0);
+    }, 1000);
+  });
+  return () => {
+    disposed = true;
+    cancel();
+    unsubscribe();
+  };
 }
 
 export function clearQueryCache(): void {
   queryClient.clear();
-  for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
-    const key = sessionStorage.key(index);
-    if (key?.startsWith(`${CACHE_VERSION}:`)) sessionStorage.removeItem(key);
+  for (let i = sessionStorage.length - 1; i >= 0; i--) {
+    const key = sessionStorage.key(i);
+    if (key?.startsWith("dashboard-query-cache-"))
+      sessionStorage.removeItem(key);
   }
 }

@@ -3,8 +3,10 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.core.development import require_development_cleanup
+from voice_api.core.read_metrics import timed_read
 from voice_api.core.security import allow_organization_member
 from voice_api.models import (
     Agent,
@@ -19,7 +21,9 @@ from voice_api.models import (
 from voice_api.models.common import new_id
 from voice_api.schemas.agent import (
     ActivateAgentBody,
+    AgentVersionResponse,
     AgentVersionsResponse,
+    AgentVersionSummariesResponse,
     BindToolBody,
     CreateBody,
     ExpectedRevision,
@@ -70,7 +74,11 @@ async def validate_agent_bindings(session: AsyncSession, version: AgentVersion) 
     definitions = {
         key: version.config
         for key, binding in config.tool_bindings.items()
-        if (version := next((row for row in tool_versions if row.id == binding.tool_version_id), None))
+        if (
+            version := next(
+                (row for row in tool_versions if row.id == binding.tool_version_id), None
+            )
+        )
     }
     action_errors = validate_node_actions(config.model_dump(mode="json"), definitions)
     if action_errors:
@@ -79,26 +87,38 @@ async def validate_agent_bindings(session: AsyncSession, version: AgentVersion) 
 
 @router.get("/agents")
 @allow_organization_member
+@timed_read
 async def agents(session: AsyncSession = Session, _: None = Operator) -> dict:
-    rows = (await session.scalars(select(Agent).order_by(Agent.name))).all()
-    results = []
-    for x in rows:
-        latest = await session.scalar(
-            select(AgentVersion)
-            .where(AgentVersion.agent_id == x.id)
-            .order_by(AgentVersion.version.desc())
+    latest = select(
+        AgentVersion.agent_id,
+        AgentVersion.id.label("version_id"),
+        AgentVersion.status,
+        func.row_number()
+        .over(partition_by=AgentVersion.agent_id, order_by=AgentVersion.version.desc())
+        .label("rank"),
+    ).subquery()
+    rows = (
+        await session.execute(
+            select(
+                Agent.id, Agent.name, Agent.active_version_id, latest.c.version_id, latest.c.status
+            )
+            .outerjoin(latest, (latest.c.agent_id == Agent.id) & (latest.c.rank == 1))
+            .order_by(Agent.name)
         )
-        results.append(
+    ).all()
+    return {
+        "agents": [
             {
-                "id": x.id,
-                "name": x.name,
-                "active_version_id": x.active_version_id,
-                "published_version_id": x.active_version_id,
-                "latest_version_id": latest.id if latest else None,
-                "latest_version_status": latest.status if latest else None,
+                "id": row.id,
+                "name": row.name,
+                "active_version_id": row.active_version_id,
+                "published_version_id": row.active_version_id,
+                "latest_version_id": row.version_id,
+                "latest_version_status": row.status,
             }
-        )
-    return {"agents": results}
+            for row in rows
+        ]
+    }
 
 
 @router.post("/agents", status_code=201)
@@ -119,14 +139,24 @@ async def create_agent(
     return {"agent_id": agent.id, "version_id": version.id}
 
 
-@router.get("/agents/{agent_id}/versions", response_model=AgentVersionsResponse)
+@router.get(
+    "/agents/{agent_id}/versions",
+    response_model=AgentVersionsResponse | AgentVersionSummariesResponse,
+)
 @allow_organization_member
+@timed_read
 async def agent_versions(
-    agent_id: str, session: AsyncSession = Session, _: None = Operator
+    agent_id: str, session: AsyncSession = Session, _: None = Operator, view: str = "full"
 ) -> dict:
+    if view not in {"full", "summary"}:
+        raise HTTPException(422, "Invalid version view")
     rows = (
         await session.scalars(
-            select(AgentVersion)
+            (
+                select(AgentVersion).options(defer(AgentVersion.config, raiseload=True))
+                if view == "summary"
+                else select(AgentVersion)
+            )
             .where(AgentVersion.agent_id == agent_id)
             .order_by(AgentVersion.version)
         )
@@ -138,7 +168,7 @@ async def agent_versions(
                 "version": x.version,
                 "revision": x.revision,
                 "status": x.status,
-                "config": x.config,
+                **({"config": x.config} if view == "full" else {}),
                 "note": x.note,
             }
             for x in rows
@@ -273,7 +303,11 @@ async def agent_deletion_impact(
     run_count = 0
     if v_ids:
         run_count = (
-            await session.scalar(select(func.count(Run.id)).where(Run.agent_version_id.in_(v_ids), Run.channel != "text_test"))
+            await session.scalar(
+                select(func.count(Run.id)).where(
+                    Run.agent_version_id.in_(v_ids), Run.channel != "text_test"
+                )
+            )
         ) or 0
 
     warnings = []
@@ -316,7 +350,11 @@ async def delete_agent(
     run_count = 0
     if v_ids:
         run_count = (
-            await session.scalar(select(func.count(Run.id)).where(Run.agent_version_id.in_(v_ids), Run.channel != "text_test"))
+            await session.scalar(
+                select(func.count(Run.id)).where(
+                    Run.agent_version_id.in_(v_ids), Run.channel != "text_test"
+                )
+            )
         ) or 0
 
     if run_count > 0 and not force:
@@ -343,3 +381,22 @@ async def delete_agent(
     await session.execute(delete(Agent).where(Agent.id == agent_id))
     await session.commit()
     return {"status": "ok", "deleted_agent_id": agent_id, "name": agent.name}
+
+
+@router.get("/agent-versions/{version_id}", response_model=AgentVersionResponse)
+@allow_organization_member
+@timed_read
+async def get_agent_version(
+    version_id: str, session: AsyncSession = Session, _: None = Operator
+) -> dict:
+    row = await session.get(AgentVersion, version_id)
+    if row is None:
+        raise HTTPException(404, "Agent version not found")
+    return {
+        "id": row.id,
+        "version": row.version,
+        "revision": row.revision,
+        "status": row.status,
+        "config": row.config,
+        "note": row.note,
+    }

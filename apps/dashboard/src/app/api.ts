@@ -85,13 +85,34 @@ export async function request<T>(
           ? detail
           : Array.isArray(detail)
             ? detail
-                .map((item: { msg?: string }) => item.msg ?? "Invalid value")
+                .map((item: { msg?: string; loc?: (string | number)[] }) => {
+                  const field = (item.loc ?? [])
+                    .filter((part, index) => !(index === 0 && part === "body"))
+                    .reduce<string>(
+                      (path, part) =>
+                        typeof part === "number"
+                          ? `${path}[${part}]`
+                          : path
+                            ? `${path}.${part}`
+                            : part,
+                      "",
+                    );
+                  return `${field ? `${field}: ` : ""}${item.msg ?? "Invalid value"}`;
+                })
                 .join("; ")
             : `Request failed (${response.status})`;
     throw new ApiError(
       response.status,
       message,
-      typeof detail === "object" && !Array.isArray(detail) ? detail : undefined,
+      typeof detail === "object" && !Array.isArray(detail)
+        ? detail
+        : payload?.diagnostic_id
+          ? {
+              diagnostic_id: payload.diagnostic_id,
+              stage: payload.stage,
+              timestamp: payload.timestamp,
+            }
+          : undefined,
     );
   }
   return response.status === 204

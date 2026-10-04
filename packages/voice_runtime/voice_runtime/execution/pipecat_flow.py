@@ -62,8 +62,16 @@ def compile_pipecat_flow(
                 "You are a helpful voice assistant. Continue naturally and answer the caller."
             )
 
+        # Explicit function configuration owns its name. Allowed transitions can
+        # describe the same edge without exposing a second tool to Pipecat.
+        explicit_names = {
+            function["name"] if isinstance(function, dict) else function.name
+            for function in node.get("functions", [])
+        }
         functions = []
         for target in node.get("transitions", []):
+            if _transition_name(target) in explicit_names:
+                continue
             functions.append(
                 {
                     "name": _transition_name(target),

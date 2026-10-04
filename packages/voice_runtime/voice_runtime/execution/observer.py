@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import time
+from collections import deque
 from pathlib import Path
 
 from pipecat.frames.frames import (
@@ -80,6 +81,7 @@ class EvidenceObserver(BaseObserver):
         self.function_calls: list[dict] = []
         self.last_speech_operation_id: str | None = None
         self.last_tts_operation_id: str | None = None
+        self._seen_error_frames = deque(maxlen=256)
         self._seen_interruption_frames: set[int] = set()
         self._vad_stop_clock_ns: int | None = None
         self.context_event_consumer = None
@@ -158,6 +160,10 @@ class EvidenceObserver(BaseObserver):
         if isinstance(frame, MetricsFrame):
             self._metrics(source, frame)
         if isinstance(frame, ErrorFrame):
+            # The same error passes through several processors. Persist it once.
+            if frame.id in self._seen_error_frames:
+                return
+            self._seen_error_frames.append(frame.id)
             processor = getattr(frame, "processor", None) or source
             operation_name = (
                 "llm"

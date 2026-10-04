@@ -275,7 +275,7 @@ def safe_event_payload(event: RuntimeEvent | str, **fields) -> dict:
                 result[key] = value
     value = fields.get("duration_ms")
     if type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 86400000:
-        result["duration_ms"] = value
+        result["duration_ms"] = round(value, 4)
     # Accept UUID objects only: phone numbers, URL IDs, and arbitrary strings are
     # not opaque identifiers. Callers must never pass provider IDs here.
     for key in ("run_id", "operation_id", "callback_id"):

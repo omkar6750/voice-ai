@@ -78,6 +78,10 @@ async def dispatch(session, run, *, browser_session_id="", conversation_id=None,
                 409, "Previous runtime attempt requires reconciliation; refusing redial"
             )
         return assignment
+    if run.status != "queued":
+        raise HTTPException(
+            409, "Run is already claimed or ended; refusing to modify its frozen snapshot"
+        )
     call = await session.scalar(select(Call).where(Call.run_id == run.id))
     provider = run.channel if run.channel in {"browser", "text_test"} else call.provider
     if provider not in {"browser", "text_test"}:

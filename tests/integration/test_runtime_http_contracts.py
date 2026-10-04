@@ -176,3 +176,32 @@ async def test_artifact_stream_integrity_and_replayed_completion(remote):
     assert (
         await api.post("/api/v1/runtime/artifacts/grant", json={**body, "sha256": "0" * 64})
     ).status_code == 409
+
+
+async def test_late_confirmed_cleanup_reconciles_expired_run_without_restart(remote, database):
+    from voice_api.services.runtime_recovery import recover_expired_assignments
+
+    api, identity, assignment, _ = remote
+    run = await database.get(Run, identity["run_id"])
+    run.status = "running"
+    assignment.lease_expires_at = now() - timedelta(minutes=1)
+    await database.commit()
+    assert await recover_expired_assignments(database, run.id) == 1
+    assert run.status == "uncertain"
+    body = {
+        **identity,
+        "lifecycle": {
+            "termination": {
+                "cause": "terminal_completed",
+                "pipeline_finished_at_ns": 10,
+                "cleanup_status": "confirmed",
+            }
+        },
+    }
+    response = await api.post("/api/v1/runtime/sync", json=body)
+    assert response.status_code == 200, response.text
+    assert run.status == "completed" and run.ended_at is not None
+    assert assignment.state == "ended"
+    response = await api.post("/api/v1/runtime/sync", json=body)
+    assert response.status_code == 200, response.text
+    assert run.status == "completed" and assignment.state == "ended"

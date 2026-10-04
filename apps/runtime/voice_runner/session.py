@@ -42,6 +42,9 @@ class Session:
         self.pending_logs = []
         self.log_sequence = 0
         self.outcome = None
+        self.trace = None
+        endpoint = request.snapshot.get("_resolved", {}).get("endpoint", {})
+        self.modem_ports = {str(endpoint.get(k, "")).casefold() for k in ("at_port", "audio_port")}
         self.next_heartbeat = 0
         self.closed = asyncio.Event()
         self.send_lock = asyncio.Lock()
@@ -279,6 +282,12 @@ class Session:
                     await self.sync()
             except EvidenceDeliveryError as exc:
                 if not exc.retryable:
+                    if self.text:
+                        await self.text.failure(
+                            "persistence",
+                            "The API rejected chat evidence. Execution is stopping; inspect diagnostics before retrying.",
+                        )
+                        self.text.emit({"type": "persistence", "state": "delayed"})
                     if self.task:
                         self.task.cancel()
                     raise
@@ -333,6 +342,21 @@ class Session:
         )
         self.aux_path.parent.mkdir(parents=True, exist_ok=True)
         self.loop = asyncio.get_running_loop()
+        from voice_runtime.perf_diagnostics import is_enabled
+
+        if self.manager.settings.local and is_enabled() and self.request.channel == "sim7600":
+            from voice_runtime.execution.local_trace import LocalRuntimeTrace
+
+            def trace_record(row):
+                row = {**row, "run_id": self.run_id, "service": "voice-runtime"}
+                self.loop.call_soon_threadsafe(self.on_log, row)
+
+            self.trace = await asyncio.to_thread(
+                LocalRuntimeTrace,
+                self.diagnostic_capture.path.parent / "modem-trace.jsonl",
+                self.run_id,
+                trace_record,
+            )
         self.spool = await asyncio.to_thread(
             DurableSpool,
             Path(self.manager.settings.runtime_spool_dir) / f"{self.run_id}.jsonl",
@@ -373,6 +397,7 @@ class Session:
             termination=self.termination,
         )
         self.host.broker = self
+        self.host.trace = self.trace
         return self.host
 
     async def run_pipeline(self, transport=None, media=None):
@@ -394,6 +419,7 @@ class Session:
                     from voice_runtime.telephony.driver import Sim7600CallDriver
 
                     self.driver = Sim7600CallDriver(host)
+                    self.driver.trace = self.trace
                     await self.driver.prepare(self.request.snapshot, self.tracker)
                     outcome = await self.driver.call(self.request.destination)
                 else:
@@ -421,7 +447,9 @@ class Session:
             try:
                 try:
                     if self.driver:
-                        await self.driver.close()
+                        cleanup = await self.driver.close()
+                        if not cleanup.get("release_confirmed"):
+                            outcome["dispatch_uncertain"] = True
                     elif self.host:
                         await self.host.close()
                     if self.media:
@@ -457,6 +485,10 @@ class Session:
                 self.delivery_task.cancel()
                 await asyncio.gather(self.delivery_task, return_exceptions=True)
                 artifacts_incomplete = False
+                if self.trace:
+                    await asyncio.to_thread(self.trace.close)
+                    self.manager.dropped_logs += self.trace.dropped
+                    await asyncio.sleep(0)
                 await asyncio.to_thread(self.diagnostic_capture.close)
                 if self.request.channel != "text_test" and (
                     self.host or self.diagnostic_capture.path.stat().st_size

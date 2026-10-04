@@ -15,6 +15,7 @@ from voice_runtime.diagnostics import exception_diagnostic
 from voice_runtime.execution.classifier import model_visible_result, normalize_classifier_result
 from voice_runtime.execution.exchange import ExchangeTracker
 from voice_runtime.execution.observer import EvidenceObserver
+from voice_runtime.execution.whatsapp_state import begin_send, finish_send
 
 
 class TracedFlowManager(FlowManager):
@@ -82,6 +83,16 @@ class TracedFlowManager(FlowManager):
 
         async def traced(params):
             binding = self.bindings.get(name)
+            whatsapp = bool(
+                binding
+                and binding.get("definition", {}).get("handler")
+                in {"send_whatsapp_template", "send_whatsapp_message"}
+                and any(
+                    slot.get("key") == "whatsapp_sent"
+                    for slot in self._snapshot.get("fact_slots", [])
+                )
+            )
+            previous_send = begin_send(self.state, name) if whatsapp else None
             invocation_id = self.tracker.start_tool(
                 name,
                 binding["version_id"] if binding else None,
@@ -143,13 +154,12 @@ class TracedFlowManager(FlowManager):
                             ),
                             int(self._snapshot.get("classifier", {}).get("max_result_chars", 512)),
                         )
+                if whatsapp and is_final and isinstance(result, dict):
+                    finish_send(self.state, name, result)
                 if isinstance(diagnostic, dict):
                     self.tracker.diagnostic(**diagnostic)
                 result_id = self.tracker.tool_result(invocation_id, result, is_final=is_final)
-                if (
-                    (name == "change_node" or name.startswith("go_to_"))
-                    and is_final
-                ):
+                if (name == "change_node" or name.startswith("go_to_")) and is_final:
                     self._transition_tool_id = invocation_id
                 result_properties = properties or FunctionCallResultProperties(is_final=is_final)
                 if (
@@ -185,7 +195,10 @@ class TracedFlowManager(FlowManager):
                     )
 
             try:
-                await execute(replace(params, result_callback=result_callback))
+                if previous_send is not None:
+                    await result_callback(previous_send)
+                else:
+                    await execute(replace(params, result_callback=result_callback))
             finally:
                 self._active_tool_invocation.reset(active_tool_token)
                 if not final_sent and not self.tracker.tool_was_ended(invocation_id):

@@ -76,7 +76,9 @@ async def require_organization_access(
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Organization not found")
         request.state.platform_support_session = token_hash
         bind_organization(session.sync_session, organization.id)
-        return ClerkPrincipal(user_id=principal.user_id, org_id=organization.clerk_org_id, org_role="org:owner")
+        return ClerkPrincipal(
+            user_id=principal.user_id, org_id=organization.clerk_org_id, org_role="org:owner"
+        )
     if not principal.org_id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Organization access required")
     try:
@@ -87,6 +89,14 @@ async def require_organization_access(
         raise HTTPException(503, "Organization access unavailable") from exc
     if organization_id is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Organization access required")
+    if (
+        hasattr(session, "in_transaction")
+        and session.in_transaction()
+        and not session.new
+        and not session.dirty
+        and not session.deleted
+    ):
+        await session.rollback()
     membership = await directory.membership(principal.org_id, principal.user_id)
     if membership is None or membership.role not in {"org:owner", "org:admin", "org:member"}:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Organization access required")

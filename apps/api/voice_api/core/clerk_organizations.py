@@ -1,13 +1,16 @@
 """Clerk organization directory. Membership is always read from Clerk live."""
 
+import asyncio
 from dataclasses import dataclass
 from functools import lru_cache
+from time import perf_counter
 
-from clerk_backend_api import Clerk
 from fastapi import HTTPException
 from voice_runtime.perf_diagnostics import measure
 
+from voice_api.core.clerk_client import get_clerk_clients
 from voice_api.core.config import get_settings
+from voice_api.core.read_metrics import record
 
 
 @dataclass(frozen=True)
@@ -30,7 +33,8 @@ class ClerkOrganizationDirectory:
     async def verified_profile(self, user_id: str) -> dict[str, str | None]:
         """Return Clerk's verified primary email and required display-name fields."""
         try:
-            async with Clerk(bearer_auth=self.secret_key) as clerk:
+            async with asyncio.timeout(3):
+                clerk = get_clerk_clients().sdk
                 user = await clerk.users.get_async(user_id=user_id)
         except Exception as exc:
             raise HTTPException(503, "Clerk profile lookup unavailable") from exc
@@ -54,7 +58,8 @@ class ClerkOrganizationDirectory:
     async def create_organization(self, user_id: str, name: str) -> dict[str, str]:
         """Create an org in Clerk and make the signed-in user its creator/admin."""
         try:
-            async with Clerk(bearer_auth=self.secret_key) as clerk:
+            async with asyncio.timeout(3):
+                clerk = get_clerk_clients().sdk
                 organization = await clerk.organizations.create_async(
                     request={"name": name, "created_by": user_id}
                 )
@@ -65,20 +70,25 @@ class ClerkOrganizationDirectory:
     async def delete_organization(self, org_id: str) -> None:
         """Compensate a failed local provisioning transaction."""
         try:
-            async with Clerk(bearer_auth=self.secret_key) as clerk:
+            async with asyncio.timeout(3):
+                clerk = get_clerk_clients().sdk
                 await clerk.organizations.delete_async(organization_id=org_id)
         except Exception as exc:
             raise HTTPException(502, "Clerk organization cleanup failed") from exc
 
     async def membership(self, org_id: str, user_id: str) -> OrganizationMember | None:
+        started = perf_counter()
         try:
             with measure("membership", "lookup"):
-                async with Clerk(bearer_auth=self.secret_key) as clerk:
+                async with asyncio.timeout(3):
+                    clerk = get_clerk_clients().sdk
                     page = await clerk.organization_memberships.list_async(
                         organization_id=org_id, user_id=[user_id], limit=1
                     )
         except Exception as exc:
             raise HTTPException(503, "Clerk membership lookup unavailable") from exc
+        finally:
+            record("membership", (perf_counter() - started) * 1000)
         for item in page.data:
             public = item.public_user_data
             if public and public.user_id == user_id:

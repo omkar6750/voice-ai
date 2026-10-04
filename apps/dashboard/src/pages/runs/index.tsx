@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@clerk/react";
 import { Link } from "react-router-dom";
 import { Search, RefreshCw, Activity } from "lucide-react";
 import { toast } from "sonner";
-import { useApi } from "@/app/api";
+import { useApi, useSupportSession } from "@/app/api";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/table";
 import { isActive, stamp } from "./model";
 import { StatusBadge } from "./status";
-import type { RunSummary } from "./types";
+import type { components } from "@/generated/api";
 
 function formatProvider(provider?: string) {
   if (!provider) return "SIM7600";
@@ -42,18 +42,43 @@ function formatProvider(provider?: string) {
 
 export function RunsPage() {
   const api = useApi();
-  const { orgId } = useAuth();
+  const { orgId, userId } = useAuth();
+  const support = useSupportSession();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
+  const [storedCursors, setCursors] = useState<string[]>([]);
+  const scope = JSON.stringify([userId, orgId, support]);
+  const cursorScope = useRef(scope);
+  const cursors = cursorScope.current === scope ? storedCursors : [];
+  useEffect(() => { cursorScope.current = scope; setCursors([]); }, [scope]);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (search.trim() !== debouncedSearch) {
+        setDebouncedSearch(search.trim());
+        setCursors([]);
+      }
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [search, debouncedSearch]);
+  const parameters = new URLSearchParams({ limit: "25" });
+  if (status !== "all") parameters.set("status", status);
+  if (debouncedSearch) parameters.set("search", debouncedSearch);
+  if (cursors.length) parameters.set("cursor", cursors[cursors.length - 1]);
+  const queryKey = ["runs", userId, orgId, support, parameters.toString()];
   const runsQuery = useQuery({
-    queryKey: ["runs", orgId ?? "personal"],
-    queryFn: () => api<{ runs: RunSummary[] }>("/runs"),
+    queryKey,
+    enabled: Boolean(userId && orgId),
+    queryFn: ({ signal }) =>
+      api<components["schemas"]["RunPageResponse"]>(`/runs?${parameters}`, {
+        signal,
+      }),
     staleTime: 5_000,
     gcTime: 30 * 60_000,
     refetchOnWindowFocus: false,
     refetchInterval: (query) => {
-      const data = query.state.data as { runs: RunSummary[] } | undefined;
+      const data = query.state.data;
       return data?.runs.some((run) => isActive(run.status)) ? 10_000 : false;
     },
   });
@@ -71,18 +96,16 @@ export function RunsPage() {
       lastNotifiedError.current = error;
     }
   }, [error]);
-  const visible = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    return runs.filter(
-      (run) =>
-        (status === "all" || run.status === status) &&
-        (!needle ||
-          [run.id, run.contact_name, run.channel, run.agent_version_id].some(
-            (value) => value?.toLowerCase().includes(needle),
-          )),
-    );
-  }, [runs, search, status]);
-  const statuses = [...new Set(runs.map((run) => run.status))].sort();
+  const visible = runs;
+  const statuses = [
+    "queued",
+    "claimed",
+    "running",
+    "uncertain",
+    "completed",
+    "failed",
+    "cancelled",
+  ];
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 lg:p-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
@@ -92,12 +115,12 @@ export function RunsPage() {
           </p>
           <h1 className="text-2xl font-semibold tracking-tight">Runs</h1>
           <p className="text-sm text-muted-foreground">
-            {runs.length} stored executions across phone and browser.
+            Page {cursors.length + 1}, {runs.length} executions
           </p>
         </div>
         <Button
           variant="outline"
-          onClick={() => void queryClient.invalidateQueries({ queryKey: ["runs", orgId ?? "personal"] })}
+          onClick={() => { setCursors([]); void queryClient.invalidateQueries({ queryKey: ["runs", userId, orgId, support] }); }}
           disabled={runsQuery.isFetching}
         >
           <RefreshCw data-icon="inline-start" /> Refresh
@@ -120,7 +143,10 @@ export function RunsPage() {
         <NativeSelect
           aria-label="Filter by status"
           value={status}
-          onChange={(event) => setStatus(event.target.value)}
+          onChange={(event) => {
+            setStatus(event.target.value);
+            setCursors([]);
+          }}
         >
           <NativeSelectOption value="all">All states</NativeSelectOption>
           {statuses.map((item) => (
@@ -188,11 +214,6 @@ export function RunsPage() {
                       <span className="font-medium text-xs">
                         {run.contact_name ?? "No contact snapshot"}
                       </span>
-                      {run.contact_phone && (
-                        <span className="font-mono text-[11px] text-muted-foreground">
-                          {run.contact_phone}
-                        </span>
-                      )}
                     </div>
                   </TableCell>
                   <TableCell>
@@ -217,10 +238,29 @@ export function RunsPage() {
       )}
       {!loading && visible.length > 0 && (
         <p className="text-xs text-muted-foreground">
-          Showing {visible.length} of {runs.length} runs. Active states refresh
+          Showing {visible.length} runs on this page. Active states refresh
           every 10 seconds.
         </p>
       )}
+      <nav aria-label="Run pages" className="flex items-center justify-between">
+        <Button
+          variant="outline"
+          disabled={!cursors.length || runsQuery.isFetching}
+          onClick={() => setCursors((old) => old.slice(0, -1))}
+        >
+          Previous
+        </Button>
+        <Button
+          variant="outline"
+          disabled={!runsQuery.data?.has_more || runsQuery.isFetching}
+          onClick={() => {
+            const next = runsQuery.data?.next_cursor;
+            if (next) setCursors((old) => [...old, next]);
+          }}
+        >
+          Next
+        </Button>
+      </nav>
     </div>
   );
 }

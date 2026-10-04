@@ -45,3 +45,15 @@ class BindToolBody(BaseModel):
 
 class ActivateAgentBody(BaseModel):
     version_id: str
+
+
+class AgentVersionSummaryResponse(BaseModel):
+    id: str
+    version: int
+    revision: int
+    status: str
+    note: str | None
+
+
+class AgentVersionSummariesResponse(BaseModel):
+    versions: list[AgentVersionSummaryResponse]

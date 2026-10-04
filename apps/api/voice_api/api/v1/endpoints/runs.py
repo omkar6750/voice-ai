@@ -1,12 +1,13 @@
 """Run requests and timeline inspection."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import AwareDatetime, BaseModel
+from sqlalchemy import or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner
+from voice_api.core.read_metrics import timed_read
 from voice_api.core.security import allow_organization_member
 from voice_api.models import (
     AgentVersion,
@@ -19,9 +20,12 @@ from voice_api.models import (
     TraceSpan,
 )
 from voice_api.models.common import new_id
+from voice_api.schemas.run_reads import RunPageResponse
 from voice_api.schemas.timeline import TimelineResponse
 from voice_api.services.evidence_service import related_evidence
+from voice_api.services.read_pagination import decode_cursor, encode_cursor
 from voice_api.services.resolution_service import resolve
+from voice_api.services.runtime_recovery import recover_expired_assignments
 
 router = APIRouter(tags=["runs"])
 Session = Depends(get_session)
@@ -68,48 +72,111 @@ async def request_browser_run(
     return {"run_id": run.id, "status": run.status}
 
 
-@router.get("/runs")
+@router.get("/runs", response_model=RunPageResponse)
 @allow_organization_member
-async def list_runs(session: AsyncSession = Session, _: None = Operator) -> dict:
-    rows = (await session.scalars(select(Run).where(Run.channel != "text_test").order_by(Run.created_at.desc()))).all()
-    run_ids = [r.id for r in rows]
-    calls = (
-        (await session.scalars(select(Call).where(Call.run_id.in_(run_ids)))).all()
-        if run_ids
-        else []
-    )
-    call_provider_by_run = {
-        c.run_id: c.provider
-        for c in calls
-        if hasattr(c, "run_id") and c.run_id and hasattr(c, "provider")
+@timed_read
+async def list_runs(
+    session: AsyncSession = Session,
+    _: None = Operator,
+    limit: Annotated[int, Query(ge=1, le=100)] = 25,
+    cursor: str | None = None,
+    status: str | None = None,
+    channel: Literal["phone", "browser"] | None = None,
+    agent_version_id: str | None = None,
+    created_after: AwareDatetime | None = None,
+    created_before: AwareDatetime | None = None,
+    search: Annotated[str | None, Query(max_length=120)] = None,
+) -> dict:
+    scope = session.sync_session.info.get("organization_scope_id")
+    if not scope:
+        raise HTTPException(403, "Organization access required")
+    await recover_expired_assignments(session)
+    filters = {
+        "status": status,
+        "channel": channel,
+        "agent_version_id": agent_version_id,
+        "created_after": created_after.isoformat() if created_after else None,
+        "created_before": created_before.isoformat() if created_before else None,
+        "search": search,
     }
-
+    query = (
+        select(
+            Run.id,
+            Run.channel,
+            Run.transport_provider,
+            Run.agent_version_id,
+            Run.contact_id,
+            Run.contact_snapshot["name"].as_string().label("contact_name"),
+            Run.endpoint_id,
+            Run.status,
+            Run.created_at,
+            Run.started_at,
+            Run.ended_at,
+            Run.resolved_config["call_limits"].label("call_limits"),
+            Call.provider.label("call_provider"),
+        )
+        .outerjoin(Call, (Call.run_id == Run.id) & (Call.org_id == Run.org_id))
+        .where(Run.org_id == scope, Run.channel != "text_test")
+    )
+    for value, column in (
+        (status, Run.status),
+        (channel, Run.channel),
+        (agent_version_id, Run.agent_version_id),
+    ):
+        if value is not None:
+            query = query.where(column == value)
+    if created_after:
+        query = query.where(Run.created_at >= created_after)
+    if created_before:
+        query = query.where(Run.created_at <= created_before)
+    if search:
+        escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = "%" + escaped + "%"
+        query = query.where(
+            or_(
+                Run.id.ilike(pattern),
+                Run.agent_version_id.ilike(pattern),
+                Run.contact_snapshot["name"].as_string().ilike(pattern),
+            )
+        )
+    if cursor:
+        date, identity = decode_cursor(cursor, scope, filters)
+        query = query.where(tuple_(Run.created_at, Run.id) < tuple_(date, identity))
+    rows = (
+        (
+            await session.execute(
+                query.order_by(Run.created_at.desc(), Run.id.desc()).limit(limit + 1)
+            )
+        )
+        .mappings()
+        .all()
+    )
+    more = len(rows) > limit
+    page = rows[:limit]
+    result = []
+    for row in page:
+        item = dict(row)
+        fallback = item.pop("call_provider")
+        item["transport_provider"] = (
+            item["transport_provider"]
+            or fallback
+            or ("dashboard" if item["channel"] == "browser" else "sim7600")
+        )
+        result.append(item)
     return {
-        "runs": [
-            {
-                "id": r.id,
-                "channel": r.channel,
-                "transport_provider": r.transport_provider
-                or call_provider_by_run.get(r.id)
-                or ("dashboard" if r.channel == "browser" else "sim7600"),
-                "agent_version_id": r.agent_version_id,
-                "contact_id": r.contact_id,
-                "contact_name": r.contact_snapshot.get("name") if r.contact_snapshot else None,
-                "endpoint_id": r.endpoint_id,
-                "status": r.status,
-                "created_at": r.created_at,
-                "started_at": r.started_at,
-                "ended_at": r.ended_at,
-                "call_limits": r.resolved_config.get("call_limits") if r.resolved_config else None,
-            }
-            for r in rows
-        ]
+        "runs": result,
+        "has_more": more,
+        "next_cursor": encode_cursor(scope, filters, page[-1]["created_at"], page[-1]["id"])
+        if more
+        else None,
     }
 
 
 @router.get("/runs/{run_id}")
 @allow_organization_member
+@timed_read
 async def get_run(run_id: str, session: AsyncSession = Session, _: None = Operator) -> dict:
+    await recover_expired_assignments(session, run_id)
     run = await session.get(Run, run_id)
     if run is None:
         raise HTTPException(404, "Run not found")
@@ -136,6 +203,7 @@ async def get_run(run_id: str, session: AsyncSession = Session, _: None = Operat
 
 @router.get("/runs/{run_id}/timeline", response_model=TimelineResponse)
 @allow_organization_member
+@timed_read
 async def timeline(
     run_id: str, session: AsyncSession = Session, _: None = Operator
 ) -> TimelineResponse:

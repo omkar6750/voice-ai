@@ -116,7 +116,8 @@ async def create_browser_session(
         agent_version_id=version.id,
         contact_id=resolved_contact_id,
         endpoint_id=None,
-        status="claimed",
+        # Dispatch compiles the snapshot before claiming and freezing it.
+        status="queued",
         resolved_config=snapshot,
         config_hash=digest,
         snapshot_schema_version=1,

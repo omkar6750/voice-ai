@@ -1,6 +1,7 @@
 """Text conversation setup and commit-before-acknowledgement persistence."""
 
 from copy import deepcopy
+from datetime import timedelta
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -110,6 +111,23 @@ async def ticket(session, row):
                 assignment.state = "ended"
         elif assignment and assignment.state == "preparing":
             raise HTTPException(409, "Conversation setup is already in progress")
+    if row.active_run_id and not assignment:
+        # The API may have stopped after saving the attempt but before preparation.
+        # No assignment means no runtime received credentials or execution authority.
+        if row.status == "connecting" and row.updated_at > now() - timedelta(seconds=60):
+            raise HTTPException(409, "Conversation setup is still in progress; retry shortly")
+        previous_run = await session.get(Run, row.active_run_id, with_for_update=True)
+        has_messages = await session.scalar(
+            select(ChatMessage.id).where(ChatMessage.run_id == row.active_run_id).limit(1)
+        )
+        if (
+            not has_messages
+            and previous_run
+            and previous_run.status in {"queued", "claimed", "failed"}
+        ):
+            previous_run.status = "failed"
+            previous_run.error = "Chat setup did not reach runtime preparation"
+            row.active_run_id = None
     if row.active_run_id and not row.checkpoint:
         raise HTTPException(
             409, "No safe checkpoint is available. History is readable; start a new conversation."
@@ -125,7 +143,8 @@ async def ticket(session, row):
         transport_provider="text",
         agent_version_id=row.agent_version_id,
         contact_id=row.contact_id,
-        status="claimed",
+        # Dispatch compiles and freezes configuration before claiming execution.
+        status="queued",
         resolved_config=deepcopy(row.snapshot),
         contact_snapshot=row.contact_snapshot,
         snapshot_schema_version=1,
@@ -139,12 +158,21 @@ async def ticket(session, row):
     row.checkpoint = {**(row.checkpoint or {}), "safe": False} if row.checkpoint else None
     row.error = None
     await session.commit()
+    conversation_id, run_id = row.id, run.id
     try:
         assignment = await dispatch(
             session, run, conversation_id=row.id, checkpoint=resume_checkpoint
         )
         result = await control("/v1/sessions/text-ticket", identity(assignment))
     except Exception as exc:
+        # A database failure leaves the transaction unusable until rollback.
+        await session.rollback()
+        row = await get_conversation(session, conversation_id, lock=True)
+        run = await session.get(Run, run_id, with_for_update=True)
+        assignment = await session.get(RuntimeAssignment, run_id)
+        if not assignment or assignment.state == "rejected":
+            run.status = "failed"
+            row.checkpoint = resume_checkpoint
         row.status = "failed"
         row.error = {
             "stage": "setup",

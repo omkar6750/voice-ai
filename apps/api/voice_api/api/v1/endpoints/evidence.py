@@ -370,7 +370,46 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
                 raise HTTPException(422, "Tool exchange must belong to run")
         run = await session.get(Run, run_id)
         binding = run.resolved_config.get("_resolved", {}).get("tools", {}).get(record.binding_key)
-        if binding is None or binding.get("version_id") != record.tool_version_id:
+        generated = False
+        if binding is None and record.tool_version_id is None:
+            # Generated fact/edge tools belong to the frozen flow, not the registry.
+            at = at_ns(record.started_ns)
+            node_key = await session.scalar(
+                select(FlowNodeVisit.node_key)
+                .join(TraceSpan, TraceSpan.id == FlowNodeVisit.span_id)
+                .where(FlowNodeVisit.run_id == run_id, TraceSpan.started_at <= at)
+                .order_by(TraceSpan.started_at.desc())
+                .limit(1)
+            )
+            node = next(
+                (
+                    n
+                    for n in run.resolved_config.get("flow", {}).get("nodes", [])
+                    if n["id"] == node_key
+                ),
+                {},
+            )
+            generated = (
+                any(
+                    record.binding_key == f"record_{slot['key']}"
+                    and (not slot.get("nodes") or node_key in slot["nodes"])
+                    for slot in run.resolved_config.get("fact_slots", [])
+                )
+                if node
+                else False
+            )
+            generated = (
+                generated
+                or record.binding_key
+                in {f"go_to_{target}" for target in node.get("transitions", [])}
+                or any(
+                    fn.get("transition_only") and fn["name"] == record.binding_key
+                    for fn in node.get("functions", [])
+                )
+            )
+        if not generated and (
+            binding is None or binding.get("version_id") != record.tool_version_id
+        ):
             raise HTTPException(422, "Tool binding is absent from run snapshot")
         if record.llm_operation_id:
             operation = await session.get(TraceSpan, record.llm_operation_id)

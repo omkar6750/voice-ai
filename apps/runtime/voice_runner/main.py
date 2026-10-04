@@ -156,11 +156,7 @@ class Manager:
                         for s in self.sessions.values()
                         if s.state != "ended" and s.request.channel == "sim7600"
                         for p in ports
-                        if p
-                        in {
-                            str(s.request.snapshot["_resolved"]["endpoint"].get(k, "")).casefold()
-                            for k in ("at_port", "audio_port")
-                        }
+                        if p in s.modem_ports
                     )
                 ):
                     raise HTTPException(409, "Modem ports unavailable")
@@ -545,10 +541,10 @@ async def probe_modem(body: ModemProbe, request: Request):
     ports = {body.at_port.casefold(), body.audio_port.casefold()}
     async with m.lock:
         occupied = {
-            str(s.request.snapshot.get("_resolved", {}).get("endpoint", {}).get(k, "")).casefold()
+            port
             for s in m.sessions.values()
-            if not s.closed.is_set() and s.request.channel == "sim7600"
-            for k in ("at_port", "audio_port")
+            if s.state != "ended" and s.request.channel == "sim7600"
+            for port in s.modem_ports
         }
         if ports & (occupied | m.probe_ports) or body.at_port == body.audio_port:
             raise HTTPException(409, "Modem is busy")

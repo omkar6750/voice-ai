@@ -51,3 +51,12 @@ Text tests share the voice runtime conversation engine: [ADR-0046](docs/adr/ADR-
 Provider adapters: [ADR-0047](docs/adr/ADR-0047-provider-adapters.md) — Isoquant Chat Completions and Gnani SDK WebSocket services.
 
 - [ADR-0048](docs/adr/ADR-0048-fixed-lead-classification.md): fixed classify_lead contract, shared enums and configurable destinations for all 27 combinations.
+
+
+## 2026-10-03 — Selective local worktree integration
+
+Read optimization, latency diagnostics and modem cleanup changes adapted to the
+current separate runtime and editor. No membership authorization cache, Storybook,
+main merge or deployment. See ADR-0049 and docs/deployment/WORKTREE-INTEGRATION.md.
+Migration 0047_dashboard_read_index follows 0046_text_tests. Live provider/modem
+acceptance remains operator-run.

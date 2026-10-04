@@ -6,6 +6,7 @@ import contextvars
 import json
 import logging
 import logging.handlers
+import math
 import os
 import queue
 import re
@@ -43,6 +44,13 @@ SAFE_STRINGS = {
     "module",
     "function",
     "level",
+    "component",
+    "phase",
+    "transport",
+    "route_group",
+    "request_method",
+    "validation_scope",
+    "validation_detail_state",
 }
 logger = logging.getLogger("voice.http")
 logger.propagate = False
@@ -88,6 +96,97 @@ def redact(value, key=""):
     return "[redacted]"
 
 
+def setting(name, default=""):
+    return os.getenv("VOICE_" + name, _environment.get("VOICE_" + name, default))
+
+
+def round_timings(value, key=""):
+    """Bound timing precision in console, JSON files and forwarded events."""
+    if isinstance(value, dict):
+        return {
+            k: round_timings(v, "phases_ms" if key == "phases_ms" else k) for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [round_timings(v, key) for v in value]
+    if (
+        isinstance(value, float)
+        and math.isfinite(value)
+        and (key.endswith("_ms") or key == "phases_ms")
+    ):
+        return round(value, 4)
+    return value
+
+
+class ConsoleFormatter(logging.Formatter):
+    """Render only already sanitized events; file sinks remain JSONL."""
+
+    def __init__(self, stream):
+        super().__init__()
+        tty = getattr(stream, "isatty", lambda: False)()
+        self.pretty = setting("LOG_FORMAT", "auto") == "pretty" or (
+            setting("LOG_FORMAT", "auto") == "auto" and tty
+        )
+        self.color = setting("LOG_COLOR", "auto") == "always" or (
+            setting("LOG_COLOR", "auto") == "auto" and tty and not os.getenv("NO_COLOR")
+        )
+
+    def format(self, record):
+        if not self.pretty:
+            return record.getMessage()
+        event = json.loads(record.getMessage())
+        severity = event.get("level", record.levelname)
+        status = event.get("http_status", 0)
+        tone = (
+            "31"
+            if severity in {"ERROR", "CRITICAL"} or status >= 500
+            else (
+                "33"
+                if severity == "WARNING" or status >= 400
+                else "36"
+                if event.get("direction") == "inbound"
+                else "35"
+                if event.get("direction") == "outbound"
+                else "32"
+            )
+        )
+        label = " ".join(
+            str(event[k])
+            for k in ("service", "direction", "event", "method", "route", "http_status")
+            if k in event
+        )
+        header = f"{self.formatTime(record, '%H:%M:%S')} {severity:<7} {label}"
+        if self.color:
+            header = f"\x1b[{tone}m{header}\x1b[0m"
+        lines = [header]
+
+        def nested(value, indent="  ", key="", timing=False):
+            if isinstance(value, (dict, list)) and value:
+                entries = value.items() if isinstance(value, dict) else enumerate(value)
+                for name, child in entries:
+                    if isinstance(child, (dict, list)) and child:
+                        lines.append(f"{indent}|- {name}:")
+                        nested(child, indent + "   ", str(name), timing or key == "phases_ms")
+                    else:
+                        nested(child, indent, str(name), timing or key == "phases_ms")
+            else:
+                rendered = (
+                    f"{value:.4f} ms"
+                    if isinstance(value, (int, float)) and (timing or key.endswith("_ms"))
+                    else json.dumps(value, ensure_ascii=True)
+                )
+                lines.append(f"{indent}|- {key}: {rendered}")
+
+        nested(
+            {
+                k: v
+                for k, v in event.items()
+                if k
+                not in {"service", "direction", "event", "method", "route", "http_status", "level"}
+            }
+        )
+        return "\n".join(lines)
+
+
 class BoundedHandler(logging.handlers.QueueHandler):
     def enqueue(self, record):
         global _dropped
@@ -115,6 +214,8 @@ def configure(service, directory=None, *, env_files=()):
                     "VOICE_API_LOG_MAX_BODY_CHARS",
                     "VOICE_DEBUG_PERF",
                     "VOICE_LOG_LEVEL",
+                    "VOICE_LOG_FORMAT",
+                    "VOICE_LOG_COLOR",
                 }
                 and v is not None
             }
@@ -135,11 +236,12 @@ def configure(service, directory=None, *, env_files=()):
                 encoding="utf-8",
             )
         )
-    for sink in sinks:
+    sinks[0].setFormatter(ConsoleFormatter(sinks[0].stream))
+    for sink in sinks[1:]:
         sink.setFormatter(logging.Formatter("%(message)s"))
     _bounded_handler = BoundedHandler(q)
     logger.handlers = [_bounded_handler]
-    logger.setLevel(os.getenv("VOICE_LOG_LEVEL", _environment.get("VOICE_LOG_LEVEL", "INFO")))
+    logger.setLevel(setting("LOG_LEVEL", "INFO"))
     _listener = logging.handlers.QueueListener(q, *sinks)
     _listener.start()
 
@@ -150,7 +252,7 @@ def emit(event, *, forward=True):
         event["run_id"] = str(UUID(event["run_id"]))
     except (ValueError, TypeError):
         pass
-    safe = redact(event)
+    safe = round_timings(redact(event))
     level = logging._nameToLevel.get(event.get("level", "INFO"), logging.INFO)
     if logger.isEnabledFor(level):
         logger.handle(
