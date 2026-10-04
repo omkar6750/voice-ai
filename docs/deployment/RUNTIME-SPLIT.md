@@ -49,7 +49,7 @@ Keep Clerk, database, vault, Cloudinary and Supabase administrator credentials o
 on the API. Hosted SIM7600 is rejected. Set runtime CPU budget to `0.1`, concurrency
 `1`; keep hosted calls disabled in both services until acceptance.
 
-Verify browser/Twilio media, API signature callbacks, recording uploads/access,
+Verify browser audio, chat turns, recording uploads/access,
 15-second API delays, 30-second lease expiry, two-service shutdown, and measured
 CPU/memory/loop/audio lag before enabling hosted calls. Local multi-session tests
 are required before raising concurrency. API status is advisory: runtime admission
@@ -63,7 +63,7 @@ still limit demo reliability. No production uptime guarantee is implied.
 ## Local activation
 
 Local activation was authorized on 2026-10-02. Development API routes now dispatch
-to the separate runtime; hosted routing is unchanged. No services were deployed.
+to the separate runtime. Production now always uses that boundary; hosted transport admission is browser/chat only. No services were deployed.
 The local database on localhost:55433/voice migrated through 0045.
 
 The primary checkout already owns ports 8000/5173. This testing worktree runs at:

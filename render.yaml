@@ -10,7 +10,7 @@ services:
     region: singapore
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    autoDeployTrigger: "commit"
+    autoDeployTrigger: "off"
     healthCheckPath: /health
     maxShutdownDelaySeconds: 300
     envVars:
@@ -20,7 +20,7 @@ services:
         value: production
       - key: VOICE_DEBUG_DIAGNOSTICS
         value: "false"
-      # Parent must wire and enforce these settings before any public deployment.
+      # Enable only for the controlled browser/chat acceptance session.
       - key: VOICE_HOSTED_CALLS_ENABLED
         value: "false"
       - key: VOICE_MAX_CONCURRENT_CALLS
@@ -81,7 +81,7 @@ services:
     region: singapore
     dockerfilePath: ./Dockerfile.runtime
     dockerContext: .
-    autoDeployTrigger: "commit"
+    autoDeployTrigger: "off"
     healthCheckPath: /health
     maxShutdownDelaySeconds: 300
     envVars:
@@ -93,6 +93,8 @@ services:
         value: "false"
       - key: VOICE_MAX_CONCURRENT_CALLS
         value: "1"
+      - key: VOICE_CALL_MAX_DURATION_SECONDS
+        value: "600"
       - key: VOICE_RUNTIME_CPU_BUDGET
         value: "0.1"
       - key: VOICE_API_BASE_URL

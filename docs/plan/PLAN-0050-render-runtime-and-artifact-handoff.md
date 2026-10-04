@@ -1,6 +1,6 @@
 # PLAN-0050 · Hosted runtime and artifact handoff
 
-Status: deployment plan; no hosted resource or external data changed.
+Status: implementation in progress; hosted deployment awaiting Render workspace confirmation.
 Date: 2026-10-04
 
 ## Current implementation
@@ -20,15 +20,15 @@ fences, evidence and artifact status; the existing hosted plan uses Neon for tha
 ## Service topology and constraints
 
 1. Keep the API and runtime as distinct Render web services in the same region.
-   The dashboard reaches only the API. Browser WebSockets and Twilio media reach
+   The dashboard reaches only the API. Browser WebSockets and chat WebSockets reach
    the runtime public URL through the API-issued ticket/URL flow; API-to-runtime
    control uses its separate server-side token. Bind to `$PORT`, expose `/health`,
    and use one runtime worker. Keep SIM7600 on the Windows edge; the Linux container
    has no modem or local audio device.
 2. Keep hosted calls disabled until the existing `ACCEPTANCE.md` gates pass. Admit
-   at most one browser/Twilio call for 600 seconds after capacity measurement.
-   Disable auto deploy for the runtime before opening admission: the current
-   `render.yaml` says `autoDeployTrigger: commit`, while the acceptance procedure
+   at most one browser call or chat test for 600 seconds after capacity measurement.
+   Auto deploy is disabled on both services: the
+   `render.yaml` uses `autoDeployTrigger: off`; the release procedure
    requires drain, in-flight completion and operator-controlled deploy. A health
    response proves process liveness, not provider/storage readiness.
 3. Put `VOICE_RUNTIME_SPOOL_DIR` and `VOICE_RECORDINGS_DIR` on writable scratch
@@ -65,7 +65,7 @@ fences, evidence and artifact status; the existing hosted plan uses Neon for tha
    controlled pre-deploy operation, never at runtime startup.
 3. Build and test the exact linux/amd64 image, OpenAPI dashboard client, focused
    auth/runtime/storage contracts and migration head. Deploy with admission off.
-4. Test synthetic browser audio, then an explicitly authorized Twilio call. Measure
+4. Test a browser call and a chat conversation only. Twilio and modem admission are rejected on hosted services. Measure
    model-loaded RSS, CPU/event-loop lag, cold start, speech latency, WebSocket
    interruption, ten-minute timeout, shutdown and forced restart. Verify a real
    Cloudinary recording and Supabase diagnostic can be accessed only through an
@@ -88,4 +88,4 @@ fences, evidence and artifact status; the existing hosted plan uses Neon for tha
   https://cloudinary.com/documentation/image_upload_api_reference
 
 The existing `docs/deployment/ACCEPTANCE.md` is the operational gate. This plan
-does not authorize a live call, paid disk, migration, role conversion or deployment.
+has user authorization for deployment and browser/chat acceptance. Paid resources remain outside this release.

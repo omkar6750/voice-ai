@@ -102,6 +102,19 @@ async def test_production_rejects_modem_before_hardware(settings):
         await m.close()
 
 
+async def test_production_rejects_twilio_before_session_creation(settings):
+    settings.env = "production"
+    settings.hosted_calls_enabled = True
+    m = await manager_for(settings)
+    try:
+        with pytest.raises(HTTPException) as error:
+            await m.prepare(prepared("twilio"))
+        assert error.value.status_code == 409
+        assert not m.sessions
+    finally:
+        await m.close()
+
+
 async def test_overlapping_modem_ports_reject(settings):
     m = await manager_for(settings)
     try:

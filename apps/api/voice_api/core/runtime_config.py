@@ -24,8 +24,8 @@ def get_runtime_settings():
 
 def use_separate_runtime() -> bool:
     settings = get_runtime_settings()
-    # This activation is intentionally local; hosted call routing is unchanged.
+    # Production must never fall back to an API-owned pipeline.
     return (
-        settings.env.casefold() in {"dev", "development", "local"}
-        and settings.runtime_separate_enabled
+        settings.env.casefold() not in {"dev", "development", "local"}
+        or settings.runtime_separate_enabled
     )

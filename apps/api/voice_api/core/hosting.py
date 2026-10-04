@@ -9,7 +9,7 @@ def require_hosted_call_admission(provider: str, settings: Settings | None = Non
     settings = settings or get_settings()
     if settings.env == "dev":
         return
-    if provider not in {"browser", "twilio"}:
+    if provider != "browser":
         raise HTTPException(409, "This call transport is unavailable on the hosted service")
     if not settings.hosted_calls_enabled:
         raise HTTPException(503, "Hosted calls are disabled pending capacity acceptance")

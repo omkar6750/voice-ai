@@ -28,7 +28,7 @@ services or live capacity.
 
 - [ ] Parent wires hosted admission, one concurrent call and 600-second duration settings;
   tests prove rejection before DB claim/provider effects with hosted calls disabled.
-- [ ] Parent enforces browser/Twilio-only transport, modem denial and all automation off;
+- [ ] Parent enforces browser/chat-only transport, modem denial and all automation off;
   rejects missing production credentials and dev-only bypasses.
 - [x] Docker lock freshness/frozen install, linux/amd64 image build and nonroot startup
   pass; record Python/uv versions, dependency lock SHA and resolved base-image digests.
@@ -53,7 +53,7 @@ services or live capacity.
 
 ## Persistence and ownership gates
 
-- [ ] One combined browser/Twilio admission race, duplicate callbacks, expired leases,
+- [ ] One combined browser/chat admission race, duplicate callbacks, expired leases,
   old/new process overlap and stale owners produce no second external attempt.
 - [ ] Restart/crash leaves unknown external outcomes reserved and evidence incomplete;
   explicit reconciliation releases safely without redial or fabricated success.
@@ -77,7 +77,7 @@ services or live capacity.
 ## Actual Render measurements before enabling calls
 
 Use approved synthetic browser audio first; the test operator must explicitly authorize
-any provider/Twilio traffic and confirm existing free allowance. Never call a contact
+browser audio and chat provider traffic and confirm existing free allowance. Never call a contact
 as an automated deployment check. Enabling for an isolated measurement must not open
 general customer admission; close it again after the test. Record actual values:
 
@@ -89,7 +89,7 @@ general customer admission; close it again after the test. Record actual values:
 | CPU and event-loop lag during streaming/upload | Pending | Operator-approved real-time budget met |
 | STT/LLM/TTS and caller-to-audible p50/p95 latency | Pending | Record target budget before test; observed values meet it |
 | Browser WebSocket/audio interruption and cancel | Pending | Deterministic single owner and cleanup |
-| Twilio signatures, media marks/clear and remote hangup | Pending | Approved test allowance; no duplicate/redial |
+| Chat response, tool evidence and stop/interrupt | Pending | Completed turns, details persisted, no frozen composer |
 | Second concurrent request | Pending | Rejected before external effects |
 | Server deadline at 600 seconds | Pending | Transport released; fenced terminal evidence |
 | Storage failure / unknown quota | Pending | Required capture blocks or closes; truthful evidence |
@@ -110,7 +110,7 @@ authorization; this plan never silently chooses a larger instance.
 4. Run only approved direct-connection migrations outside service startup; record head.
 5. Operator manually deploys the already-reviewed image/ref; auto-deploy remains off.
 6. Verify health, organization auth, private storage and incomplete-run reconciliation.
-7. Reopen admission only for accepted browser/Twilio demos; one concurrency, 600 seconds.
+7. Reopen admission only for accepted browser/chat demos; one concurrency, 600 seconds.
 8. For rollback, repeat the drain. Verify schema compatibility; never automatically
    downgrade or discard evidence. Keep calls disabled if acceptance no longer holds.
 

@@ -12,13 +12,27 @@ def test_hosted_calls_fail_closed_until_capacity_accepted():
     assert error.value.status_code == 503
 
 
-def test_hosted_profile_never_admits_modem():
+def test_hosted_profile_only_admits_browser():
     settings = Settings(_env_file=None, env="production", hosted_calls_enabled=True)
-    for provider in ("browser", "twilio"):
-        require_hosted_call_admission(provider, settings)
-    with pytest.raises(HTTPException) as error:
-        require_hosted_call_admission("sim7600", settings)
-    assert error.value.status_code == 409
+    require_hosted_call_admission("browser", settings)
+    for provider in ("twilio", "sim7600"):
+        with pytest.raises(HTTPException) as error:
+            require_hosted_call_admission(provider, settings)
+        assert error.value.status_code == 409
+
+
+@pytest.mark.parametrize("env", ["production", "staging"])
+def test_hosted_api_always_uses_separate_runtime(monkeypatch, env):
+    from voice_api.core import runtime_config
+
+    monkeypatch.setattr(
+        runtime_config,
+        "get_runtime_settings",
+        lambda: runtime_config.RuntimeControlSettings(
+            _env_file=None, env=env, runtime_separate_enabled=False
+        ),
+    )
+    assert runtime_config.use_separate_runtime()
 
 
 def test_local_modem_inventory_is_unavailable_in_production(monkeypatch):
