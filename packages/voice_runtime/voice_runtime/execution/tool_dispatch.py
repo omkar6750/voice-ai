@@ -6,11 +6,19 @@ import asyncio
 
 from pipecat.flows import FlowManager
 
+from voice_runtime.diagnostics import diagnostic_dict, provider_exception_diagnostic
 from voice_runtime.execution.classifier import normalize_classifier_result, run_selected_classifier
 from voice_runtime.execution.credential_keys import stage_api_key
 from voice_runtime.execution.native_helpers import (
     _extract_transcript,
     run_jev_classification,
+)
+from voice_runtime.execution.whatsapp_composer import (
+    ComposerError,
+    ComposerProviderError,
+    compose_whatsapp,
+    composer_fields,
+    composer_instruction,
 )
 from voice_runtime.safe_logs import RuntimeEvent, error_category, operational_event
 
@@ -75,6 +83,88 @@ class NativeToolDispatch:
             if broker is None:
                 return {"status": "error", "error": "Business tool broker unavailable"}
             invocation_id = getattr(_manager, "active_tool_invocation_id", None)
+            template = self._composer_template(name)
+            if template:
+                if set(args) - {"to"}:
+                    return {"status": "error", "error": "The agent may only choose the recipient"}
+                composer = self._snapshot["composer"]
+                definition = self._snapshot["_resolved"]["tools"][name]["definition"]
+                fields = composer_fields(definition)
+                transcript = self.tracker.plain_transcript()
+                model = composer["model"]
+                function_call_id = self.tracker._tool_invocation_metadata.get(
+                    invocation_id, {}
+                ).get("function_call_id")
+                observer = getattr(self, "observer", None)
+                parent_id = (
+                    observer.function_operations.get(function_call_id)
+                    if observer is not None and function_call_id
+                    else None
+                )
+                operation = self.tracker.start_operation(
+                    f"compose:{name}",
+                    "composer",
+                    provider=model["provider"],
+                    model=model["model"],
+                    parent_operation_id=parent_id,
+                    input_payload={
+                        "system_prompt": composer_instruction(template, fields),
+                        "transcript": transcript,
+                        "template_fields": fields,
+                        "required_urls": template.get("required_urls", []),
+                    },
+                    tool_invocation_id=invocation_id,
+                )
+                try:
+                    composed = await compose_whatsapp(
+                        settings=self.settings,
+                        config=composer,
+                        template=template,
+                        definition=definition,
+                        transcript=transcript,
+                    )
+                except asyncio.CancelledError:
+                    self.tracker.finish_operation(
+                        operation, "interrupted", output_state="interrupted"
+                    )
+                    raise
+                except ComposerError as exc:
+                    self.tracker.finish_operation(
+                        operation,
+                        "failed",
+                        output_state="failed",
+                        failure_reason="provider_failed"
+                        if isinstance(exc, ComposerProviderError)
+                        else "invalid_output",
+                    )
+                    if isinstance(exc, ComposerProviderError):
+                        diagnostic = provider_exception_diagnostic(
+                            exc.__cause__ or exc,
+                            provider=model["provider"],
+                            operation="llm",
+                        )
+                        diagnostic["metadata"]["operation"] = "composer"
+                    else:
+                        diagnostic = diagnostic_dict(
+                            severity="error",
+                            category="composer_output_invalid",
+                            source="runtime",
+                            code="composer_output_invalid",
+                            message=str(exc),
+                        )
+                    diagnostic["metadata"].update(
+                        operation_id=operation["operation_id"],
+                        tool_invocation_id=invocation_id,
+                    )
+                    return {
+                        "status": "error",
+                        "error": "WhatsApp message composition failed; no message was sent",
+                        "_diagnostic": diagnostic,
+                    }
+                self.tracker.finish_operation(
+                    operation, "completed", output_payload={"fields": composed}
+                )
+                return await broker.tool(name, {**args, **composed}, invocation_id)
             return await broker.tool(name, args, invocation_id)
 
         async def handle(args: dict, manager: FlowManager):

@@ -11,12 +11,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Field, FieldLabel, FieldGroup } from "@/components/ui/field";
 import {
-  Message,
-  MessageContent,
-  MessageHeader,
-  MessageFooter,
-} from "@/components/ui/message";
-import { Bubble, BubbleContent } from "@/components/ui/bubble";
+  ChatTranscriptEntry,
+  ChatInspection,
+  transcriptEntries,
+} from "./ChatEvidence";
 import {
   MessageScroller,
   MessageScrollerProvider,
@@ -61,16 +59,6 @@ const personas = {
   opt_out:
     "Clearly decline contact and ask the agent to stop. Check that it respects this.",
 };
-function label(payload: Payload): string {
-  return String(
-    payload.binding_key ??
-      payload.node_key ??
-      payload.name ??
-      payload.code ??
-      payload.kind ??
-      "Evidence",
-  ).replaceAll("_", " ");
-}
 function failure(error: unknown, stage: string): Failure {
   const diagnostic = error instanceof ApiError ? error.diagnostic : undefined;
   return {
@@ -781,80 +769,19 @@ export function ChatTestPanel({
                               : "Connect to begin. The agent follows the selected node."}
                           </p>
                         )}
-                        {entries.map((entry) => (
+                        {transcriptEntries(entries).map((entry) => (
                           <MessageScrollerItem
                             key={entry.id}
                             messageId={entry.id}
                             scrollAnchor={entry.kind === "user"}
                           >
-                            <Message
-                              align={entry.kind === "user" ? "end" : "start"}
-                            >
-                              <MessageContent>
-                                <MessageHeader>
-                                  {entry.kind === "user"
-                                    ? "You"
-                                    : entry.kind === "assistant"
-                                      ? "Agent"
-                                      : entry.kind === "error"
-                                        ? "Error"
-                                        : label(entry.payload)}
-                                </MessageHeader>
-                                <Bubble
-                                  variant={
-                                    entry.kind === "error"
-                                      ? "destructive"
-                                      : entry.kind === "user"
-                                        ? "default"
-                                        : "secondary"
-                                  }
-                                  align={
-                                    entry.kind === "user" ? "end" : "start"
-                                  }
-                                >
-                                  <BubbleContent>
-                                    <button
-                                      type="button"
-                                      className="w-full whitespace-pre-wrap text-left outline-offset-4"
-                                      aria-label={`Inspect ${entry.kind} details`}
-                                      onClick={() => void inspect(entry)}
-                                    >
-                                      {entry.kind === "user" ||
-                                      entry.kind === "assistant"
-                                        ? String(entry.payload.text ?? "") ||
-                                          "Generating…"
-                                        : entry.kind === "error"
-                                          ? String(
-                                              entry.payload.message ??
-                                                "Execution failed",
-                                            )
-                                          : JSON.stringify(
-                                              entry.payload.payload ??
-                                                entry.payload.arguments ??
-                                                entry.payload.result ?? {
-                                                  status: entry.payload.status,
-                                                  event: entry.payload.kind,
-                                                },
-                                              null,
-                                              2,
-                                            )}
-                                    </button>
-                                  </BubbleContent>
-                                </Bubble>
-                                <MessageFooter>
-                                  {String(
-                                    entry.payload.status ??
-                                      entry.payload.kind ??
-                                      entry.kind,
-                                  ).replaceAll("_", " ")}{" "}
-                                  · {entry.saved ? "Saved" : "Saving…"}
-                                  {entry.kind === "error" &&
-                                  entry.payload.diagnostic_id
-                                    ? ` · ${entry.payload.diagnostic_id}`
-                                    : ""}
-                                </MessageFooter>
-                              </MessageContent>
-                            </Message>
+                            <ChatTranscriptEntry
+                              entry={entry}
+                              entries={entries}
+                              inspect={(selectedEntry) =>
+                                void inspect(selectedEntry)
+                              }
+                            />
                           </MessageScrollerItem>
                         ))}
                       </MessageScrollerContent>
@@ -877,6 +804,16 @@ export function ChatTestPanel({
                       maxLength={8000}
                       disabled={state !== "connected"}
                       onChange={(e) => setText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (
+                          e.key === "Enter" &&
+                          !e.shiftKey &&
+                          !e.nativeEvent.isComposing
+                        ) {
+                          e.preventDefault();
+                          if (!e.repeat) e.currentTarget.form?.requestSubmit();
+                        }
+                      }}
                       placeholder="Type as the caller. Sending during a response interrupts it."
                     />
                   </Field>
@@ -902,7 +839,7 @@ export function ChatTestPanel({
           </main>
           {selected && (
             <aside
-              className="flex w-full shrink-0 flex-col gap-3 border-t p-4 lg:w-80 lg:border-l lg:border-t-0"
+              className="flex w-full shrink-0 flex-col gap-3 border-t p-4 lg:w-[28rem] lg:border-l lg:border-t-0"
               aria-label="Message inspector"
             >
               <header className="flex items-center justify-between gap-2">
@@ -935,11 +872,7 @@ export function ChatTestPanel({
                   </Button>
                 </>
               )}
-              {inspection !== null && (
-                <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words font-mono text-xs tabular-nums">
-                  {JSON.stringify(inspection, null, 2)}
-                </pre>
-              )}
+              {inspection !== null && <ChatInspection value={inspection} />}
             </aside>
           )}
         </div>

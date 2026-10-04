@@ -397,7 +397,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get Agent Version */
+        get: operations["get_agent_version_api_v1_agent_versions__version_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2546,7 +2547,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get Agent Version */
+        get: operations["get_agent_version_api_agent_versions__version_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4384,6 +4386,7 @@ export interface components {
             call_limits?: components["schemas"]["CallLimits"];
             context?: components["schemas"]["ContextConfig"];
             classifier?: components["schemas"]["ClassifierConfig"];
+            composer?: components["schemas"]["ComposerConfig"];
             callback_scheduling?: components["schemas"]["CallbackSchedulingConfig"];
             /**
              * Pipeline Logs
@@ -4403,6 +4406,24 @@ export interface components {
             /** Status */
             status: string;
             config: components["schemas"]["AgentConfig"];
+            /** Note */
+            note: string | null;
+        };
+        /** AgentVersionSummariesResponse */
+        AgentVersionSummariesResponse: {
+            /** Versions */
+            versions: components["schemas"]["AgentVersionSummaryResponse"][];
+        };
+        /** AgentVersionSummaryResponse */
+        AgentVersionSummaryResponse: {
+            /** Id */
+            id: string;
+            /** Version */
+            version: number;
+            /** Revision */
+            revision: number;
+            /** Status */
+            status: string;
             /** Note */
             note: string | null;
         };
@@ -5140,6 +5161,31 @@ export interface components {
              * Format: date-time
              */
             occurred_at: string;
+        };
+        /** ComposerConfig */
+        ComposerConfig: {
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            model?: components["schemas"]["LLMConfig"];
+            /**
+             * Timeout Secs
+             * @default 20
+             */
+            timeout_secs: number;
+            /** Templates */
+            templates?: {
+                [key: string]: components["schemas"]["ComposerTemplateConfig"];
+            };
+        };
+        /** ComposerTemplateConfig */
+        ComposerTemplateConfig: {
+            /** System Prompt */
+            system_prompt: string;
+            /** Required Urls */
+            required_urls?: string[];
         };
         /** ConnectionBody */
         ConnectionBody: {
@@ -7093,6 +7139,50 @@ export interface components {
             consumed_exchange_id: string | null;
             /** Consuming Span Id */
             consuming_span_id: string | null;
+        };
+        /** RunPageResponse */
+        RunPageResponse: {
+            /** Runs */
+            runs: components["schemas"]["RunSummaryResponse"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /** Has More */
+            has_more: boolean;
+        };
+        /** RunSummaryResponse */
+        RunSummaryResponse: {
+            /** Id */
+            id: string;
+            /**
+             * Channel
+             * @enum {string}
+             */
+            channel: "phone" | "browser";
+            /** Transport Provider */
+            transport_provider: string;
+            /** Agent Version Id */
+            agent_version_id: string;
+            /** Contact Id */
+            contact_id: string | null;
+            /** Contact Name */
+            contact_name: string | null;
+            /** Endpoint Id */
+            endpoint_id: string | null;
+            /** Status */
+            status: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at: string | null;
+            /** Ended At */
+            ended_at: string | null;
+            /** Call Limits */
+            call_limits: {
+                [key: string]: unknown;
+            } | null;
         };
         /** RuntimeEndpointResponse */
         RuntimeEndpointResponse: {
@@ -9055,7 +9145,9 @@ export interface operations {
     };
     agent_versions_api_v1_agents__agent_id__versions_get: {
         parameters: {
-            query?: never;
+            query?: {
+                view?: string;
+            };
             header?: never;
             path: {
                 agent_id: string;
@@ -9070,7 +9162,38 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AgentVersionsResponse"];
+                    "application/json": components["schemas"]["AgentVersionsResponse"] | components["schemas"]["AgentVersionSummariesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_agent_version_api_v1_agent_versions__version_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentVersionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -10100,7 +10223,16 @@ export interface operations {
     };
     list_runs_api_v1_runs_get: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+                status?: string | null;
+                channel?: ("phone" | "browser") | null;
+                agent_version_id?: string | null;
+                created_after?: string | null;
+                created_before?: string | null;
+                search?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10113,9 +10245,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RunPageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -13831,7 +13970,9 @@ export interface operations {
     };
     agent_versions_api_agents__agent_id__versions_get: {
         parameters: {
-            query?: never;
+            query?: {
+                view?: string;
+            };
             header?: never;
             path: {
                 agent_id: string;
@@ -13846,7 +13987,38 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AgentVersionsResponse"];
+                    "application/json": components["schemas"]["AgentVersionsResponse"] | components["schemas"]["AgentVersionSummariesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_agent_version_api_agent_versions__version_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentVersionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -14876,7 +15048,16 @@ export interface operations {
     };
     list_runs_api_runs_get: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+                status?: string | null;
+                channel?: ("phone" | "browser") | null;
+                agent_version_id?: string | null;
+                created_after?: string | null;
+                created_before?: string | null;
+                search?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14889,9 +15070,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["RunPageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

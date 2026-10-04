@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.core.security import allow_organization_member
-from voice_api.models import ChatConversation, ChatMessage, TraceSpan
+from voice_api.models import ChatConversation, ChatMessage, FlowNodeVisit, ToolInvocation, TraceSpan
 from voice_api.schemas.chat import ChatSummary, ChatTicket, CreateChat
 from voice_api.services import chat_service
 from voice_api.services.evidence_service import related_evidence
@@ -99,19 +99,61 @@ async def inspect(conversation_id: str, message_id: str, session=Session, actor=
         raise HTTPException(404, "Message evidence not found; it may still be saving")
     evidence = await related_evidence(session, message.run_id)
     operation_id = message.payload.get("operation_id") or message.payload.get("llm_operation_id")
+    visit_id = message.payload.get("visit_id")
+    if visit_id:
+        visit = await session.get(FlowNodeVisit, visit_id)
+        if visit and visit.run_id == message.run_id:
+            operation_id = visit.span_id
+    attributes = message.payload.get("attributes") or {}
+    invocation_id = message.payload.get("invocation_id") or (
+        attributes.get("tool_invocation_id") if isinstance(attributes, dict) else None
+    )
+    tool = await session.get(ToolInvocation, invocation_id) if invocation_id else None
+    if tool and tool.run_id != message.run_id:
+        tool = None
+    operation_id = operation_id or (tool.llm_operation_id if tool else None)
+    if operation_id:
+        descendants = (
+            select(TraceSpan.id)
+            .where(TraceSpan.run_id == message.run_id, TraceSpan.id == operation_id)
+            .cte("chat_operation_tree", recursive=True)
+        )
+        descendants = descendants.union_all(
+            select(TraceSpan.id).where(
+                TraceSpan.run_id == message.run_id, TraceSpan.parent_id == descendants.c.id
+            )
+        )
+        span_filter = TraceSpan.id.in_(select(descendants.c.id))
+    else:
+        span_filter = TraceSpan.exchange_id == message.payload.get("exchange_id")
     spans = (
         await session.scalars(
-            select(TraceSpan).where(
+            select(TraceSpan)
+            .where(
                 TraceSpan.run_id == message.run_id,
-                TraceSpan.id == operation_id
-                if operation_id
-                else TraceSpan.exchange_id == message.payload.get("exchange_id"),
+                span_filter,
             )
+            .order_by(TraceSpan.started_at)
         )
     ).all()
     return {
         "message": message.payload,
         "kind": message.kind,
+        "tool": {
+            key: getattr(tool, key, None)
+            for key in (
+                "id",
+                "binding_key",
+                "arguments",
+                "result",
+                "status",
+                "started_at",
+                "ended_at",
+                "llm_operation_id",
+            )
+        }
+        if tool
+        else None,
         "evidence": evidence,
         "operations": [
             {

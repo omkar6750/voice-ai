@@ -93,6 +93,7 @@ class NativePipelineHost(
         self.broker = None
         self.pending_context = {}
         self.worker = self.flow = self.capture = self.observer = None
+        self.trace = None
         self.runner_task: asyncio.Task | None = None
         self.ready = asyncio.Event()
         self.errors: list[str] = []
@@ -161,6 +162,11 @@ class NativePipelineHost(
             set(node_bindings)
             | self._global_function_keys
             | {f"go_to_{target}" for target in transitions}
+            | {
+                f"record_{slot['key']}"
+                for slot in self._snapshot.get("fact_slots", [])
+                if not slot.get("nodes") or key in slot["nodes"]
+            }
         )
         config["role_message"] = compile_tool_references(
             config.get("role_message", ""), exposed_tools
@@ -178,11 +184,16 @@ class NativePipelineHost(
             tool = bindings[name]["definition"]
             parameters = tool["parameters"]
             properties = deepcopy(parameters.get("properties", {}))
+            required = parameters.get("required", [])
             if name == "change_node":
                 node_property = properties.get("node")
                 if isinstance(node_property, dict):
                     node_property["enum"] = list(transitions)
             description = tool["description"]
+            if self._composer_template(name):
+                from voice_runtime.execution.whatsapp_composer import composer_tool_schema
+
+                properties, required, description = composer_tool_schema(tool)
             if self._is_nonblocking_tool(name):
                 description = (
                     description.rstrip()
@@ -214,7 +225,7 @@ class NativePipelineHost(
                     name=name,
                     description=description,
                     properties=properties,
-                    required=parameters.get("required", []),
+                    required=required,
                     handler=(
                         next(
                             function.handler
@@ -249,6 +260,10 @@ class NativePipelineHost(
                     value = slot.validate_value(args.get("value"))
                 except (TypeError, ValueError) as exc:
                     return {"status": "error", "error": str(exc)}
+                if slot.key == "whatsapp_sent":
+                    from voice_runtime.execution.whatsapp_state import record_send_fact
+
+                    return record_send_fact(manager.state, value)
                 manager.state[slot.key] = value
                 return {"status": "ok", "key": slot.key, "value": value}
 
@@ -318,13 +333,25 @@ class NativePipelineHost(
 
             spec = next(spec for spec in registered_handler_specs() if spec.name == name)
             tool = {"description": spec.description, "parameters": spec.parameters}
+        if self._composer_template(name):
+            from voice_runtime.execution.whatsapp_composer import composer_tool_schema
+
+            properties, required, description = composer_tool_schema(tool)
+        else:
+            properties = deepcopy(tool["parameters"].get("properties", {}))
+            required = tool["parameters"].get("required", [])
+            description = tool["description"]
         return FlowsFunctionSchema(
             name=name,
-            description=tool["description"],
-            properties=deepcopy(tool["parameters"].get("properties", {})),
-            required=tool["parameters"].get("required", []),
+            description=description,
+            properties=properties,
+            required=required,
             handler=handler,
         )
+
+    def _composer_template(self, name: str) -> dict | None:
+        composer = self._snapshot.get("composer") or {}
+        return (composer.get("templates") or {}).get(name) if composer.get("enabled") else None
 
     def _pipecat_tool_proxy(self, name: str):
         async def proxy(flow_manager, **params):
@@ -367,6 +394,16 @@ class NativePipelineHost(
         proxy.__name__ = name
         proxy.__doc__ = f"Run the versioned application tool {name}."
         return proxy
+
+    def _local_observers(self):
+        if not self.trace:
+            return []
+        from voice_runtime.execution.local_observer import (
+            LocalErrorObserver,
+            LocalLifecycleObserver,
+        )
+
+        return [LocalLifecycleObserver(self.trace), LocalErrorObserver(self.trace)]
 
     async def prepare(
         self,
@@ -419,6 +456,15 @@ class NativePipelineHost(
                 raise ValueError(
                     f"Tool binding '{binding_key}' uses an unregistered runtime handler"
                 )
+        composer_config = snapshot.get("composer") or {}
+        if composer_config.get("enabled"):
+            from voice_runtime.execution.whatsapp_composer import composer_fields
+
+            for binding_key in (composer_config.get("templates") or {}):
+                binding = snapshot["_resolved"]["tools"].get(binding_key)
+                if not binding or binding["definition"].get("handler") != "send_whatsapp_template":
+                    raise ValueError(f"Composer template '{binding_key}' is not a bound WhatsApp template")
+                composer_fields(binding["definition"])
         for key in self._nodes:
             for name in self._nodes[key]["tool_bindings"]:
                 if name not in snapshot["_resolved"]["tools"]:
@@ -469,6 +515,14 @@ class NativePipelineHost(
                     stage_api_key(self.settings, "summarizer", summary_provider),
                 )
             )
+        if composer_config.get("enabled"):
+            composer_provider = (composer_config.get("model") or {}).get("provider", "groq")
+            required_credentials.append(
+                (
+                    f"composer:{composer_provider}",
+                    stage_api_key(self.settings, "composer", composer_provider),
+                )
+            )
         for name, value in required_credentials:
             if not value:
                 raise ValueError(f"{name} is not configured")
@@ -486,6 +540,7 @@ class NativePipelineHost(
             transport = Sim7600UsbAudioBridge(
                 endpoint["audio_port"],
                 endpoint["baudrate"],
+                trace=self.trace,
                 sample_rate=rate,
                 channels=1,
                 capture=self.capture,
@@ -655,8 +710,13 @@ class NativePipelineHost(
         self.observer.context_event_consumer = self._mark_context_events_consumed
         self.worker = PipelineWorker(
             pipeline,
-            observers=[self.observer] + ([self.capture] if self.capture else []),
+            observers=[self.observer]
+            + ([self.capture] if self.capture else [])
+            + self._local_observers(),
             enable_rtvi=enable_rtvi,
+            # Text sessions have no audio activity for Pipecat's default watchdog.
+            # Runtime duration, disconnect and execution leases own text limits.
+            **({"idle_timeout_secs": None} if text_output else {}),
             params=PipelineParams(
                 enable_metrics=True,
                 enable_usage_metrics=True,

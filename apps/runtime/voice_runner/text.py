@@ -50,6 +50,7 @@ class TextState:
         self.uncertain = False
         self.pending_tasks = set()
         self.failed_generations = set()
+        self.failure_reported = False
 
     def clean(self, data):
         return redact(data, self.session.tracker._secrets)
@@ -134,9 +135,12 @@ class TextState:
             "flow_visit_started",
             "interruption",
             "diagnostic",
-            "tool_context_delivery",
+            "tool_result_context_updated",
+            "tool_result_consumed",
+            "flow_visit_ended",
             "classifier_result",
-            "classifier_context_delivery",
+            "classifier_context_updated",
+            "classifier_result_consumed",
         }:
             self.schedule(self.record("evidence", record))
         if record["kind"] == "tool_started":
@@ -161,6 +165,11 @@ class TextState:
             )
 
     async def failure(self, stage, message, diagnostic_id=None):
+        # Preserve pipeline evidence, but do not replace the actionable provider
+        # error with generic shutdown consequences in the chat.
+        if stage == "runtime" and self.failure_reported:
+            return
+        self.failure_reported = True
         payload = {
             "stage": stage,
             "message": message,
@@ -227,6 +236,7 @@ class TextState:
             {
                 "safe": safe,
                 "messages": context,
+                "dialogue": deepcopy(host.tracker.dialogue),
                 "node": host.flow.current_node,
                 "state": deepcopy(host.flow.state),
                 "exchange_count": host._exchange_count,
@@ -238,8 +248,10 @@ class TextState:
         self.session.wake.set()
 
     async def interrupt(self):
-        if self.session.host and self.session.host.worker:
-            await self.session.host.worker.queue_frame(InterruptionFrame())
+        host = self.session.host
+        generating = self.active is not None or bool(host and host.tracker._active_tools)
+        if generating and host and host.worker:
+            await host.worker.queue_frame(InterruptionFrame())
             await self.complete("interrupted")
 
     async def command(self, body):
@@ -393,6 +405,7 @@ async def run_text(session):
             await host.flow.initialize(node)
             host.flow._classifier_runner = classifier
             host.context.set_messages(deepcopy(checkpoint["messages"]))
+            host.tracker.dialogue = deepcopy(checkpoint.get("dialogue", []))
             host.pending_context = deepcopy(checkpoint.get("pending_context", {}))
             host._exchange_count = checkpoint.get("exchange_count", 0)
         else:
@@ -412,6 +425,21 @@ async def run_text(session):
                         },
                     ],
                 }
+            # Groq/Qwen needs a user query even for the agent's first response.
+            # This control instruction is context, never a fabricated caller message.
+            if node.get("respond_immediately", True) and not any(
+                message.get("role") == "user" for message in node.get("task_messages", [])
+            ):
+                node = {
+                    **node,
+                    "task_messages": [
+                        *node.get("task_messages", []),
+                        {
+                            "role": "user",
+                            "content": "Runtime start instruction: open this test conversation using the configured opening for this node. This is not caller speech and confirms no caller facts or tool outcomes.",
+                        },
+                    ],
+                }
             await host.flow.initialize(node)
         state.ready.set()
         state.emit({"type": "state", "state": "connected"})
@@ -421,6 +449,12 @@ async def run_text(session):
             raise RuntimeError("Text pipeline failed")
         session.termination.pipeline_finished()
         state.ended = not state.paused
+    except TimeoutError:
+        await state.failure(
+            "limit",
+            "The text session reached its maximum duration. Resume from a safe checkpoint or start a new conversation.",
+        )
+        session.termination.request("duration_limit")
     except asyncio.CancelledError:
         if not state.ended and not state.paused:
             await state.failure(
@@ -430,12 +464,20 @@ async def run_text(session):
     except Exception:
         import sys
 
+        from pydantic import ValidationError
         from voice_shared.logging import exception_event
 
         diagnostic = exception_event("voice-runtime", sys.exception())
+        configuration_error = (
+            isinstance(sys.exception(), ValidationError) and not state.ready.is_set()
+        )
         await state.failure(
-            "runtime",
-            "The text pipeline failed. Inspect diagnostics or start a new conversation.",
+            "configuration" if configuration_error else "runtime",
+            (
+                "Saved configuration failed runtime validation. Review flow transitions and tool routing, then start a new conversation."
+                if configuration_error
+                else "The text pipeline failed. Inspect diagnostics or start a new conversation."
+            ),
             diagnostic if isinstance(diagnostic, str) else None,
         )
         session.termination.request("pipeline_failure")

@@ -3,13 +3,22 @@
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, HttpUrl, ValidationError, field_validator, model_validator
+from pydantic_core import PydanticCustomError
 
 from .base import ConfigModel, Identifier
 from .cadence import ClassifierConfig, SummarizerConfig, lead_classifier_contract
 from .knowledge import RetrievalConfig
 from .prompt_references import tool_references
-from .providers import AudioConfig, CallLimits, MainLLMConfig, STTConfig, TTSConfig, VADConfig
+from .providers import (
+    AudioConfig,
+    CallLimits,
+    LLMConfig,
+    MainLLMConfig,
+    STTConfig,
+    TTSConfig,
+    VADConfig,
+)
 from .tools import ToolBinding
 
 
@@ -272,6 +281,31 @@ class CallbackSchedulingConfig(ConfigModel):
         return self
 
 
+class ComposerTemplateConfig(ConfigModel):
+    system_prompt: str = Field(min_length=1, max_length=12000)
+    required_urls: list[HttpUrl] = Field(default_factory=list)
+
+    @field_validator("required_urls")
+    @classmethod
+    def secure_urls(cls, urls: list[HttpUrl]) -> list[HttpUrl]:
+        if any(url.scheme != "https" or url.username or url.password for url in urls):
+            raise ValueError("composer required URLs must be public HTTPS links")
+        return urls
+
+
+class ComposerConfig(ConfigModel):
+    enabled: bool = False
+    model: LLMConfig = Field(default_factory=lambda: LLMConfig(temperature=0.2, max_tokens=300))
+    timeout_secs: float = Field(default=20, gt=0, le=60)
+    templates: dict[Identifier, ComposerTemplateConfig] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def valid_templates(self):
+        if self.enabled and not self.templates:
+            raise ValueError("enabled composer requires at least one WhatsApp template prompt")
+        return self
+
+
 class AgentConfig(ConfigModel):
     name: str = Field(min_length=1)
     system_prompt: str = ""
@@ -291,7 +325,7 @@ class AgentConfig(ConfigModel):
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     stt: STTConfig = Field(default_factory=STTConfig)
     credential_refs: dict[
-        Literal["stt", "llm", "llm_fallback", "tts", "classifier", "summarizer", "embedding"],
+        Literal["stt", "llm", "llm_fallback", "tts", "classifier", "summarizer", "embedding", "composer"],
         Identifier,
     ] = Field(default_factory=dict)
     llm: MainLLMConfig = Field(default_factory=MainLLMConfig)
@@ -301,13 +335,16 @@ class AgentConfig(ConfigModel):
     call_limits: CallLimits = Field(default_factory=CallLimits)
     context: ContextConfig = Field(default_factory=ContextConfig)
     classifier: ClassifierConfig = Field(default_factory=ClassifierConfig)
+    composer: ComposerConfig = Field(default_factory=ComposerConfig)
     callback_scheduling: CallbackSchedulingConfig = Field(default_factory=CallbackSchedulingConfig)
     pipeline_logs: Literal["inherit", "enabled", "disabled"] = "inherit"
 
     @model_validator(mode="after")
     def binding_references_exist(self):
+        if set(self.composer.templates) - set(self.tool_bindings):
+            raise ValueError("composer prompt references an unbound tool")
         references = set(self.background_hooks)
-        for node in self.flow.nodes:
+        for node_index, node in enumerate(self.flow.nodes):
             references.update(node.tool_bindings + node.entry_actions + node.exit_actions)
             for function in node.functions:
                 if function.name == "change_node":
@@ -323,21 +360,48 @@ class AgentConfig(ConfigModel):
                     if not isinstance(handler, str) or not handler:
                         raise ValueError("function actions require a handler")
                     references.add(handler)
-            prompt_texts = [node.prompt]
-            prompt_texts.extend(
-                text for text in (node.role_prompt, node.role_message) if text is not None
-            )
-            prompt_texts.extend(message.content for message in node.task_messages)
-            unbound = set().union(*(tool_references(text) for text in prompt_texts))
-            unbound -= (
+            available = (
                 set(node.tool_bindings)
                 | {function.name for function in self.flow.global_functions}
                 | {function.name for function in node.functions}
+                | {f"go_to_{target}" for target in node.transitions}
+                | {
+                    f"record_{slot.key}"
+                    for slot in self.fact_slots
+                    if not slot.nodes or node.id in slot.nodes
+                }
             )
-            if unbound:
-                raise ValueError(
-                    f"unbound prompt tool references in node '{node.id}': {sorted(unbound)}"
+            prompt_fields = [
+                ("prompt", node.prompt),
+                ("role_prompt", node.role_prompt),
+                ("role_message", node.role_message),
+            ]
+            prompt_fields.extend(
+                (f"task_messages.{index}", message.content)
+                for index, message in enumerate(node.task_messages)
+            )
+            errors = []
+            for field, text in prompt_fields:
+                unbound = tool_references(text or "") - available
+                if not unbound:
+                    continue
+                loc = ("flow", "nodes", node_index)
+                if field.startswith("task_messages."):
+                    loc += ("task_messages", int(field.split(".")[1]), "content")
+                else:
+                    loc += (field,)
+                scoped_fact = unbound & {f"record_{slot.key}" for slot in self.fact_slots}
+                code = "fact_tool_unavailable" if scoped_fact else "unbound_prompt_tool"
+                errors.append(
+                    {
+                        "type": PydanticCustomError(
+                            code, "unbound prompt tool references: tool unavailable in this node"
+                        ),
+                        "loc": loc,
+                    }
                 )
+            if errors:
+                raise ValidationError.from_exception_data(type(self).__name__, errors)
         if references - self.tool_bindings.keys():
             raise ValueError(
                 f"unknown tool bindings: {sorted(references - self.tool_bindings.keys())}"

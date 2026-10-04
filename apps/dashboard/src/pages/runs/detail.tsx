@@ -162,6 +162,9 @@ export function RunDetailPage() {
       : null;
   const llmSpans =
     timeline?.spans.filter((span) => span.category === "llm") ?? [];
+  const composerSpans =
+    timeline?.spans.filter((span) => span.category === "composer") ?? [];
+  const composerDuration = composerSpans.reduce((sum, span) => sum + (span.duration_ms ?? 0), 0);
   const llmFirstToken =
     llmSpans
       .filter((span) => span.ttfb_ms != null)
@@ -304,6 +307,10 @@ export function RunDetailPage() {
               <span>
                 Provider operations <strong>{timeline.spans.length}</strong>
               </span>
+              {composerSpans.length > 0 && <span>
+                WhatsApp composer <strong>{composerSpans.length}</strong>
+                {composerDuration > 0 ? ` · ${duration(composerDuration)} total` : ""}
+              </span>}
               <span>
                 LLM calls <strong>{llmSpans.length}</strong>
               </span>

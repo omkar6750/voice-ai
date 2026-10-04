@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/message-scroller";
 import {
   clock,
+  duration,
   consumingLlm,
   deliveryFor,
   resultsFor,
@@ -46,8 +47,11 @@ function ToolActivity({
   const asyncEvents = timeline.context_events.filter(
     (event) => event.tool_invocation_id === tool.id,
   );
+  const composerSpans = timeline.spans.filter(
+    (span) => span.category === "composer" && span.attributes?.tool_invocation_id === tool.id,
+  );
   return (
-    <Message align="end">
+    <Message align="start">
       <MessageAvatar>
         <Wrench aria-hidden="true" className="size-4" />
       </MessageAvatar>
@@ -61,12 +65,12 @@ function ToolActivity({
           </p>
         )}
         {whatsappReceiptHistory(tool).length > 0 && (
-          <p className="max-w-full text-right text-xs text-muted-foreground">
+          <p className="max-w-full text-left text-xs text-muted-foreground">
             Delivery events: {whatsappReceiptHistory(tool).join(" → ")}
           </p>
         )}
         {asyncEvents.map((event) => (
-          <p key={event.id} className="text-right text-xs text-muted-foreground">
+          <p key={event.id} className="text-left text-xs text-muted-foreground">
             {event.source.replaceAll("_", " ")} · {event.status.replaceAll("_", " ")}
             {event.delivered_at ? " · added to context" : " · not added to context"}
             {event.consumed_at ? " · consumed by LLM" : " · not consumed by LLM"}
@@ -75,7 +79,19 @@ function ToolActivity({
               : ""}
           </p>
         ))}
-        <Bubble align="end" variant="secondary">
+        {composerSpans.map((span) => (
+          <Button
+            key={span.id}
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-auto max-w-full justify-start px-2 text-left text-xs text-primary hover:bg-primary/5 hover:text-primary"
+            onClick={() => onSelect({ kind: "span", id: span.id })}
+          >
+            WhatsApp composer · {span.status.replaceAll("_", " ")} · {duration(span.duration_ms)}
+          </Button>
+        ))}
+        <Bubble align="start" variant="secondary">
           <BubbleContent asChild>
             <button
               type="button"
@@ -94,7 +110,7 @@ function ToolActivity({
           return (
             <div
               key={result.id}
-              className="flex max-w-full flex-col items-end gap-1"
+              className="flex max-w-full flex-col items-start gap-1"
             >
               <Button
                 variant="ghost"
@@ -192,7 +208,7 @@ export function Transcript({
                         return (
                           <Message
                             key={message.id}
-                            align={agent ? "end" : "start"}
+                            align={agent ? "start" : "end"}
                           >
                             <MessageAvatar>
                               {agent ? (
@@ -210,7 +226,7 @@ export function Transcript({
                                 {clock(message.source_at ?? message.created_at)}
                               </MessageHeader>
                               <Bubble
-                                align={agent ? "end" : "start"}
+                                align={agent ? "start" : "end"}
                                 variant={agent ? "default" : "outline"}
                               >
                                 <BubbleContent asChild>
@@ -239,7 +255,7 @@ export function Transcript({
                         );
                       })}
                       {tools.length > 0 && assistant && (
-                        <p className="text-right text-xs text-muted-foreground">
+                        <p className="text-left text-xs text-muted-foreground">
                           Tool activity in this exchange. Exact message link not
                           recorded.
                         </p>

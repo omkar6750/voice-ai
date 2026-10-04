@@ -118,6 +118,11 @@ def stage_providers(snapshot: dict) -> dict[str, str]:
         result["summarizer"] = (summary.get("model") or {}).get(
             "provider", result.get("llm", "groq")
         )
+    composer = snapshot.get("composer") or {}
+    if composer.get("enabled"):
+        result["composer"] = (composer.get("model") or {}).get(
+            "provider", result.get("llm", "groq")
+        )
     if snapshot.get("knowledge_base_ids"):
         result["embedding"] = "gemini"
     return result

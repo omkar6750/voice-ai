@@ -128,6 +128,11 @@ async def test_text_pipeline_stream_context_and_checkpoint_without_speech(text_s
     session.task = asyncio.create_task(run_text(session))
     await wait_for(lambda: session.text.checkpoint and session.text.checkpoint.get("safe"))
     assert session.host.capture is None
+    assert session.host.worker._idle_timeout_secs is None
+    assert any(
+        message.get("role") == "user" and "Runtime start instruction:" in message.get("content", "")
+        for message in llms[0].inputs[0]
+    )
     assert any(m.get("content") == "Hello there." for m in session.text.checkpoint["messages"])
     assert any(e["type"] == "delta" for e in session.text.replay)
     await session.text.command(
@@ -197,6 +202,10 @@ async def test_resume_does_not_regenerate_or_replay(text_session):
             {"role": "user", "content": "Previous question"},
             {"role": "assistant", "content": "Previous answer"},
         ],
+        "dialogue": [
+            {"role": "user", "text": "Full caller history before a context reset"},
+            {"role": "assistant", "text": "Full agent reply before a context reset"},
+        ],
         "command_ids": ["already-sent"],
     }
     session.task = asyncio.create_task(run_text(session))
@@ -204,6 +213,10 @@ async def test_resume_does_not_regenerate_or_replay(text_session):
     await asyncio.sleep(0.2)
     assert not llms[0].inputs
     assert session.host.context.get_messages()[-1]["content"] == "Previous answer"
+    assert session.host.tracker.plain_transcript() == (
+        "Caller: Full caller history before a context reset\n"
+        "Agent: Full agent reply before a context reset"
+    )
     await session.text.command({"type": "user_message", "id": "already-sent", "text": "Duplicate"})
     assert not llms[0].inputs
     await session.text.command({"type": "user_message", "id": str(uuid4()), "text": "Continue"})
@@ -295,3 +308,64 @@ def test_runtime_text_websocket_single_use_ticket(tmp_path, monkeypatch):
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect(path, headers={"origin": "http://localhost:5174"}):
                 pass
+
+
+async def test_setup_validation_failure_is_visible_without_sensitive_exception(text_session):
+    from voice_shared.compiler import compile_flow_json
+
+    session, _, _, _ = text_session
+    compiled = compile_flow_json(session.request.snapshot)
+    compiled["initial_node"] = "missing_node"
+    session.request.snapshot["_compiled_flow"] = compiled
+    session.task = asyncio.create_task(run_text(session))
+    await wait_for(session.closed.is_set)
+    failures = [e for e in session.text.replay if e["type"] == "error"]
+    assert failures
+    assert failures[-1]["stage"] == "configuration"
+    assert "runtime validation" in failures[-1]["message"]
+    assert failures[-1]["diagnostic_id"]
+    assert "fake-provider-key" not in json.dumps(failures)
+
+
+async def test_provider_error_frame_is_persisted_once():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from pipecat.frames.frames import ErrorFrame
+    from voice_runtime.execution.observer import EvidenceObserver
+
+    llm, tracker = object(), Mock()
+    observer = EvidenceObserver(
+        tracker, llm=llm, stt=None, tts=None, llm_model="test", stt_model="", tts_model=""
+    )
+    frame = ErrorFrame(error="Provider request failed")
+    data = SimpleNamespace(frame=frame, source=object())
+    for _ in range(4):
+        await observer.on_push_frame(data)
+    assert tracker.diagnostic.call_count == 1
+
+
+async def test_generic_pipeline_failure_does_not_repeat_provider_error(text_session):
+    session, _, _, _ = text_session
+    await session.text.failure("provider", "Provider rejected context", "diagnostic-primary")
+    await session.text.failure("runtime", "Pipecat pipeline failed", "diagnostic-secondary")
+    failures = [event for event in session.text.replay if event["type"] == "error"]
+    assert len(failures) == 1
+    assert failures[0]["diagnostic_id"] == "diagnostic-primary"
+
+
+async def test_completed_turn_does_not_create_interruption(text_session):
+    session, _, llms, _ = text_session
+    session.task = asyncio.create_task(run_text(session))
+    await wait_for(lambda: session.text.checkpoint and session.text.active is None)
+    before = len(
+        [r for r in session.text.records if r.get("payload", {}).get("kind") == "interruption"]
+    )
+    await session.text.command(
+        {"type": "user_message", "id": str(uuid4()), "text": "A normal next turn"}
+    )
+    await wait_for(lambda: len(llms[0].inputs) >= 2 and session.text.active is None)
+    after = len(
+        [r for r in session.text.records if r.get("payload", {}).get("kind") == "interruption"]
+    )
+    assert after == before

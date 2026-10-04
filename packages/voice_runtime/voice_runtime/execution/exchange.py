@@ -54,6 +54,14 @@ class ExchangeTracker:
         self._active_operations: dict[str, dict[str, Any]] = {}
         self._classifier_result_metadata: dict[str, dict[str, Any]] = {}
         self._pending_classifier_results: list[str] = []
+        # Finalized caller/agent speech, independent of the compacted LLM context.
+        self.dialogue: list[dict[str, str]] = []
+
+    def plain_transcript(self) -> str:
+        return "\n".join(
+            f"{'Caller' if turn['role'] == 'user' else 'Agent'}: {turn['text']}"
+            for turn in self.dialogue
+        )
 
     def emit(
         self,
@@ -456,6 +464,7 @@ class ExchangeTracker:
             source_timestamp=timestamp,
             finalized=True,
         )
+        self.dialogue.append({"role": "user", "text": content})
         return exchange
 
     def assistant_started(self) -> str:
@@ -480,6 +489,7 @@ class ExchangeTracker:
             finalized=True,
             interrupted=interrupted,
         )
+        self.dialogue.append({"role": "assistant", "text": content})
 
     def start_operation(self, name: str, category: str, **attributes: Any) -> dict[str, Any]:
         provider = attributes.pop("provider", None)

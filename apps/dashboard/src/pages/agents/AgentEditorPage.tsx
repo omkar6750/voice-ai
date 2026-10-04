@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ChevronDown, Settings2 } from "lucide-react";
@@ -9,7 +9,7 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import { useApi } from "@/app/api";
+import { ApiError, useApi } from "@/app/api";
 import { useOrganizationAccess } from "@/app/access";
 import {
   LoadState,
@@ -26,6 +26,7 @@ import { ChatTestPanel } from "./ChatTestPanel";
 import { AudioPanel } from "./AudioPanel";
 import { CallbackSchedulingPanel } from "./CallbackSchedulingPanel";
 import { ClassifierPanel } from "./ClassifierPanel";
+import { ComposerPanel } from "./ComposerPanel";
 import { ContextPanel } from "./ContextPanel";
 import { FlowPanel } from "./FlowPanel";
 import { KnowledgePanel } from "./KnowledgePanel";
@@ -47,6 +48,7 @@ const sections = [
   "Models",
   "Audio",
   "Classifier",
+  "Composer",
   "Context",
   "Tools",
   "Knowledge",
@@ -59,36 +61,46 @@ export function AgentEditorPage() {
   const [params, setParams] = useSearchParams();
   const api = useApi();
   const { canManage } = useOrganizationAccess();
-  const resource = useResource<{ versions: AgentVersion[] }>(
-    `/agents/${agentId}/versions`,
+  const resource = useResource<AgentVersion>(
+    `/agent-versions/${versionId}`,
+    Boolean(versionId),
   );
   const providers = useResource<ProviderCatalog>("/providers");
   const tools = useResource<{ tools: ToolSummary[] }>("/tools");
   const variables = useResource<ContactVariablesResponse>(
     "/contacts/variables",
   );
-  const stored = resource.data?.versions.find((item) => item.id === versionId);
+  const stored = resource.data;
+  const initializedVersion = useRef<string | null>(null);
+  const baseVersion = useRef<AgentVersion | null>(null);
   const [draft, setDraft] = useState<AgentConfig | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveDiagnostic, setSaveDiagnostic] =
+    useState<ApiError["diagnostic"]>();
   const section =
     sections.find((item) => item.toLowerCase() === params.get("section")) ??
     "Flow";
 
   useEffect(() => {
-    if (stored) {
+    if (!stored) return;
+    if (initializedVersion.current !== stored.id) {
+      initializedVersion.current = stored.id;
+      baseVersion.current = stored;
       setDraft(stored.config);
       setNote(stored.note ?? "");
       setConflict(false);
+    } else if (baseVersion.current?.revision !== stored.revision) {
+      setConflict(true);
     }
   }, [stored]);
   const dirty = Boolean(
     stored &&
     draft &&
-    (JSON.stringify(draft) !== JSON.stringify(stored.config) ||
-      note !== (stored.note ?? "")),
+    (JSON.stringify(draft) !== JSON.stringify(baseVersion.current?.config) ||
+      note !== (baseVersion.current?.note ?? "")),
   );
   useEffect(() => {
     if (!dirty) return;
@@ -145,7 +157,7 @@ export function AgentEditorPage() {
   }
 
   async function save() {
-    if (!stored || !draft || stored.status !== "draft") return;
+    if (!stored || !draft || stored.status !== "draft" || conflict) return;
     if (unboundToolReferences.length > 0) {
       toast.error(
         `Cannot save draft: flow references unbound tools [${unboundToolReferences.join(", ")}]. Remove them or bind them in Tools first.`,
@@ -154,18 +166,23 @@ export function AgentEditorPage() {
     }
     setBusy(true);
     setSaveError(null);
+    setSaveDiagnostic(undefined);
     try {
       await api(`/agent-versions/${stored.id}`, {
         method: "PATCH",
         body: JSON.stringify({
-          revision: stored.revision,
+          revision: baseVersion.current?.revision,
           config: draft,
           note: note || null,
         }),
       });
       toast.success("Draft saved");
+      initializedVersion.current = null;
       await resource.reload();
     } catch (cause) {
+      setSaveDiagnostic(
+        cause instanceof ApiError ? cause.diagnostic : undefined,
+      );
       setSaveError(
         cause instanceof Error ? cause.message : "Could not save draft",
       );
@@ -241,6 +258,33 @@ export function AgentEditorPage() {
                 Save failed: {saveError}
               </p>
             )}
+            {saveError && saveDiagnostic?.diagnostic_id && (
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span>Stage: {saveDiagnostic.stage ?? "save"}</span>
+                {saveDiagnostic.timestamp && (
+                  <time dateTime={saveDiagnostic.timestamp}>
+                    {new Date(saveDiagnostic.timestamp).toLocaleString()}
+                  </time>
+                )}
+                <code>Diagnostic ID: {saveDiagnostic.diagnostic_id}</code>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    if (!navigator.clipboard) {
+                      toast.error("Copy the displayed diagnostic ID manually");
+                      return;
+                    }
+                    void navigator.clipboard
+                      .writeText(saveDiagnostic.diagnostic_id!)
+                      .catch(() => toast.error("Could not copy diagnostic ID"));
+                  }}
+                >
+                  Copy diagnostic ID
+                </Button>
+              </div>
+            )}
             {providers.error && (
               <p className="text-sm text-destructive">
                 Provider catalog unavailable: {providers.error}. Stored values
@@ -309,6 +353,7 @@ export function AgentEditorPage() {
                         "Models",
                         "Audio",
                         "Classifier",
+                        "Composer",
                         "Context",
                         "Logging",
                         "Callback Scheduling",
@@ -322,6 +367,7 @@ export function AgentEditorPage() {
                       "Models",
                       "Audio",
                       "Classifier",
+                      "Composer",
                       "Context",
                       "Logging",
                       "Callback Scheduling",
@@ -406,6 +452,14 @@ export function AgentEditorPage() {
                 config={draft}
                 change={setDraft}
                 providers={providers.data}
+                disabled={disabled}
+              />
+            )}
+            {section === "Composer" && (
+              <ComposerPanel
+                config={draft}
+                change={setDraft}
+                catalog={providers.data}
                 disabled={disabled}
               />
             )}

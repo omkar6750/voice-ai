@@ -80,5 +80,5 @@ export type ToolVersion = {
   id: string;
   version: number;
   status: string;
-  config: { name: string; description: string; kind: string };
+  config: { name: string; description: string; kind: string; handler?: string | null; whatsapp?: unknown };
 };

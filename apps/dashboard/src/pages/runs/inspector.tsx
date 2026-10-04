@@ -20,7 +20,7 @@ import {
 } from "./model";
 import type { RunDetail, Selection, Timeline } from "./types";
 
-function Value({
+export function Value({
   label,
   children,
 }: {
@@ -35,7 +35,7 @@ function Value({
   );
 }
 
-function Json({ label, value }: { label: string; value: unknown }) {
+export function Json({ label, value }: { label: string; value: unknown }) {
   return (
     <section className="flex min-w-0 flex-col gap-1">
       <h4 className="text-xs font-medium">{label}</h4>
@@ -175,14 +175,24 @@ function Evidence({
               {timeline.context_events.map((event) => (
                 <div key={event.id} className="rounded-md border p-3 text-xs">
                   <div className="flex justify-between gap-2">
-                    <span className="font-medium">{event.source.replaceAll("_", " ")}</span>
-                    <span className="capitalize text-muted-foreground">{event.status.replaceAll("_", " ")}</span>
+                    <span className="font-medium">
+                      {event.source.replaceAll("_", " ")}
+                    </span>
+                    <span className="capitalize text-muted-foreground">
+                      {event.status.replaceAll("_", " ")}
+                    </span>
                   </div>
-                  <p className="mt-1 text-muted-foreground">{stamp(event.occurred_at)}</p>
+                  <p className="mt-1 text-muted-foreground">
+                    {stamp(event.occurred_at)}
+                  </p>
                   <Json label="Outcome" value={event.payload} />
                   <dl className="mt-2">
-                    <Value label="Added to context">{stamp(event.delivered_at)}</Value>
-                    <Value label="Consumed by LLM">{stamp(event.consumed_at)}</Value>
+                    <Value label="Added to context">
+                      {stamp(event.delivered_at)}
+                    </Value>
+                    <Value label="Consumed by LLM">
+                      {stamp(event.consumed_at)}
+                    </Value>
                   </dl>
                 </div>
               ))}
@@ -318,12 +328,20 @@ function Evidence({
     const span = timeline.spans.find((item) => item.id === selection.id);
     if (!span) return null;
     const classifierResults = classifierResultsFor(timeline, span);
+    const composerInput = span.category === "composer" && span.input && typeof span.input === "object" && !Array.isArray(span.input)
+      ? span.input as Record<string, unknown> : null;
+    const composerTool = span.category === "composer"
+      ? timeline.tools.find((tool) => tool.id === span.attributes?.tool_invocation_id)
+      : null;
+    const composerDiagnostics = span.category === "composer"
+      ? diagnostics.filter((item) => item.metadata?.operation_id === span.id)
+      : [];
     return (
       <>
         <CardHeader>
-          <CardTitle>{span.name}</CardTitle>
+          <CardTitle>{span.category === "composer" ? "WhatsApp composer" : span.name}</CardTitle>
           <CardDescription>
-            {span.category} · {span.status}
+            {span.category === "composer" ? `Template message · ${span.status}` : `${span.category} · ${span.status}`}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
@@ -344,25 +362,62 @@ function Evidence({
             <Value label="Ended">{stamp(span.ended_at)}</Value>
             <Value label="Duration">{duration(span.duration_ms)}</Value>
             {span.ttfb_ms != null && (
-              <Value label={span.category === "llm" ? "First token" : "First byte"}>
+              <Value
+                label={span.category === "llm" ? "First token" : "First byte"}
+              >
                 {duration(span.ttfb_ms)}
               </Value>
             )}
-            {span.ttfa_ms != null && <Value label="First audio">{duration(span.ttfa_ms)}</Value>}
-            {span.prompt_tokens != null && <Value label="Input tokens">{span.prompt_tokens}</Value>}
-            {span.completion_tokens != null && <Value label="Output tokens">{span.completion_tokens}</Value>}
-            {span.total_tokens != null && <Value label="Total tokens">{span.total_tokens}</Value>}
-            {span.cache_read_input_tokens != null && <Value label="Cached input read">{span.cache_read_input_tokens}</Value>}
-            {span.cache_creation_input_tokens != null && <Value label="Cached input created">{span.cache_creation_input_tokens}</Value>}
-            {span.reasoning_tokens != null && <Value label="Reasoning tokens">{span.reasoning_tokens}</Value>}
-            {span.otel_trace_id && <Value label="OTel trace">{span.otel_trace_id}</Value>}
-            {span.otel_span_id && <Value label="OTel span">{span.otel_span_id}</Value>}
+            {span.ttfa_ms != null && (
+              <Value label="First audio">{duration(span.ttfa_ms)}</Value>
+            )}
+            {span.prompt_tokens != null && (
+              <Value label="Input tokens">{span.prompt_tokens}</Value>
+            )}
+            {span.category === "composer" && span.prompt_tokens == null && <Value label="Input tokens">Not reported by this adapter</Value>}
+            {span.completion_tokens != null && (
+              <Value label="Output tokens">{span.completion_tokens}</Value>
+            )}
+            {span.category === "composer" && span.completion_tokens == null && <Value label="Output tokens">Not reported by this adapter</Value>}
+            {span.total_tokens != null && (
+              <Value label="Total tokens">{span.total_tokens}</Value>
+            )}
+            {span.cache_read_input_tokens != null && (
+              <Value label="Cached input read">
+                {span.cache_read_input_tokens}
+              </Value>
+            )}
+            {span.cache_creation_input_tokens != null && (
+              <Value label="Cached input created">
+                {span.cache_creation_input_tokens}
+              </Value>
+            )}
+            {span.reasoning_tokens != null && (
+              <Value label="Reasoning tokens">{span.reasoning_tokens}</Value>
+            )}
+            {span.otel_trace_id && (
+              <Value label="OTel trace">{span.otel_trace_id}</Value>
+            )}
+            {span.otel_span_id && (
+              <Value label="OTel span">{span.otel_span_id}</Value>
+            )}
           </dl>
-          <Json label="Provider input / prompt" value={span.input} />
-          <Json
-            label="Provider output / reasoning if captured"
-            value={span.output}
-          />
+          {span.category === "composer" ? (
+            <>
+              <Json label="Composer system prompt" value={composerInput?.system_prompt} />
+              <Json label="Plain Caller/Agent transcript" value={composerInput?.transcript} />
+              <Json label="Template fields and required links" value={{ fields: composerInput?.template_fields, required_urls: composerInput?.required_urls }} />
+              <Json label="Composed template fields" value={span.output} />
+              <p className="text-xs text-muted-foreground">A composed message is only a draft. The linked tool records whether Meta accepted the send.</p>
+              {composerTool && <Button type="button" variant="outline" size="sm" onClick={() => onSelect({ kind: "tool", id: composerTool.id })}>View WhatsApp send result</Button>}
+              {composerDiagnostics.map((item) => <div key={item.diagnostic_id} className="border-l-2 border-destructive pl-3 text-xs"><p className="font-medium">{item.message}</p><p className="text-muted-foreground">Diagnostic ID: {item.diagnostic_id}</p></div>)}
+            </>
+          ) : (
+            <>
+              <Json label="Provider input / prompt" value={span.input} />
+              <Json label="Provider output / reasoning if captured" value={span.output} />
+            </>
+          )}
           <Json label="Attributes" value={span.attributes} />
           {classifierResults.map((result) => {
             const delivery = classifierDeliveryFor(timeline, result);
@@ -479,13 +534,21 @@ function Evidence({
             .map((event) => (
               <div key={event.id} className="rounded-md border p-3 text-xs">
                 <div className="flex justify-between gap-2">
-                  <span className="font-medium">{event.source.replaceAll("_", " ")}</span>
-                  <span className="capitalize text-muted-foreground">{event.status.replaceAll("_", " ")}</span>
+                  <span className="font-medium">
+                    {event.source.replaceAll("_", " ")}
+                  </span>
+                  <span className="capitalize text-muted-foreground">
+                    {event.status.replaceAll("_", " ")}
+                  </span>
                 </div>
                 <Json label="Outcome" value={event.payload} />
                 <dl>
-                  <Value label="Added to context">{stamp(event.delivered_at)}</Value>
-                  <Value label="Consumed by LLM">{stamp(event.consumed_at)}</Value>
+                  <Value label="Added to context">
+                    {stamp(event.delivered_at)}
+                  </Value>
+                  <Value label="Consumed by LLM">
+                    {stamp(event.consumed_at)}
+                  </Value>
                 </dl>
               </div>
             ))}
@@ -500,6 +563,11 @@ function Evidence({
               Originating LLM operation
             </Button>
           )}
+          {timeline.spans.filter((span) => span.category === "composer" && span.attributes?.tool_invocation_id === tool.id).map((span) => (
+            <Button key={span.id} type="button" variant="outline" size="sm" onClick={() => onSelect({ kind: "span", id: span.id })}>
+              Composer · {span.status} · {duration(span.duration_ms)}
+            </Button>
+          ))}
           <Json label="Arguments" value={tool.arguments} />
           <Json label="Final result" value={tool.result} />
           {resultsFor(timeline, tool).map((result) => (
