@@ -28,7 +28,7 @@ services or live capacity.
 
 - [ ] Parent wires hosted admission, one concurrent call and 600-second duration settings;
   tests prove rejection before DB claim/provider effects with hosted calls disabled.
-- [ ] Parent enforces browser/chat-only transport, modem denial and all automation off;
+- [ ] Parent enforces browser/Twilio calls and chat tests, modem denial and all automation off;
   rejects missing production credentials and dev-only bypasses.
 - [x] Docker lock freshness/frozen install, linux/amd64 image build and nonroot startup
   pass; record Python/uv versions, dependency lock SHA and resolved base-image digests.
@@ -53,7 +53,7 @@ services or live capacity.
 
 ## Persistence and ownership gates
 
-- [ ] One combined browser/chat admission race, duplicate callbacks, expired leases,
+- [ ] One combined browser/Twilio/chat admission race, duplicate callbacks, expired leases,
   old/new process overlap and stale owners produce no second external attempt.
 - [ ] Restart/crash leaves unknown external outcomes reserved and evidence incomplete;
   explicit reconciliation releases safely without redial or fabricated success.
@@ -75,6 +75,8 @@ services or live capacity.
   delivered evidence. No promise of recovering an ephemeral local spool is made.
 
 ## Actual Render measurements before enabling calls
+
+This release tests browser and chat only. Twilio support is retained, but live Twilio testing is deferred because no account is available; it must not be reported as verified.
 
 Use approved synthetic browser audio first; the test operator must explicitly authorize
 browser audio and chat provider traffic and confirm existing free allowance. Never call a contact

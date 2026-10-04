@@ -102,15 +102,18 @@ async def test_production_rejects_modem_before_hardware(settings):
         await m.close()
 
 
-async def test_production_rejects_twilio_before_session_creation(settings):
+async def test_production_prepares_twilio_without_dialing(settings):
     settings.env = "production"
     settings.hosted_calls_enabled = True
+    settings.runtime_public_base_url = "https://runtime.example.com"
     m = await manager_for(settings)
     try:
-        with pytest.raises(HTTPException) as error:
-            await m.prepare(prepared("twilio"))
-        assert error.value.status_code == 409
-        assert not m.sessions
+        request = prepared("twilio").model_copy(
+            update={"api_public_base_url": "https://api.example.com"}
+        )
+        session = await m.prepare(request)
+        assert session.state == "prepared"
+        assert session.task is None
     finally:
         await m.close()
 

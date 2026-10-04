@@ -12,13 +12,13 @@ def test_hosted_calls_fail_closed_until_capacity_accepted():
     assert error.value.status_code == 503
 
 
-def test_hosted_profile_only_admits_browser():
+def test_hosted_profile_admits_browser_and_twilio_but_not_modem():
     settings = Settings(_env_file=None, env="production", hosted_calls_enabled=True)
-    require_hosted_call_admission("browser", settings)
-    for provider in ("twilio", "sim7600"):
-        with pytest.raises(HTTPException) as error:
-            require_hosted_call_admission(provider, settings)
-        assert error.value.status_code == 409
+    for provider in ("browser", "twilio"):
+        require_hosted_call_admission(provider, settings)
+    with pytest.raises(HTTPException) as error:
+        require_hosted_call_admission("sim7600", settings)
+    assert error.value.status_code == 409
 
 
 @pytest.mark.parametrize("env", ["production", "staging"])

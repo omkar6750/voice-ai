@@ -63,7 +63,7 @@ still limit demo reliability. No production uptime guarantee is implied.
 ## Local activation
 
 Local activation was authorized on 2026-10-02. Development API routes now dispatch
-to the separate runtime. Production now always uses that boundary; hosted transport admission is browser/chat only. No services were deployed.
+to the separate runtime. Production now always uses that boundary; hosted execution supports browser, chat and Twilio. Live release testing covers browser/chat; Twilio remains unverified without an account. No services were deployed.
 The local database on localhost:55433/voice migrated through 0045.
 
 The primary checkout already owns ports 8000/5173. This testing worktree runs at:

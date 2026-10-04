@@ -117,8 +117,6 @@ class Manager:
         )
         if modem_config and not self.settings.local:
             raise HTTPException(404, "SIM7600 unavailable in hosted environments")
-        if not self.settings.local and request.channel not in {"browser", "text_test"}:
-            raise HTTPException(409, "Hosted runtime supports browser calls and chat tests only")
         if not self.settings.local and not self.settings.hosted_calls_enabled:
             raise HTTPException(503, "Hosted runtime disabled pending acceptance")
         if request.channel == "twilio":

@@ -20,7 +20,7 @@ fences, evidence and artifact status; the existing hosted plan uses Neon for tha
 ## Service topology and constraints
 
 1. Keep the API and runtime as distinct Render web services in the same region.
-   The dashboard reaches only the API. Browser WebSockets and chat WebSockets reach
+   The dashboard reaches only the API. Browser/chat WebSockets and Twilio media reach
    the runtime public URL through the API-issued ticket/URL flow; API-to-runtime
    control uses its separate server-side token. Bind to `$PORT`, expose `/health`,
    and use one runtime worker. Keep SIM7600 on the Windows edge; the Linux container
@@ -65,7 +65,7 @@ fences, evidence and artifact status; the existing hosted plan uses Neon for tha
    controlled pre-deploy operation, never at runtime startup.
 3. Build and test the exact linux/amd64 image, OpenAPI dashboard client, focused
    auth/runtime/storage contracts and migration head. Deploy with admission off.
-4. Test a browser call and a chat conversation only. Twilio and modem admission are rejected on hosted services. Measure
+4. Test a browser call and a chat conversation only. Hosted Twilio support remains available but live Twilio acceptance is deferred because no account is available. Hosted modem admission remains rejected. Measure
    model-loaded RSS, CPU/event-loop lag, cold start, speech latency, WebSocket
    interruption, ten-minute timeout, shutdown and forced restart. Verify a real
    Cloudinary recording and Supabase diagnostic can be accessed only through an
