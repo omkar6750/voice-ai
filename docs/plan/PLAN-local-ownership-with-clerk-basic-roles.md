@@ -164,3 +164,11 @@ conversion above. The live development instance currently uses the custom
 membership and pending invitation has been reconciled. Ownership and platform
 transfer workflows remain separate follow-up work; do not infer either transfer
 from an admin role change.
+
+The read-only cutover audit could not finish on 2026-10-04: the configured
+local database at `localhost:55432/voice` refused connections, Docker's daemon
+was stopped, and Clerk CLI doctor reported an expired authentication token.
+The linked Clerk application has a development instance but no production
+instance. No live creator role, membership, invitation or database assignment
+was changed. Resume with an available database and refreshed Clerk CLI login,
+then compare the exact owner IDs before converting the custom role.
