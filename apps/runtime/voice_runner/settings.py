@@ -5,6 +5,15 @@ from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+class DeploymentConfigurationError(ValueError):
+    """Static setting identity for diagnostics, without its secret value."""
+
+    def __init__(self, component: str, category: str):
+        self.component = component
+        self.category = category
+        super().__init__(f"{component}: {category}")
+
+
 class RuntimeSettings(BaseSettings):
     runtime_min_free_spool_bytes: int = Field(default=512 * 1024 * 1024, ge=1)
     env: str = "dev"
@@ -38,16 +47,19 @@ class RuntimeSettings(BaseSettings):
         return self.env.casefold() in {"dev", "development", "local"}
 
     def validate_deployment(self):
-        if (
-            not self.runtime_control_token.get_secret_value()
-            or not self.runtime_service_token.get_secret_value()
+        for component, value in (
+            ("VOICE_RUNTIME_CONTROL_TOKEN", self.runtime_control_token.get_secret_value()),
+            ("VOICE_RUNTIME_SERVICE_TOKEN", self.runtime_service_token.get_secret_value()),
         ):
-            raise ValueError("Runtime control and service tokens are required")
-        if not self.local and (
-            not self.api_base_url.startswith("https://")
-            or not self.runtime_public_base_url.startswith("https://")
-        ):
-            raise ValueError("Hosted runtime requires HTTPS service URLs")
+            if not value.strip():
+                raise DeploymentConfigurationError(component, "required")
+        if not self.local:
+            for component, value in (
+                ("VOICE_API_BASE_URL", self.api_base_url),
+                ("VOICE_RUNTIME_PUBLIC_BASE_URL", self.runtime_public_base_url),
+            ):
+                if not value.startswith("https://"):
+                    raise DeploymentConfigurationError(component, "https_required")
         Path(self.runtime_spool_dir).mkdir(parents=True, exist_ok=True)
 
 

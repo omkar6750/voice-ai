@@ -21,7 +21,7 @@ from voice_shared.logging import HttpLoggingMiddleware, configure, exception_eve
 
 from voice_runner.capacity import Capacity
 from voice_runner.session import Session
-from voice_runner.settings import get_settings
+from voice_runner.settings import DeploymentConfigurationError, RuntimeSettings, get_settings
 
 configure_safe_logging()
 
@@ -263,22 +263,43 @@ class Manager:
 
 @asynccontextmanager
 async def lifespan(app):
-    settings = get_settings()
-    settings.validate_deployment()
-    install("voice-runtime")
-    configure(
-        "voice-runtime",
-        "data/logs" if settings.local else None,
-        env_files=settings.model_config.get("env_file", ()),
-    )
     from voice_runtime.safe_logs import set_event_sink
     from voice_shared.logging import emit
 
-    set_event_sink(lambda event: emit({"service": "voice-runtime", **event}))
-    from voice_runtime import perf_diagnostics
+    try:
+        settings = get_settings()
+        # Configure sanitized diagnostics before validation can abort startup.
+        configure(
+            "voice-runtime",
+            "data/logs" if settings.local else None,
+            env_files=settings.model_config.get("env_file", ()),
+        )
+        settings.validate_deployment()
+        install("voice-runtime")
+        from voice_runtime import perf_diagnostics
 
-    perf_diagnostics.configure(env=settings.env, enabled=settings.debug_perf)
-    manager = Manager(settings)
+        perf_diagnostics.configure(env=settings.env, enabled=settings.debug_perf)
+        manager = Manager(settings)
+    except Exception as exc:
+        configure("voice-runtime", env_files=RuntimeSettings.model_config.get("env_file", ()))
+        diagnostic_id = exception_event("voice-runtime", exc, forward=False)
+        emit(
+            {
+                "service": "voice-runtime",
+                "event": "startup_failed",
+                "level": "ERROR",
+                "phase": "startup",
+                "diagnostic_id": diagnostic_id,
+                **(
+                    {"component": exc.component, "category": exc.category}
+                    if isinstance(exc, DeploymentConfigurationError)
+                    else {}
+                ),
+            },
+            forward=False,
+        )
+        raise
+    set_event_sink(lambda event: emit({"service": "voice-runtime", **event}))
     app.state.manager = manager
     monitor = asyncio.create_task(manager.capacity.monitor())
     loop = asyncio.get_running_loop()
