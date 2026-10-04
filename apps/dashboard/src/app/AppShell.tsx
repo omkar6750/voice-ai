@@ -21,6 +21,7 @@ import {
 import { lazy, Suspense, useState } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { AppRoutes } from "./AppRoutes";
+import { useAppContext } from "./app-context";
 import { clerkUrls } from "./clerk-config";
 import { OrganizationAccessContext, type OrganizationAccess } from "./access";
 import {
@@ -288,26 +289,22 @@ export function AppShell({
   supportOrganization?: { id: string; name: string };
   onExitSupport?: () => void;
 }) {
-  const { orgId, orgRole } = useAuth();
-  const canCall = Boolean(supportOrganization) || Boolean(orgId);
-  const role: OrganizationAccess["role"] =
-    supportOrganization || orgRole === "org:owner" || orgRole === "org:admin"
-      ? "org:admin"
-      : orgRole === "org:member"
-        ? "org:member"
-        : null;
+  const { orgId } = useAuth();
+  const appContext = useAppContext(Boolean(orgId));
+  const capabilities = appContext.data?.capabilities ?? [];
+  const canCall = Boolean(supportOrganization) || capabilities.includes("browser_test");
+  const role: OrganizationAccess["role"] = supportOrganization
+    ? "org:admin"
+    : appContext.data?.active_org_role ?? null;
+  const canManage = Boolean(supportOrganization) || capabilities.includes("configure");
+  const canDial = !supportOrganization && canManage;
   const access = {
     role,
-    isOwner: orgRole === "org:owner",
-    canManage: Boolean(supportOrganization) || role === "org:admin",
+    isOwner: !supportOrganization && appContext.data?.is_owner === true,
+    canManage,
     canUseBrowserTest: canCall,
-    canDial:
-      !supportOrganization &&
-      (orgRole === "org:owner" || orgRole === "org:admin"),
+    canDial,
   };
-  const canDial =
-    !supportOrganization &&
-    (orgRole === "org:owner" || orgRole === "org:admin");
   return (
     <OrganizationAccessContext.Provider value={access}>
       <SidebarProvider>

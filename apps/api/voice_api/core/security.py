@@ -77,7 +77,7 @@ async def require_organization_access(
         request.state.platform_support_session = token_hash
         bind_organization(session.sync_session, organization.id)
         return ClerkPrincipal(
-            user_id=principal.user_id, org_id=organization.clerk_org_id, org_role="org:owner"
+            user_id=principal.user_id, org_id=organization.clerk_org_id, org_role="org:admin"
         )
     if not principal.org_id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Organization access required")
@@ -114,7 +114,11 @@ async def require_organization_access(
         if not getattr(endpoint, "__allow_organization_member__", False):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Organization admin required")
     bind_organization(session.sync_session, organization_id)
-    return principal
+    return ClerkPrincipal(
+        user_id=principal.user_id,
+        org_id=principal.org_id,
+        org_role="org:admin" if membership.role == "org:owner" else membership.role,
+    )
 
 
 async def require_platform_admin_user(

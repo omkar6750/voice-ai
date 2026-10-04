@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import time
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel
@@ -12,6 +13,10 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.core.clerk_auth import ClerkPrincipal, require_clerk_user
+from voice_api.core.clerk_organizations import (
+    ClerkOrganizationDirectory,
+    get_clerk_organization_directory,
+)
 from voice_api.core.config import get_settings
 from voice_api.core.security import (
     allow_organization_member,
@@ -31,6 +36,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 Principal = Depends(require_clerk_user)
 Owner = Depends(require_legacy_data_access)
 Session = Depends(get_session)
+Directory = Depends(get_clerk_organization_directory)
 OrganizationAccess = Depends(require_organization_access)
 
 
@@ -100,6 +106,8 @@ class AppContextView(BaseModel):
     active_org_id: str | None
     active_org_name: str | None
     active_org_registered: bool
+    active_org_role: Literal["org:admin", "org:member"] | None
+    is_owner: bool
     platform_admin: bool
     user_disabled: bool
     can_create_org: bool
@@ -111,18 +119,24 @@ class AppContextView(BaseModel):
 async def app_context(
     principal: ClerkPrincipal = Principal,
     session: AsyncSession = Session,
+    directory: ClerkOrganizationDirectory = Directory,
 ) -> AppContextView:
     """Return only local product state for Clerk's current active org.
 
-    Clerk owns identity, memberships, and organization selection. This endpoint
-    deliberately does not call Clerk's Backend API or enumerate memberships.
-    Protected resource endpoints still perform their normal live membership
-    authorization checks.
+    Clerk owns identity, memberships, and organization selection. Resolve the
+    current membership live here as well; the token's role is never authority.
+    Protected resource endpoints repeat their own live authorization checks.
     """
+    # Await Clerk before opening a database read transaction.
+    membership = (
+        await directory.membership(principal.org_id, principal.user_id)
+        if principal.org_id
+        else None
+    )
     user = await session.scalar(select(User).where(User.clerk_user_id == principal.user_id))
     disabled = bool(user and user.disabled_at is not None)
     platform_admin = bool(
-        user
+        user and not disabled
         and await session.scalar(
             select(PlatformAdministrator.user_id).where(PlatformAdministrator.user_id == user.id)
         )
@@ -146,19 +160,31 @@ async def app_context(
         user
         and await session.scalar(select(Organization.id).where(Organization.owner_user_id == user.id))
     )
+    role = None
+    if not disabled and membership and membership.role in {"org:owner", "org:admin", "org:member"}:
+        role = "org:admin" if membership.role == "org:owner" else membership.role
+    is_owner = bool(
+        organization is not None
+        and user is not None
+        and organization.owner_user_id == user.id
+        and role == "org:admin"
+        and not disabled
+    )
     capabilities = []
-    if organization is not None and not disabled:
+    if organization is not None and role is not None and not disabled:
         capabilities = ["read", "browser_test"]
-        if principal.org_role in {"org:owner", "org:admin"}:
+        if role == "org:admin":
             capabilities.extend(["manage_members", "configure"])
     return AppContextView(
         user_id=principal.user_id,
         active_org_id=principal.org_id,
         active_org_name=organization.name if organization else None,
         active_org_registered=organization is not None,
+        active_org_role=role,
+        is_owner=is_owner,
         platform_admin=platform_admin,
         user_disabled=disabled,
-        can_create_org=not claimed and not owned,
+        can_create_org=not disabled and not claimed and not owned,
         organization_creation_enabled=get_settings().organization_creation_enabled,
         capabilities=capabilities,
     )

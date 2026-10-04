@@ -48,7 +48,7 @@ async def test_owner_role_can_access_member_allowed_routes():
         FakeSession(),
         FakeDirectory(),
     )
-    assert principal.org_role == "org:owner"
+    assert principal.org_role == "org:admin"
 
 
 @pytest.mark.asyncio
@@ -60,3 +60,26 @@ async def test_member_role_cannot_access_unreviewed_routes():
             FakeSession(),
             FakeDirectory("org:member"),
         )
+
+
+@pytest.mark.asyncio
+async def test_stale_admin_token_does_not_override_live_member_role():
+    with pytest.raises(HTTPException) as error:
+        await require_organization_access(
+            _request("POST", "/api/v1/agents"),
+            ClerkPrincipal("user_member", "org_1", "org:admin"),
+            FakeSession(),
+            FakeDirectory("org:member"),
+        )
+    assert error.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_live_member_role_replaces_stale_owner_token():
+    principal = await require_organization_access(
+        _request("GET", "/api/v1/agents", member_allowed=True),
+        ClerkPrincipal("user_member", "org_1", "org:owner"),
+        FakeSession(),
+        FakeDirectory("org:member"),
+    )
+    assert principal.org_role == "org:member"

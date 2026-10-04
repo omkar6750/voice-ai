@@ -112,7 +112,12 @@ async def test_agent_catalog_is_one_query_and_version_summary_omits_config(
 
 
 async def test_projected_context_preserves_registered_owner_state(database):
+    from voice_api.core.clerk_organizations import OrganizationMember
     from voice_api.models import Organization, PlatformAdministrator, User
+
+    class Directory:
+        async def membership(self, org_id, user_id):
+            return OrganizationMember(user_id, "org:admin", None, None, None)
 
     org_id = await database.scalar(select(LegacyDataTenant.organization_id))
     org = await database.get(Organization, org_id)
@@ -123,10 +128,12 @@ async def test_projected_context_preserves_registered_owner_state(database):
         database.add(PlatformAdministrator(id=1, user_id=owner.id))
         await database.flush()
     result = await app_context(
-        ClerkPrincipal(owner.clerk_user_id, org.clerk_org_id, "org:admin"), database
+        ClerkPrincipal(owner.clerk_user_id, org.clerk_org_id, "org:member"), database, Directory()
     )
     assert result.active_org_registered
     assert result.platform_admin
+    assert result.is_owner
+    assert result.active_org_role == "org:admin"
     assert not result.can_create_org
     assert "configure" in result.capabilities
     owner.disabled_at = datetime.now(UTC)
@@ -137,7 +144,7 @@ async def test_projected_context_preserves_registered_owner_state(database):
         database.add(PlatformAdministrator(id=1, user_id=owner.id))
         await database.flush()
     result = await app_context(
-        ClerkPrincipal(owner.clerk_user_id, org.clerk_org_id, "org:admin"), database
+        ClerkPrincipal(owner.clerk_user_id, org.clerk_org_id, "org:admin"), database, Directory()
     )
     assert result.user_disabled and result.capabilities == []
 

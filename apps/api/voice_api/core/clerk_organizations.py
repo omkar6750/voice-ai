@@ -76,6 +76,17 @@ class ClerkOrganizationDirectory:
         except Exception as exc:
             raise HTTPException(502, "Clerk organization cleanup failed") from exc
 
+    async def creator(self, org_id: str) -> str | None:
+        """Read Clerk's recorded creator before assigning local ownership."""
+        try:
+            async with asyncio.timeout(3):
+                organization = await get_clerk_clients().sdk.organizations.get_async(
+                    organization_id=org_id
+                )
+        except Exception as exc:
+            raise HTTPException(503, "Clerk organization lookup unavailable") from exc
+        return self._text(organization.created_by)
+
     async def membership(self, org_id: str, user_id: str) -> OrganizationMember | None:
         started = perf_counter()
         try:

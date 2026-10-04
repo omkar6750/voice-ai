@@ -205,7 +205,7 @@ async def create_organization(
     return OrganizationView(
         id=organization.clerk_org_id,
         name=organization.name,
-        role="org:owner",
+        role="org:admin",
         is_owner=True,
         registered=True,
     )
@@ -232,13 +232,19 @@ async def provision_existing_organization(
             select(Organization).where(Organization.clerk_org_id == org_id)
         )
         assert organization is not None
+        actor_id = await session.scalar(
+            select(User.id).where(User.clerk_user_id == principal.user_id, User.disabled_at.is_(None))
+        )
         return OrganizationView(
             id=organization.clerk_org_id,
             name=organization.name,
-            role=membership.role,
-            is_owner=membership.role == "org:owner",
+            role="org:admin" if membership.role == "org:owner" else membership.role,
+            is_owner=actor_id is not None and organization.owner_user_id == actor_id,
             registered=True,
         )
+
+    if await directory.creator(org_id) != principal.user_id:
+        raise HTTPException(403, "Only the verified organization creator can register it")
 
     profile = await directory.verified_profile(principal.user_id)
     if not profile["email"]:
@@ -288,8 +294,8 @@ async def provision_existing_organization(
     return OrganizationView(
         id=organization.clerk_org_id,
         name=organization.name,
-        role=membership.role,
-        is_owner=membership.role == "org:owner",
+        role="org:admin" if membership.role == "org:owner" else membership.role,
+        is_owner=True,
         registered=True,
     )
 

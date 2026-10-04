@@ -7,6 +7,8 @@ export type AppContext = {
   active_org_id: string | null;
   active_org_name: string | null;
   active_org_registered: boolean;
+  active_org_role: "org:admin" | "org:member" | null;
+  is_owner: boolean;
   platform_admin: boolean;
   user_disabled: boolean;
   can_create_org: boolean;
@@ -16,8 +18,8 @@ export type AppContext = {
 
 /**
  * Product-local context is deliberately separate from Clerk state. Clerk is
- * the source of truth for sign-in, active organization, and org role; this
- * query only supplies local capabilities/provisioning state.
+ * the source of truth for sign-in, active organization, and live membership.
+ * This query supplies the API's effective role and local ownership.
  */
 export function useAppContext(enabled = true) {
   const api = useApi();

@@ -81,6 +81,21 @@ and artifact paths belong to an org. This reduces onboarding and invitation
 steps, but means all members of an org share the same data boundary; finer
 team isolation would require a new explicit decision and schema later.
 
-Netlify hosts the dashboard; one Render FastAPI process contains Pipecat and
-the API. Preserve the browser WebSocket, Twilio path, and local SIM code.
-Hosted SIM attempts fail clearly when hardware is unavailable.
+Netlify hosts the dashboard. The API and Pipecat runtime now have separate
+Render service images; the API remains the public control boundary. Preserve
+the browser WebSocket, Twilio path, and local SIM code. Hosted SIM attempts
+fail clearly when hardware is unavailable.
+
+## 2026-10-04 ownership amendment
+
+`org:admin` and `org:member` are the only intended Clerk roles after the
+development instance is reconciled. A temporary `org:owner` membership is
+accepted as admin-equivalent during that conversion, never as proof of product
+ownership. An enabled local user is the product owner only when their ID
+matches `organizations.owner_user_id` and Clerk confirms current admin
+membership in that organization. Context and resource access use live
+membership, not a stale token role. An unregistered Clerk organization may
+become locally owned only by Clerk's recorded creator. The independent
+`PlatformAdministrator` assignment remains the sole platform authority.
+The exact cutover and unfinished transfer workflows are recorded in
+`docs/plan/PLAN-local-ownership-with-clerk-basic-roles.md`.

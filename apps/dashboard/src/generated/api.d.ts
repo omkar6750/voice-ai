@@ -49,10 +49,9 @@ export interface paths {
          * App Context
          * @description Return only local product state for Clerk's current active org.
          *
-         *     Clerk owns identity, memberships, and organization selection. This endpoint
-         *     deliberately does not call Clerk's Backend API or enumerate memberships.
-         *     Protected resource endpoints still perform their normal live membership
-         *     authorization checks.
+         *     Clerk owns identity, memberships, and organization selection. Resolve the
+         *     current membership live here as well; the token's role is never authority.
+         *     Protected resource endpoints repeat their own live authorization checks.
          */
         get: operations["app_context_api_v1_auth_context_get"];
         put?: never;
@@ -2199,10 +2198,9 @@ export interface paths {
          * App Context
          * @description Return only local product state for Clerk's current active org.
          *
-         *     Clerk owns identity, memberships, and organization selection. This endpoint
-         *     deliberately does not call Clerk's Backend API or enumerate memberships.
-         *     Protected resource endpoints still perform their normal live membership
-         *     authorization checks.
+         *     Clerk owns identity, memberships, and organization selection. Resolve the
+         *     current membership live here as well; the token's role is never authority.
+         *     Protected resource endpoints repeat their own live authorization checks.
          */
         get: operations["app_context_api_auth_context_get"];
         put?: never;
@@ -4445,6 +4443,10 @@ export interface components {
             active_org_name: string | null;
             /** Active Org Registered */
             active_org_registered: boolean;
+            /** Active Org Role */
+            active_org_role: ("org:admin" | "org:member") | null;
+            /** Is Owner */
+            is_owner: boolean;
             /** Platform Admin */
             platform_admin: boolean;
             /** User Disabled */
