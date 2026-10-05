@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+import voice_runtime.execution.native_helpers as native_helpers
 import voice_runtime.execution.speech as speech_module
 from voice_runtime.execution.native import build_speech_services
 
@@ -68,6 +69,87 @@ def test_sarvam_settings_and_credentials_reach_service_constructors(monkeypatch)
         sample_rate=8000,
     )
     cartesia_mock.construct.assert_not_called()
+
+
+def test_saaras_v4_uses_realtime_server_vad_and_codemix(monkeypatch):
+    realtime = _ServiceConstructor("SarvamRealtimeSTTService")
+    monkeypatch.setattr(speech_module, "SarvamRealtimeSTTService", realtime)
+    _, _, _ = _install_service_mocks(monkeypatch)
+
+    stt, _ = build_speech_services(
+        SimpleNamespace(sarvam_api_key="sarvam-secret"),
+        {
+            "stt": {
+                "provider": "sarvam",
+                "model": "saaras:v4",
+                "realtime": {
+                    "language_code": "auto",
+                    "mode": "codemix",
+                    "stream_type": "fast",
+                    "threshold": 0.3,
+                    "silence_duration_ms": 500,
+                    "min_speech_duration_ms": 250,
+                    "prefix_padding_ms": 80,
+                },
+            },
+            "call_limits": {"interruptions_enabled": False},
+            "tts": {
+                "provider": "sarvam",
+                "model": "bulbul:v3",
+                "voice": "ritu",
+                "language": "en-IN",
+                "pace": 1,
+            },
+        },
+        16000,
+    )
+
+    realtime.Settings.assert_called_once_with(
+        model="saaras:v4",
+        language_code="auto",
+        mode="codemix",
+        stream_type="fast",
+        threshold=0.3,
+        silence_duration_ms=500,
+        min_speech_duration_ms=250,
+    )
+    realtime.construct.assert_called_once_with(
+        api_key="sarvam-secret",
+        settings={
+            "model": "saaras:v4",
+            "language_code": "auto",
+            "mode": "codemix",
+            "stream_type": "fast",
+            "threshold": 0.3,
+            "silence_duration_ms": 500,
+            "min_speech_duration_ms": 250,
+        },
+        sample_rate=16000,
+        endpointing="vad",
+        prefix_padding_ms=80,
+        should_interrupt=False,
+    )
+    assert stt is realtime.construct.return_value
+
+
+def test_realtime_server_vad_does_not_construct_local_smart_turn(monkeypatch):
+    monkeypatch.setattr(
+        native_helpers,
+        "LocalSmartTurnAnalyzerV3",
+        lambda: pytest.fail("Realtime must not construct local Smart Turn"),
+    )
+
+    params = native_helpers.build_user_aggregator_params(
+        {
+            "stt": {"provider": "sarvam", "model": "saaras:v4"},
+            "call_limits": {"interruptions_enabled": True, "idle_timeout_secs": 60},
+            "filter_incomplete_user_turns": False,
+        },
+        vad=object(),
+    )
+
+    assert type(params.user_turn_strategies.start[0]).__name__ == "ExternalUserTurnStartStrategy"
+    assert type(params.user_turn_strategies.stop[0]).__name__ == "ExternalUserTurnStopStrategy"
 
 
 def test_cartesia_settings_credentials_and_audio_format_reach_constructor(monkeypatch):

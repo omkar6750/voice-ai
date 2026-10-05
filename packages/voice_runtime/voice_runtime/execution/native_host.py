@@ -460,10 +460,12 @@ class NativePipelineHost(
         if composer_config.get("enabled"):
             from voice_runtime.execution.whatsapp_composer import composer_fields
 
-            for binding_key in (composer_config.get("templates") or {}):
+            for binding_key in composer_config.get("templates") or {}:
                 binding = snapshot["_resolved"]["tools"].get(binding_key)
                 if not binding or binding["definition"].get("handler") != "send_whatsapp_template":
-                    raise ValueError(f"Composer template '{binding_key}' is not a bound WhatsApp template")
+                    raise ValueError(
+                        f"Composer template '{binding_key}' is not a bound WhatsApp template"
+                    )
                 composer_fields(binding["definition"])
         for key in self._nodes:
             for name in self._nodes[key]["tool_bindings"]:
@@ -601,10 +603,13 @@ class NativePipelineHost(
             )
         tts_config = snapshot["tts"]
         vad_config = snapshot["vad"]
-        vad = (
-            None
-            if text_output
-            else SileroVADAnalyzer(
+        if text_output:
+            vad = None
+        else:
+            # Sarvam Realtime owns turn boundaries for saaras:v4. Pipecat
+            # still requires local Silero VAD on the user aggregator for
+            # speech timing/TTFB measurements.
+            vad = SileroVADAnalyzer(
                 sample_rate=rate,
                 params=VADParams(
                     confidence=vad_config["confidence"],
@@ -613,7 +618,6 @@ class NativePipelineHost(
                     min_volume=vad_config["min_volume"],
                 ),
             )
-        )
         contact = (
             snapshot.get("_resolved", {}).get("contact") or snapshot.get("contact_snapshot") or {}
         )

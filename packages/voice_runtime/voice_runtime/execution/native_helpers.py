@@ -18,6 +18,7 @@ from pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy import (
     TurnAnalyzerUserTurnStopStrategy,
 )
 from pipecat.turns.user_turn_strategies import (
+    ExternalUserTurnStrategies,
     FilterIncompleteUserTurnStrategies,
     UserTurnStrategies,
 )
@@ -203,18 +204,28 @@ def _provider_body(response: httpx.Response) -> dict | str:
 
 
 def build_user_aggregator_params(snapshot: dict, vad) -> LLMUserAggregatorParams:
-    """Apply explicit Silero start and Smart Turn v3 stop strategies."""
+    """Use provider endpointing when available, otherwise local Smart Turn."""
     limits = snapshot["call_limits"]
-    stop_strategies = [TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
-    strategies = UserTurnStrategies(stop=stop_strategies)
-    if not limits["interruptions_enabled"]:
-        strategies = UserTurnStrategies(
-            start=[
-                VADUserTurnStartStrategy(enable_interruptions=False),
-                TranscriptionUserTurnStartStrategy(enable_interruptions=False),
-            ],
-            stop=stop_strategies,
+    stt = snapshot.get("stt", {})
+    if stt.get("provider") == "sarvam" and stt.get("model") == "saaras:v4":
+        # Sarvam Realtime sends proposed turn boundaries. Explicitly use its
+        # external strategy so Pipecat does not instantiate local Smart Turn.
+        strategies = ExternalUserTurnStrategies(
+            enable_interruptions=limits["interruptions_enabled"]
         )
+    else:
+        stop_strategies = [
+            TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())
+        ]
+        strategies = UserTurnStrategies(stop=stop_strategies)
+        if not limits["interruptions_enabled"]:
+            strategies = UserTurnStrategies(
+                start=[
+                    VADUserTurnStartStrategy(enable_interruptions=False),
+                    TranscriptionUserTurnStartStrategy(enable_interruptions=False),
+                ],
+                stop=stop_strategies,
+            )
     if snapshot.get("filter_incomplete_user_turns", False):
         strategies = FilterIncompleteUserTurnStrategies(
             start=strategies.start,

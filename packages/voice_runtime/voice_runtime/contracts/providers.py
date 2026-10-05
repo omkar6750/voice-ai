@@ -72,10 +72,23 @@ class VADConfig(ConfigModel):
     min_volume: float = Field(default=0.1, ge=0, le=1)
 
 
+class SarvamRealtimeSTTConfig(ConfigModel):
+    """Realtime Saaras settings; VAD parameters are sent to Sarvam's endpoint."""
+
+    language_code: str = "auto"
+    mode: Literal["transcribe", "translate", "verbatim", "translit", "codemix"] = "codemix"
+    stream_type: Literal["fast", "balanced", "simulated"] = "fast"
+    threshold: float = Field(default=0.3, ge=0, le=1)
+    silence_duration_ms: int = Field(default=500, gt=0)
+    min_speech_duration_ms: int = Field(default=250, gt=0)
+    prefix_padding_ms: int | None = Field(default=None, ge=0)
+
+
 class STTConfig(ConfigModel):
     provider: Literal["sarvam", "gnani"] = "sarvam"
     model: Literal["saaras:v3", "saaras:v4", "gnani-prisma-v2.5"] = "saaras:v3"
     language: str = "en-IN"
+    realtime: SarvamRealtimeSTTConfig = Field(default_factory=SarvamRealtimeSTTConfig)
 
     @model_validator(mode="after")
     def validate_provider_model(self):

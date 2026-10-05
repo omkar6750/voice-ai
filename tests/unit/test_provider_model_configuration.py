@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 import voice_runtime.execution.speech as speech_module
-from voice_runtime.contracts import TTSConfig
+from voice_runtime.contracts import STTConfig, TTSConfig
 from voice_runtime.execution.native import build_speech_services
 
 
@@ -53,3 +53,14 @@ def test_tts_provider_and_model_must_match():
         TTSConfig(provider="cartesia", model="bulbul:v3")
 
     assert TTSConfig(provider="cartesia", model="sonic-3").model == "sonic-3"
+
+
+def test_saaras_v4_realtime_defaults_to_multilingual_server_vad():
+    config = STTConfig(provider="sarvam", model="saaras:v4")
+
+    assert config.realtime.language_code == "auto"
+    assert config.realtime.mode == "codemix"
+    assert config.realtime.stream_type == "fast"
+    assert config.realtime.threshold == 0.3
+    assert config.realtime.silence_duration_ms == 500
+    assert config.realtime.min_speech_duration_ms == 250

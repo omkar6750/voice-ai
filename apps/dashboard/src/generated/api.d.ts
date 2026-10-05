@@ -7286,6 +7286,47 @@ export interface components {
              * @default en-IN
              */
             language: string;
+            realtime?: components["schemas"]["SarvamRealtimeSTTConfig"];
+        };
+        /**
+         * SarvamRealtimeSTTConfig
+         * @description Realtime Saaras settings; VAD parameters are sent to Sarvam's endpoint.
+         */
+        SarvamRealtimeSTTConfig: {
+            /**
+             * Language Code
+             * @default auto
+             */
+            language_code: string;
+            /**
+             * Mode
+             * @default codemix
+             * @enum {string}
+             */
+            mode: "transcribe" | "translate" | "verbatim" | "translit" | "codemix";
+            /**
+             * Stream Type
+             * @default fast
+             * @enum {string}
+             */
+            stream_type: "fast" | "balanced" | "simulated";
+            /**
+             * Threshold
+             * @default 0.3
+             */
+            threshold: number;
+            /**
+             * Silence Duration Ms
+             * @default 500
+             */
+            silence_duration_ms: number;
+            /**
+             * Min Speech Duration Ms
+             * @default 250
+             */
+            min_speech_duration_ms: number;
+            /** Prefix Padding Ms */
+            prefix_padding_ms?: number | null;
         };
         /** ScheduleCallback */
         ScheduleCallback: {

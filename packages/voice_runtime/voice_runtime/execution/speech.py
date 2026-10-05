@@ -3,7 +3,7 @@ import json
 import wave
 
 from pipecat.services.cartesia.tts import CartesiaTTSService, GenerationConfig
-from pipecat.services.sarvam.stt import SarvamSTTService
+from pipecat.services.sarvam.stt import SarvamRealtimeSTTService, SarvamSTTService
 from pipecat.services.sarvam.tts import SarvamTTSService
 
 from voice_runtime.execution.credential_keys import stage_api_key
@@ -85,11 +85,31 @@ def build_speech_services(settings, snapshot: dict, sample_rate: int):
     if stt_config["provider"] == "gnani":
         stt = build_gnani_stt(stage_api_key(settings, "stt", "gnani"), stt_config, sample_rate)
     elif stt_config["provider"] == "sarvam":
-        stt = _WavChunkSarvamSTTService(
-            api_key=stage_api_key(settings, "stt", "sarvam"),
-            settings=SarvamSTTService.Settings(model=stt_config["model"]),
-            sample_rate=sample_rate,
-        )
+        api_key = stage_api_key(settings, "stt", "sarvam")
+        if stt_config["model"] == "saaras:v4":
+            realtime = stt_config.get("realtime") or {}
+            stt = SarvamRealtimeSTTService(
+                api_key=api_key,
+                settings=SarvamRealtimeSTTService.Settings(
+                    model="saaras:v4",
+                    language_code=realtime.get("language_code", "auto"),
+                    mode=realtime.get("mode", "codemix"),
+                    stream_type=realtime.get("stream_type", "fast"),
+                    threshold=realtime.get("threshold", 0.3),
+                    silence_duration_ms=realtime.get("silence_duration_ms", 500),
+                    min_speech_duration_ms=realtime.get("min_speech_duration_ms", 250),
+                ),
+                sample_rate=sample_rate,
+                endpointing="vad",
+                prefix_padding_ms=realtime.get("prefix_padding_ms"),
+                should_interrupt=snapshot.get("call_limits", {}).get("interruptions_enabled", True),
+            )
+        else:
+            stt = _WavChunkSarvamSTTService(
+                api_key=api_key,
+                settings=SarvamSTTService.Settings(model=stt_config["model"]),
+                sample_rate=sample_rate,
+            )
     else:
         raise ValueError(f"Unsupported STT provider: {stt_config['provider']}")
 

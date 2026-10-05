@@ -1,6 +1,7 @@
 import { ReadOnlyValue } from "@/components/record-page";
 import {
   Field,
+  FieldDescription,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
@@ -17,6 +18,9 @@ export function AudioPanel({
   change: (next: AgentConfig) => void;
   disabled: boolean;
 }) {
+  const sarvamRealtime =
+    config.stt.provider === "sarvam" && config.stt.model === "saaras:v4";
+
   return (
     <section className="grid max-w-5xl gap-8 lg:grid-cols-2">
       <div className="flex flex-col gap-4">
@@ -27,52 +31,150 @@ export function AudioPanel({
             value={`${config.audio.sample_rate / 1000} kHz`}
             reason="Shown from saved config. Rate changes are not available in this editor."
           />
-          <NumberField
-            id="vad-confidence"
-            label="VAD confidence"
-            value={config.vad.confidence}
-            min={0}
-            max={1}
-            step={0.05}
-            disabled={disabled}
-            onChange={(confidence) =>
-              change({ ...config, vad: { ...config.vad, confidence } })
-            }
-          />
-          <NumberField
-            id="vad-start"
-            label="Speech start, seconds"
-            value={config.vad.start_secs}
-            min={0.01}
-            step={0.05}
-            disabled={disabled}
-            onChange={(start_secs) =>
-              change({ ...config, vad: { ...config.vad, start_secs } })
-            }
-          />
-          <NumberField
-            id="vad-stop"
-            label="Speech stop, seconds"
-            value={config.vad.stop_secs}
-            min={0.01}
-            step={0.05}
-            disabled={disabled}
-            onChange={(stop_secs) =>
-              change({ ...config, vad: { ...config.vad, stop_secs } })
-            }
-          />
-          <NumberField
-            id="vad-volume"
-            label="Minimum volume"
-            value={config.vad.min_volume}
-            min={0}
-            max={1}
-            step={0.05}
-            disabled={disabled}
-            onChange={(min_volume) =>
-              change({ ...config, vad: { ...config.vad, min_volume } })
-            }
-          />
+          {sarvamRealtime ? (
+            <>
+              <NumberField
+                id="sarvam-vad-threshold"
+                label="Sarvam VAD threshold"
+                value={config.stt.realtime.threshold}
+                min={0}
+                max={1}
+                step={0.05}
+                hint="Higher values reject more background noise; start at 0.3."
+                disabled={disabled}
+                onChange={(threshold) =>
+                  change({
+                    ...config,
+                    stt: {
+                      ...config.stt,
+                      realtime: { ...config.stt.realtime, threshold },
+                    },
+                  })
+                }
+              />
+              <NumberField
+                id="sarvam-vad-silence"
+                label="Silence to end a turn, ms"
+                value={config.stt.realtime.silence_duration_ms}
+                min={1}
+                step={50}
+                hint="Increase if callers pause mid-sentence; start at 500 ms."
+                disabled={disabled}
+                onChange={(silence_duration_ms) =>
+                  change({
+                    ...config,
+                    stt: {
+                      ...config.stt,
+                      realtime: {
+                        ...config.stt.realtime,
+                        silence_duration_ms,
+                      },
+                    },
+                  })
+                }
+              />
+              <NumberField
+                id="sarvam-vad-min-speech"
+                label="Minimum speech to count, ms"
+                value={config.stt.realtime.min_speech_duration_ms}
+                min={1}
+                step={25}
+                hint="Increase to ignore short noises; start at 250 ms."
+                disabled={disabled}
+                onChange={(min_speech_duration_ms) =>
+                  change({
+                    ...config,
+                    stt: {
+                      ...config.stt,
+                      realtime: {
+                        ...config.stt.realtime,
+                        min_speech_duration_ms,
+                      },
+                    },
+                  })
+                }
+              />
+              <NumberField
+                id="sarvam-vad-prefix-padding"
+                label="Audio before speech, ms"
+                value={config.stt.realtime.prefix_padding_ms ?? 0}
+                min={0}
+                step={20}
+                hint="Increase if the first syllable is clipped; 0 keeps Sarvam's default."
+                disabled={disabled}
+                onChange={(value) =>
+                  change({
+                    ...config,
+                    stt: {
+                      ...config.stt,
+                      realtime: {
+                        ...config.stt.realtime,
+                        prefix_padding_ms: value || null,
+                      },
+                    },
+                  })
+                }
+              />
+              <Field>
+                <FieldLabel>Endpointing</FieldLabel>
+                <FieldDescription>
+                  Sarvam server VAD controls turn boundaries. Realtime uses a
+                  local Silero VAD analyzer for Pipecat timing and TTFB. Smart
+                  Turn is bypassed because Sarvam supplies external turn
+                  boundaries.
+                </FieldDescription>
+              </Field>
+            </>
+          ) : (
+            <>
+              <NumberField
+                id="vad-confidence"
+                label="VAD confidence"
+                value={config.vad.confidence}
+                min={0}
+                max={1}
+                step={0.05}
+                disabled={disabled}
+                onChange={(confidence) =>
+                  change({ ...config, vad: { ...config.vad, confidence } })
+                }
+              />
+              <NumberField
+                id="vad-start"
+                label="Speech start, seconds"
+                value={config.vad.start_secs}
+                min={0.01}
+                step={0.05}
+                disabled={disabled}
+                onChange={(start_secs) =>
+                  change({ ...config, vad: { ...config.vad, start_secs } })
+                }
+              />
+              <NumberField
+                id="vad-stop"
+                label="Speech stop, seconds"
+                value={config.vad.stop_secs}
+                min={0.01}
+                step={0.05}
+                disabled={disabled}
+                onChange={(stop_secs) =>
+                  change({ ...config, vad: { ...config.vad, stop_secs } })
+                }
+              />
+              <NumberField
+                id="vad-volume"
+                label="Minimum volume"
+                value={config.vad.min_volume}
+                min={0}
+                max={1}
+                step={0.05}
+                disabled={disabled}
+                onChange={(min_volume) =>
+                  change({ ...config, vad: { ...config.vad, min_volume } })
+                }
+              />
+            </>
+          )}
         </FieldGroup>
         <ReadOnlyValue label="Channels" value={config.audio.channels} />
         <ReadOnlyValue label="Encoding" value={config.audio.encoding} />

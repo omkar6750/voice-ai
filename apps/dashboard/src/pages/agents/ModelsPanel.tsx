@@ -472,6 +472,7 @@ export function ModelsPanel({
                       provider,
                       model: available[0] as AgentConfig["stt"]["model"],
                       language: config.stt.language ?? "en-IN",
+                      realtime: config.stt.realtime,
                     },
                   });
                 }}
@@ -538,7 +539,15 @@ export function ModelsPanel({
                         },
                       ]
                     : []),
-                  ...sttModels.map((model) => ({ value: model, label: model })),
+                  ...sttModels.map((model) => ({
+                    value: model,
+                    label:
+                      model === "saaras:v4"
+                        ? "saaras:v4 (Realtime, server VAD)"
+                        : model === "saaras:v3"
+                          ? "saaras:v3 (Legacy WebSocket)"
+                          : model,
+                  })),
                 ]}
                 selectionOnly
                 disabled={disabled || sttModels.length === 0}
@@ -557,6 +566,98 @@ export function ModelsPanel({
                 Catalog status: {selectedStt?.status ?? "unavailable"}.
               </FieldDescription>
             </Field>
+            {config.stt.provider === "sarvam" &&
+              config.stt.model === "saaras:v4" && (
+                <>
+                  <Field>
+                    <FieldLabel htmlFor="stt-realtime-language">
+                      Realtime language
+                    </FieldLabel>
+                    <NativeSelect
+                      id="stt-realtime-language"
+                      value={config.stt.realtime.language_code}
+                      disabled={disabled}
+                      onChange={(event) =>
+                        change({
+                          ...config,
+                          stt: {
+                            ...config.stt,
+                            realtime: {
+                              ...config.stt.realtime,
+                              language_code: event.target.value,
+                            },
+                          },
+                        })
+                      }
+                    >
+                      <option value="auto">Auto detect</option>
+                      {config.language.supported_languages.map((language) => (
+                        <option key={language} value={language}>
+                          {language}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                    <FieldDescription>
+                      Auto detect supports code-mixed speech across Sarvam’s
+                      supported languages.
+                    </FieldDescription>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="stt-realtime-mode">
+                      Transcript mode
+                    </FieldLabel>
+                    <NativeSelect
+                      id="stt-realtime-mode"
+                      value={config.stt.realtime.mode}
+                      disabled={disabled}
+                      onChange={(event) =>
+                        change({
+                          ...config,
+                          stt: {
+                            ...config.stt,
+                            realtime: {
+                              ...config.stt.realtime,
+                              mode: event.target.value as AgentConfig["stt"]["realtime"]["mode"],
+                            },
+                          },
+                        })
+                      }
+                    >
+                      <option value="codemix">Code-mixed</option>
+                      <option value="transcribe">Transcribe</option>
+                      <option value="verbatim">Verbatim</option>
+                      <option value="translit">Transliterate</option>
+                      <option value="translate">Translate</option>
+                    </NativeSelect>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="stt-realtime-stream">
+                      Partial transcript speed
+                    </FieldLabel>
+                    <NativeSelect
+                      id="stt-realtime-stream"
+                      value={config.stt.realtime.stream_type}
+                      disabled={disabled}
+                      onChange={(event) =>
+                        change({
+                          ...config,
+                          stt: {
+                            ...config.stt,
+                            realtime: {
+                              ...config.stt.realtime,
+                              stream_type: event.target.value as AgentConfig["stt"]["realtime"]["stream_type"],
+                            },
+                          },
+                        })
+                      }
+                    >
+                      <option value="fast">Fast</option>
+                      <option value="balanced">Balanced</option>
+                      <option value="simulated">Final only</option>
+                    </NativeSelect>
+                  </Field>
+                </>
+              )}
           </FieldGroup>
         </div>
 
