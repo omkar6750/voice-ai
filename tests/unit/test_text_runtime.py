@@ -40,7 +40,17 @@ def snapshot():
             "flow": {
                 "initial_node": "opening",
                 "nodes": [
-                    {"id": "opening", "role_message": "Be helpful.", "transitions": ["closing"]},
+                    {
+                        "id": "opening",
+                        "role_message": "Be helpful.",
+                        "task_messages": [
+                            {
+                                "role": "user",
+                                "content": "Begin using the configured greeting, then wait.",
+                            }
+                        ],
+                        "transitions": ["closing"],
+                    },
                     {"id": "closing", "role_message": "Say goodbye.", "terminal": True},
                 ],
             },
@@ -130,7 +140,8 @@ async def test_text_pipeline_stream_context_and_checkpoint_without_speech(text_s
     assert session.host.capture is None
     assert session.host.worker._idle_timeout_secs is None
     assert any(
-        message.get("role") == "user" and "Runtime start instruction:" in message.get("content", "")
+        message.get("role") == "user"
+        and message.get("content") == "Begin using the configured greeting, then wait."
         for message in llms[0].inputs[0]
     )
     assert any(m.get("content") == "Hello there." for m in session.text.checkpoint["messages"])

@@ -82,3 +82,58 @@ async def test_failure_after_text_or_tool_fragment_never_activates_fallback(firs
     assert not fallback.closed
     assert service.active_provider == "isoquant"
     assert not service._fallback_active
+
+
+@pytest.mark.asyncio
+async def test_groq_fallback_preserves_current_node_instruction_and_user_task():
+    from unittest.mock import AsyncMock
+
+    import httpx
+    from openai import BadRequestError
+    from pipecat.processors.aggregators.llm_context import LLMContext
+    from pipecat.services.groq.llm import GroqLLMService
+    from voice_runtime.execution.llm_factory import _FallbackGroqLLMService
+
+    primary = _FallbackGroqLLMService(
+        api_key="primary-test-key",
+        settings=GroqLLMService.Settings(
+            model="primary-model", system_instruction="Greeting node persona"
+        ),
+    )
+    fallback = GroqLLMService(
+        api_key="fallback-test-key", settings=GroqLLMService.Settings(model="fallback-model")
+    )
+    primary._primary_provider, primary._primary_model = "groq", "primary-model"
+    primary.configure_fallback(
+        fallback, {"provider": "groq", "model": "fallback-model", "first_token_timeout_seconds": 1}
+    )
+    response = httpx.Response(
+        400, request=httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+    )
+    primary._client.chat.completions.create = AsyncMock(
+        side_effect=BadRequestError("invalid request", response=response, body={})
+    )
+    fallback._client.chat.completions.create = AsyncMock(
+        return_value=Stream([chunk(content="Hello")])
+    )
+    context = LLMContext(messages=[{"role": "user", "content": "Introduce yourself, then wait."}])
+    try:
+        await primary.get_chat_completions(context)
+        sent = fallback._client.chat.completions.create.call_args.kwargs
+        assert sent["messages"] == [
+            {"role": "system", "content": "Greeting node persona"},
+            {"role": "user", "content": "Introduce yourself, then wait."},
+        ]
+        assert sent["model"] == "fallback-model"
+        primary._settings.system_instruction = "Discovery node persona"
+        await primary.get_chat_completions(context)
+        assert (
+            fallback._client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+            == "Discovery node persona"
+        )
+        assert context.get_messages() == [
+            {"role": "user", "content": "Introduce yourself, then wait."}
+        ]
+    finally:
+        await primary._client.close()
+        await fallback._client.close()

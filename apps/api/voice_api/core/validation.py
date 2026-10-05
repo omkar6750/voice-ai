@@ -4,6 +4,7 @@ from functools import lru_cache
 
 # Error messages are authored here, never copied from submitted exceptions.
 MESSAGES = {
+    "initial_user_task_required": "The initial node responds on entry. Add a nonempty user task message in Flow > Task messages, or disable Responds on entry.",
     "missing": "This field is required.",
     "extra_forbidden": "This field is not supported.",
     "int_parsing": "Enter a whole number.",

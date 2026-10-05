@@ -425,21 +425,6 @@ async def run_text(session):
                         },
                     ],
                 }
-            # Groq/Qwen needs a user query even for the agent's first response.
-            # This control instruction is context, never a fabricated caller message.
-            if node.get("respond_immediately", True) and not any(
-                message.get("role") == "user" for message in node.get("task_messages", [])
-            ):
-                node = {
-                    **node,
-                    "task_messages": [
-                        *node.get("task_messages", []),
-                        {
-                            "role": "user",
-                            "content": "Runtime start instruction: open this test conversation using the configured opening for this node. This is not caller speech and confirms no caller facts or tool outcomes.",
-                        },
-                    ],
-                }
             await host.flow.initialize(node)
         state.ready.set()
         state.emit({"type": "state", "state": "connected"})

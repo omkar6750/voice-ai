@@ -29,6 +29,7 @@ import { ClassifierPanel } from "./ClassifierPanel";
 import { ComposerPanel } from "./ComposerPanel";
 import { ContextPanel } from "./ContextPanel";
 import { FlowPanel } from "./FlowPanel";
+import { openingTaskError } from "./flow-validation";
 import { KnowledgePanel } from "./KnowledgePanel";
 import { ModelsPanel } from "./ModelsPanel";
 import { PromptsPanel } from "./PromptsPanel";
@@ -158,6 +159,12 @@ export function AgentEditorPage() {
 
   async function save() {
     if (!stored || !draft || stored.status !== "draft" || conflict) return;
+    const openingError = openingTaskError(draft);
+    if (openingError) {
+      setSaveError(openingError);
+      toast.error(openingError);
+      return;
+    }
     if (unboundToolReferences.length > 0) {
       toast.error(
         `Cannot save draft: flow references unbound tools [${unboundToolReferences.join(", ")}]. Remove them or bind them in Tools first.`,

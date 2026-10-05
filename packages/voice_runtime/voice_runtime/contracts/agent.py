@@ -3,7 +3,14 @@
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, HttpUrl, ValidationError, field_validator, model_validator
+from pydantic import (
+    Field,
+    HttpUrl,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 from pydantic_core import PydanticCustomError
 
 from .base import ConfigModel, Identifier
@@ -143,12 +150,33 @@ class FlowConfig(ConfigModel):
         return value
 
     @model_validator(mode="after")
-    def valid_graph(self):
+    def valid_graph(self, info: ValidationInfo):
         nodes = {node.id: node for node in self.nodes}
         if len(nodes) != len(self.nodes):
             raise ValueError("node IDs must be unique")
         if self.initial_node not in nodes:
             raise ValueError("initial_node is missing")
+        initial = nodes[self.initial_node]
+        if (
+            not (info.context or {}).get("read_legacy_config")
+            and initial.respond_immediately
+            and not any(
+                message.role == "user" and message.content.strip()
+                for message in initial.task_messages
+            )
+        ):
+            raise ValidationError.from_exception_data(
+                type(self).__name__,
+                [
+                    {
+                        "type": PydanticCustomError(
+                            "initial_user_task_required",
+                            "Initial nodes that respond on entry require a nonempty user task message.",
+                        ),
+                        "loc": ("nodes", self.nodes.index(initial), "task_messages"),
+                    }
+                ],
+            )
         for node in self.nodes:
             if len(set(node.transitions)) != len(node.transitions):
                 raise ValueError("duplicate transition")
@@ -325,7 +353,9 @@ class AgentConfig(ConfigModel):
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     stt: STTConfig = Field(default_factory=STTConfig)
     credential_refs: dict[
-        Literal["stt", "llm", "llm_fallback", "tts", "classifier", "summarizer", "embedding", "composer"],
+        Literal[
+            "stt", "llm", "llm_fallback", "tts", "classifier", "summarizer", "embedding", "composer"
+        ],
         Identifier,
     ] = Field(default_factory=dict)
     llm: MainLLMConfig = Field(default_factory=MainLLMConfig)

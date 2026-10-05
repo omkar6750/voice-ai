@@ -32,6 +32,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { PromptEditor } from "./PromptEditor";
+import { needsOpeningTask } from "./flow-validation";
 import type {
   AgentConfig,
   ContactVariablesResponse,
@@ -584,6 +585,25 @@ export function FlowPanel({
                     above so provider adapters keep them in the system
                     instruction.
                   </FieldDescription>
+                  {node.id === config.flow.initial_node &&
+                    node.respond_immediately && (
+                      <p
+                        role={
+                          needsOpeningTask(node, config.flow.initial_node)
+                            ? "alert"
+                            : undefined
+                        }
+                        className={
+                          needsOpeningTask(node, config.flow.initial_node)
+                            ? "text-sm text-destructive"
+                            : "text-sm text-muted-foreground"
+                        }
+                      >
+                        A nonempty user task message is required to start the
+                        conversation. Describe the opening action here; this is
+                        an instruction, not caller speech.
+                      </p>
+                    )}
                   <div className="flex flex-col gap-3">
                     {(node.task_messages ?? []).map((message, index) => (
                       <div

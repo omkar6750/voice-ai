@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from voice_runtime.contracts import (
     AgentConfig,
     FlowConfig,
+    FlowMessageConfig,
     FlowNodeConfig,
     ToolBinding,
     ToolConfig,
@@ -82,6 +83,12 @@ async def seed_organization(session: AsyncSession, organization_id: str) -> None
             nodes=[
                 FlowNodeConfig(
                     id="greeting",
+                    task_messages=[
+                        FlowMessageConfig(
+                            role="user",
+                            content="Greet the caller using the configured instructions, then wait for their response.",
+                        )
+                    ],
                     prompt=(
                         "Greet the caller and ask how you can help. When they are ready to "
                         "continue, use change_node to move to conversation."

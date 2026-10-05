@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from voice_runtime.contracts import AgentConfig
 
 
@@ -24,6 +24,12 @@ class AgentVersionResponse(BaseModel):
     status: str
     config: AgentConfig
     note: str | None
+
+    @field_validator("config", mode="before")
+    @classmethod
+    def readable_legacy_configuration(cls, value):
+        # Existing immutable versions must remain readable so operators can clone/fix them.
+        return AgentConfig.model_validate(value, context={"read_legacy_config": True})
 
 
 class AgentVersionsResponse(BaseModel):

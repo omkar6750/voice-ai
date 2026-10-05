@@ -63,9 +63,20 @@ def application_identity() -> dict:
 
 
 async def resolve(
-    session: AsyncSession, version: AgentVersion, logging_override: bool | None = None, *, text_test: bool = False
+    session: AsyncSession,
+    version: AgentVersion,
+    logging_override: bool | None = None,
+    *,
+    text_test: bool = False,
 ) -> tuple[dict, str]:
-    config = AgentConfig.model_validate(version.config)
+    from pydantic import ValidationError
+
+    from voice_api.core.validation import public_validation_errors
+
+    try:
+        config = AgentConfig.model_validate(version.config)
+    except ValidationError as error:
+        raise HTTPException(422, detail=public_validation_errors(error)) from None
     settings = await session.scalar(select(WorkspaceSettings).where(WorkspaceSettings.id == 1))
     workspace = WorkspaceConfig.model_validate(settings.config if settings else {})
     tools = {}
@@ -103,7 +114,9 @@ async def resolve(
     from voice_api.services.provider_credentials import resolve_references
 
     credential_refs = await resolve_references(
-        session, {**config.model_dump(mode="json"), **({"_text_test": True} if text_test else {})}, strict=False
+        session,
+        {**config.model_dump(mode="json"), **({"_text_test": True} if text_test else {})},
+        strict=False,
     )
     snapshot = safe_evidence(
         {

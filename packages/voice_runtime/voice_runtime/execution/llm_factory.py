@@ -57,7 +57,14 @@ def _has_generated_content(chunk) -> bool:
 def _fallback_worthy(error: Exception) -> bool:
     status_code = getattr(error, "status_code", None) or getattr(error, "code", None)
     return isinstance(
-        error, (ConnectionError, APIConnectionError, APIStatusError, APITimeoutError, genai_errors.APIError)
+        error,
+        (
+            ConnectionError,
+            APIConnectionError,
+            APIStatusError,
+            APITimeoutError,
+            genai_errors.APIError,
+        ),
     ) or (isinstance(status_code, int) and status_code != 200)
 
 
@@ -231,7 +238,15 @@ class _FirstTokenFallback:
         await super().cleanup()
         await self._fallback_service.cleanup()
 
+    def _sync_fallback_instruction(self) -> None:
+        """FlowManager updates the primary service's instruction on every node entry."""
+        primary_settings = getattr(self, "_settings", None)
+        fallback_settings = getattr(self._fallback_service, "_settings", None)
+        if primary_settings is not None and fallback_settings is not None:
+            fallback_settings.system_instruction = primary_settings.system_instruction
+
     async def _fallback_stream(self, context):
+        self._sync_fallback_instruction()
         if isinstance(self._fallback_service, GoogleLLMService):
             return _google_as_openai_chunks(self._fallback_service, context)
         stream = await self._fallback_service.get_chat_completions(context)
@@ -350,6 +365,7 @@ class _FallbackOpenRouterLLMService(_FirstTokenFallback, OpenRouterLLMService):
 
 class _FallbackGoogleLLMService(_FirstTokenFallback, GoogleLLMService):
     async def _google_fallback_stream(self, context):
+        self._sync_fallback_instruction()
         if isinstance(self._fallback_service, GoogleLLMService):
             return self._fallback_service._stream_response(context)
         return _openai_as_google_chunks(self._fallback_service, context)

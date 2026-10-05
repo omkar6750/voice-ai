@@ -61,6 +61,7 @@ export function AgentsPage() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [initialNode, setInitialNode] = useState("opening");
+  const [openingTask, setOpeningTask] = useState("");
   const [busy, setBusy] = useState(false);
 
   // Deletion state
@@ -73,7 +74,8 @@ export function AgentsPage() {
     event.preventDefault();
     const trimmed = name.trim();
     const nodeId = initialNode.trim();
-    if (!trimmed || !/^[a-z][a-z0-9_]*$/.test(nodeId)) return;
+    if (!trimmed || !openingTask.trim() || !/^[a-z][a-z0-9_]*$/.test(nodeId))
+      return;
     setBusy(true);
     try {
       const result = await api<{ agent_id: string; version_id: string }>(
@@ -86,7 +88,16 @@ export function AgentsPage() {
               name: trimmed,
               flow: {
                 initial_node: nodeId,
-                nodes: [{ id: nodeId, role_message: "", task_messages: [], terminal: true }],
+                nodes: [
+                  {
+                    id: nodeId,
+                    role_message: "",
+                    task_messages: [
+                      { role: "user", content: openingTask.trim() },
+                    ],
+                    terminal: true,
+                  },
+                ],
               },
             },
           }),
@@ -96,6 +107,7 @@ export function AgentsPage() {
       setOpen(false);
       setName("");
       setInitialNode("opening");
+      setOpeningTask("");
       await reload();
       navigate(`/agents/${result.agent_id}/versions/${result.version_id}`);
     } catch (cause) {
@@ -116,7 +128,9 @@ export function AgentsPage() {
       setImpact(data);
     } catch (cause) {
       toast.error(
-        cause instanceof Error ? cause.message : "Could not inspect agent impact",
+        cause instanceof Error
+          ? cause.message
+          : "Could not inspect agent impact",
       );
     } finally {
       setLoadingImpact(false);
@@ -178,7 +192,9 @@ export function AgentsPage() {
                     </FieldDescription>
                   </Field>
                   <Field>
-                    <FieldLabel htmlFor="initial-node-id">Initial node ID</FieldLabel>
+                    <FieldLabel htmlFor="initial-node-id">
+                      Initial node ID
+                    </FieldLabel>
                     <Input
                       id="initial-node-id"
                       value={initialNode}
@@ -188,14 +204,35 @@ export function AgentsPage() {
                       required
                     />
                     <FieldDescription>
-                      This node opens the call. Use lowercase letters, numbers, and underscores.
+                      This node opens the call. Use lowercase letters, numbers,
+                      and underscores.
+                    </FieldDescription>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="opening-task">
+                      Opening task message
+                    </FieldLabel>
+                    <Input
+                      id="opening-task"
+                      value={openingTask}
+                      onChange={(event) => setOpeningTask(event.target.value)}
+                      required
+                    />
+                    <FieldDescription>
+                      Describe how the agent should begin. Saved as a user task
+                      instruction, not caller speech.
                     </FieldDescription>
                   </Field>
                 </FieldGroup>
                 <SheetFooter className="mt-auto">
                   <Button
                     type="submit"
-                    disabled={busy || !name.trim() || !/^[a-z][a-z0-9_]*$/.test(initialNode.trim())}
+                    disabled={
+                      busy ||
+                      !name.trim() ||
+                      !openingTask.trim() ||
+                      !/^[a-z][a-z0-9_]*$/.test(initialNode.trim())
+                    }
                   >
                     {busy ? "Creating…" : "Create draft"}
                   </Button>
@@ -234,16 +271,18 @@ export function AgentsPage() {
                     <Button variant="link" asChild>
                       <Link to={`/agents/${agent.id}`}>Versions</Link>
                     </Button>
-                    {canManage && <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="text-destructive hover:bg-destructive/10"
-                      onClick={() => openDeleteModal(agent)}
-                      title={`Delete ${agent.name}`}
-                    >
-                      <Trash2 className="size-4" />
-                      <span className="sr-only">Delete</span>
-                    </Button>}
+                    {canManage && (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-destructive hover:bg-destructive/10"
+                        onClick={() => openDeleteModal(agent)}
+                        title={`Delete ${agent.name}`}
+                      >
+                        <Trash2 className="size-4" />
+                        <span className="sr-only">Delete</span>
+                      </Button>
+                    )}
                   </div>
                 </TableCell>
               </TableRow>
