@@ -47,7 +47,9 @@ class Settings(BaseSettings):
     supabase_service_key: SecretStr | None = None
     supabase_private_bucket: str = "voice-private"
     clerk_secret_key: str | None = Field(default=None, validation_alias="CLERK_SECRET_KEY")
-    clerk_authorized_parties: str = "http://localhost:5173,http://localhost:8000"
+    clerk_authorized_parties: str = (
+        "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:8000"
+    )
     clerk_webhook_signing_secret: str | None = Field(
         default=None, validation_alias="CLERK_WEBHOOK_SIGNING_SECRET"
     )
