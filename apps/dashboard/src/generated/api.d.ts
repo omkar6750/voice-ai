@@ -7280,7 +7280,7 @@ export interface components {
              * @default saaras:v3
              * @enum {string}
              */
-            model: "saaras:v3" | "gnani-prisma-v2.5";
+            model: "saaras:v3" | "saaras:v4" | "gnani-prisma-v2.5";
             /**
              * Language
              * @default en-IN

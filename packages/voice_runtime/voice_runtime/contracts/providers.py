@@ -74,14 +74,18 @@ class VADConfig(ConfigModel):
 
 class STTConfig(ConfigModel):
     provider: Literal["sarvam", "gnani"] = "sarvam"
-    model: Literal["saaras:v3", "gnani-prisma-v2.5"] = "saaras:v3"
+    model: Literal["saaras:v3", "saaras:v4", "gnani-prisma-v2.5"] = "saaras:v3"
     language: str = "en-IN"
 
     @model_validator(mode="after")
     def validate_provider_model(self):
-        expected = {"sarvam": "saaras:v3", "gnani": "gnani-prisma-v2.5"}[self.provider]
-        if self.model != expected:
-            raise ValueError(f"STT provider '{self.provider}' requires model '{expected}'")
+        expected = {
+            "sarvam": {"saaras:v3", "saaras:v4"},
+            "gnani": {"gnani-prisma-v2.5"},
+        }[self.provider]
+        if self.model not in expected:
+            choices = " or ".join(sorted(expected))
+            raise ValueError(f"STT provider '{self.provider}' requires model {choices}")
         if self.provider == "gnani" and self.language not in GNANI_LANGUAGES:
             raise ValueError("Select a supported Gnani STT language")
         return self
@@ -231,7 +235,7 @@ RUNTIME_PROVIDER_CAPABILITIES: dict[str, dict] = {
         "slots": ["llm", "stt", "tts"],
         "models_by_slot": {
             "llm": list(SARVAM_LLM_MODELS),
-            "stt": ["saaras:v3"],
+            "stt": ["saaras:v3", "saaras:v4"],
             "tts": ["bulbul:v3"],
         },
         "languages": ["en-IN", "hi-IN", "mr-IN", "te-IN"],

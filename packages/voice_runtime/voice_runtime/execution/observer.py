@@ -181,7 +181,27 @@ class EvidenceObserver(BaseObserver):
                     exception, provider=provider, operation=operation_name
                 )
             else:
-                diagnostic = provider_error_diagnostic(provider=provider, body=frame.error)
+                sarvam_error = None
+                if (
+                    operation_name == "stt"
+                    and provider == "sarvam"
+                    and isinstance(frame.error, str)
+                    and frame.error.startswith("SARVAM_STT_PROVIDER_ERROR:")
+                ):
+                    try:
+                        sarvam_error = json.loads(frame.error.split(":", 1)[1])
+                    except (TypeError, ValueError):
+                        sarvam_error = None
+                if isinstance(sarvam_error, dict):
+                    diagnostic = provider_error_diagnostic(
+                        provider=provider,
+                        status_code=sarvam_error.get("status_code"),
+                    )
+                    provider_code = sarvam_error.get("code")
+                    if isinstance(provider_code, str) and len(provider_code) <= 80:
+                        diagnostic["metadata"]["provider_error_code"] = provider_code
+                else:
+                    diagnostic = provider_error_diagnostic(provider=provider, body=frame.error)
                 diagnostic["metadata"]["operation"] = operation_name
             diagnostic["metadata"]["pipecat_error_category"] = (
                 frame.category.value if frame.category is not None else "unknown"

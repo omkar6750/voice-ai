@@ -4,7 +4,7 @@ Status: completed
 
 ## Existing facts
 
-- STT remains runtime-supported only through Sarvam `saaras:v3`, but is now exposed through the provider capability catalog instead of a read-only dashboard label.
+- STT is exposed through the provider capability catalog. Sarvam `saaras:v3` and `saaras:v4` are selectable; Gnani `gnani-prisma-v2.5` remains supported.
 - TTS supports Sarvam `bulbul:v3` and Cartesia `sonic-3`. Pipecat 1.11.0 exposes model, voice, and language for Cartesia, while pace is not a Cartesia runtime setting.
 - The old provider catalog was an untyped dictionary and the dashboard had static TTS provider/model choices, fallback models, hard-coded languages, and a free-form voice input.
 
@@ -29,14 +29,14 @@ Implementation completed in:
 - `ProviderCatalogResponse` and its nested Pydantic models include slots, models, per-slot models, languages, voices, editable/runtime-supported fields, credential/catalog status, runtime support status, and check time.
 - The catalog is returned by `/api/v1/providers` with a FastAPI response model and is exported through the normal OpenAPI/generated-TypeScript flow.
 - Runtime-owned capability definitions are shared with the API catalog; the API adds credential status without exposing credentials.
-- `TTSConfig` rejects provider/model mismatches (`sarvam` must use `bulbul:v3`, `cartesia` must use `sonic-3`). `STTConfig` remains a strict Sarvam/v3 contract.
+- `TTSConfig` rejects provider/model mismatches (`sarvam` must use `bulbul:v3`, `cartesia` must use `sonic-3`). `STTConfig` validates Sarvam v3/v4 and Gnani model compatibility.
 
 ## Runtime and frontend behavior
 
 - The Models tab reads all STT/TTS providers, models, languages, voices, and field support from `/providers`; it no longer contains hard-coded provider or model options.
 - Providers expose credential/catalog state and runtime support separately.
 - Cartesia pace is shown as read-only with an explicit unsupported explanation; no unsupported setting is silently sent to Pipecat.
-- `build_speech_services` constructs the exact Sarvam STT, Sarvam TTS, or Cartesia TTS service from the resolved snapshot. Cartesia now receives the selected model, voice, and language.
+- `build_speech_services` constructs the exact Sarvam STT (v3 or v4), Gnani STT, Sarvam TTS, or Cartesia TTS service from the resolved snapshot. Cartesia now receives the selected model, voice, and language.
 - Resolved snapshots and evidence continue to identify the selected provider and model values.
 
 ## Tests and acceptance

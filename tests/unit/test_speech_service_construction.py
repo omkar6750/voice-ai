@@ -22,6 +22,7 @@ def _install_service_mocks(monkeypatch):
     sarvam_tts = _ServiceConstructor("SarvamTTSService")
     cartesia_tts = _ServiceConstructor("CartesiaTTSService")
     monkeypatch.setattr(speech_module, "SarvamSTTService", stt)
+    monkeypatch.setattr(speech_module, "_WavChunkSarvamSTTService", stt)
     monkeypatch.setattr(speech_module, "SarvamTTSService", sarvam_tts)
     monkeypatch.setattr(speech_module, "CartesiaTTSService", cartesia_tts)
     return stt, sarvam_tts, cartesia_tts

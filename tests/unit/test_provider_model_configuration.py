@@ -19,6 +19,7 @@ def test_snapshot_provider_values_reach_speech_service_constructors(monkeypatch)
     stt_service = type("FakeSTT", (_FakeService,), {})
     tts_service = type("FakeTTS", (_FakeService,), {})
     monkeypatch.setattr(speech_module, "SarvamSTTService", stt_service)
+    monkeypatch.setattr(speech_module, "_WavChunkSarvamSTTService", stt_service)
     monkeypatch.setattr(speech_module, "CartesiaTTSService", tts_service)
 
     stt, tts = build_speech_services(
