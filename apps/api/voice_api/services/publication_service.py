@@ -19,8 +19,14 @@ from voice_api.models import (
 from voice_api.models.common import new_id
 
 
-async def sync_bindings(session: AsyncSession, version: AgentVersion) -> None:
-    config = AgentConfig.model_validate(version.config)
+async def sync_bindings(
+    session: AsyncSession, version: AgentVersion, *, cloning_legacy: bool = False
+) -> None:
+    # Cloning must preserve older published instructions so operators can repair the draft.
+    # All binding checks still apply; saves and publication keep strict validation.
+    config = AgentConfig.model_validate(
+        version.config, context={"read_legacy_config": True} if cloning_legacy else None
+    )
     from voice_api.core.config import get_settings
 
     if config.credential_refs or get_settings().env != "dev":
@@ -98,7 +104,7 @@ async def clone_version(session: AsyncSession, source_id: str, kind: str, revisi
     session.add(clone)
     await session.flush()
     if kind == "agent":
-        await sync_bindings(session, clone)
+        await sync_bindings(session, clone, cloning_legacy=True)
         source_bindings = (
             await session.scalars(
                 select(AgentVersionTool).where(AgentVersionTool.agent_version_id == source.id)

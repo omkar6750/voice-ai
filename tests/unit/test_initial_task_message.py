@@ -57,3 +57,51 @@ def test_legacy_version_readable_but_write_rejected():
     assert result.config.flow.nodes[0].task_messages == []
     with pytest.raises(ValidationError):
         RevisionBody(revision=1, config=config)
+
+
+async def test_clone_published_version_without_opening_task_preserves_draft(monkeypatch):
+    from copy import deepcopy
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+
+    from voice_api.models import AgentVersion
+    from voice_api.services.publication_service import clone_version, sync_bindings
+    from voice_runtime.contracts import AgentConfig
+
+    source_config = {"name": "Legacy", "flow": flow([])}
+    source = AgentVersion(
+        id="source",
+        agent_id="agent",
+        version=2,
+        revision=5,
+        status="published",
+        config=deepcopy(source_config),
+    )
+    session = SimpleNamespace(
+        get=AsyncMock(side_effect=[source, object(), source]),
+        scalar=AsyncMock(return_value=2),
+        scalars=AsyncMock(return_value=SimpleNamespace(all=lambda: [])),
+        add=Mock(),
+        add_all=Mock(),
+        flush=AsyncMock(),
+        execute=AsyncMock(),
+        commit=AsyncMock(),
+    )
+    monkeypatch.setattr("voice_api.core.config.get_settings", lambda: SimpleNamespace(env="dev"))
+    result = await clone_version(session, "source", "agent", 5)
+    draft = session.add.call_args.args[0]
+    assert result["status"] == "draft"
+    assert result["version"] == 3
+    assert draft.parent_id == source.id
+    assert draft.config == source_config
+    assert source.status == "published"
+    assert source.config == source_config
+    with pytest.raises(ValidationError):
+        AgentConfig.model_validate(draft.config)
+    with pytest.raises(ValidationError):
+        await sync_bindings(session, draft)
+    draft.config["flow"]["nodes"][0]["task_messages"] = [
+        {"role": "user", "content": "Introduce yourself, then wait."}
+    ]
+    AgentConfig.model_validate(draft.config)
+    assert source.config == source_config
