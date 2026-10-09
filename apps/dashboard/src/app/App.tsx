@@ -1,16 +1,16 @@
-import { SignIn, SignUp, useAuth, useOrganization } from "@clerk/react";
+import { useAuth, useOrganization } from "@clerk/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { ApiContext, ApiError, SupportSessionContext, request, useApi } from "./api";
 import { useAppContext } from "./app-context";
 import { PlatformKeepAwake } from "./PlatformKeepAwake";
-import { clerkUrls } from "./clerk-config";
-import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { clearQueryCache, persistQueryCache, restoreQueryCache } from "@/lib/query-client";
 
+const LandingPage = lazy(() => import("@/pages/landing/LandingPage"));
+const AuthPage = lazy(() => import("@/pages/landing/AuthPage"));
 const AppShell = lazy(() => import("./AppShell").then((page) => ({ default: page.AppShell })));
 const PlatformOrganizationsPage = lazy(() => import("@/pages/organizations/platform").then((page) => ({ default: page.PlatformOrganizationsPage })));
 const OrganizationListPage = lazy(() => import("@/pages/organizations/clerk").then((page) => ({ default: page.OrganizationListPage })));
@@ -41,12 +41,11 @@ async function requestWithFreshToken<T>(
 
 function SignedOutRoutes() {
   return <Routes>
-    <Route path="/sign-in/*" element={<main className="grid min-h-svh place-items-center px-4"><SignIn routing="path" path={clerkUrls.signIn} forceRedirectUrl={clerkUrls.afterSignIn} /></main>} />
-    <Route path="/sign-up/*" element={<main className="grid min-h-svh place-items-center px-4"><SignUp routing="path" path={clerkUrls.signUp} forceRedirectUrl={clerkUrls.afterSignUp} /></main>} />
-    <Route path="*" element={<main className="mx-auto flex min-h-svh max-w-3xl flex-col justify-center gap-6 px-6"><p className="text-sm font-medium text-muted-foreground">Voice AI</p><h1 className="text-4xl font-semibold tracking-tight">Build and test voice agents with your team.</h1><p className="max-w-xl text-muted-foreground">Sign in with your email, create or join an organization, invite teammates, and securely manage voice agents together.</p><div className="flex gap-3"><Button asChild><Link to="/sign-up">Sign up</Link></Button><Button variant="outline" asChild><Link to="/sign-in">Log in</Link></Button></div></main>} />
+    <Route path="/sign-in/*" element={<AuthPage mode="sign-in" />} />
+    <Route path="/sign-up/*" element={<AuthPage mode="sign-up" />} />
+    <Route path="*" element={<Navigate to="/sign-in" replace />} />
   </Routes>;
 }
-
 function ProvisionOrganization() {
   const { orgId, orgRole } = useAuth();
   const { organization } = useOrganization();
@@ -117,7 +116,7 @@ function AuthenticatedApp() {
 
   if (!isLoaded) return <LoadingPage>Loading…</LoadingPage>;
   if (!isSignedIn) return <SignedOutRoutes />;
-  if (pathname.startsWith("/sign-")) return <Navigate to="/runs" replace />;
+  if (pathname.startsWith("/sign-")) return <Navigate to="/" replace />;
 
   const platformAdmin = Boolean(appContext.data?.platform_admin);
   const contextResolved = appContext.isSuccess && !appContext.isFetching;
@@ -156,8 +155,11 @@ function AuthenticatedApp() {
 
 export function App() {
   const { getToken } = useAuth();
+  const { pathname } = useLocation();
   const api = useCallback(async <T,>(path: string, init?: RequestInit) => {
     return requestWithFreshToken<T>(getToken, path, init);
   }, [getToken]);
-  return <ApiContext.Provider value={api}><AuthenticatedApp /></ApiContext.Provider>;
+  // Public routes do not mount organization queries or operational keep-awake.
+  if (pathname === "/") return <Suspense fallback={<main className="grid min-h-svh place-items-center bg-black text-white">Loading Voice AI…</main>}><LandingPage /></Suspense>;
+  return <Suspense fallback={<LoadingPage />}><ApiContext.Provider value={api}><AuthenticatedApp /></ApiContext.Provider></Suspense>;
 }
