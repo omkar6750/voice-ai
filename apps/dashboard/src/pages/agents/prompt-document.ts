@@ -91,28 +91,29 @@ function decorate(doc: import("@tiptap/pm/model").Node, catalog: Catalog) {
     if (!node.isText) return;
     const position = (offset: number) =>
       Array.from(node.text!).slice(0, offset).join("").length;
+    const fallbackRanges: { from: number; to: number }[] = [];
     try {
-      for (const token of parsePrompt(node.text!).filter(
-        (t) => t.fallback && !t.escaped,
-      )) {
+      for (const token of parsePrompt(node.text!).filter((t) => t.fallback)) {
+        const from = position(token.start),
+          to = position(token.end);
+        fallbackRanges.push({ from, to });
+        if (token.escaped) continue;
         const errors = promptErrors(
           token.expression,
           catalog.variables,
           catalog.booleans,
         );
         decorations.push(
-          Decoration.inline(
-            pos + position(token.start),
-            pos + position(token.end),
-            {
-              class: errors.length
-                ? "rounded bg-destructive/20 text-destructive underline decoration-wavy"
-                : "rounded bg-primary/10 ring-1 ring-inset ring-primary/50",
-              "data-prompt-reference": "fallback",
-              "data-prompt-expression-start": String(token.start),
-              title: errors.join("; ") || "Rightmost nonempty variable wins",
-            },
-          ),
+          Decoration.inline(pos + from, pos + to, {
+            class: errors.length
+              ? "rounded bg-destructive/20 text-destructive underline decoration-wavy"
+              : "rounded bg-linear-to-r from-primary/10 via-primary/20 to-primary/40 text-foreground ring-1 ring-inset ring-primary/50",
+            "data-prompt-reference": "fallback",
+            "data-prompt-expression-start": String(token.start),
+            title:
+              errors.join("; ") ||
+              "Priority increases left to right: later nonempty values override earlier values",
+          }),
         );
       }
     } catch (error) {
@@ -126,6 +127,16 @@ function decorate(doc: import("@tiptap/pm/model").Node, catalog: Catalog) {
     for (const match of node.text!.matchAll(
       /(?:#([a-z][a-z0-9_]*)\b)|(?:\{\{\s*([a-zA-Z0-9_.:-]+)\s*\}\})/g,
     )) {
+      // One decoration owns the entire chain. Overlapping operand decorations
+      // split that wrapper into repeated boxes in ProseMirror's DOM.
+      if (
+        match[2] &&
+        fallbackRanges.some(
+          ({ from, to }) =>
+            match.index! >= from && match.index! + match[0].length <= to,
+        )
+      )
+        continue;
       const valid = match[1]
         ? catalog.tools.includes(match[1])
         : catalog.variables.includes(match[2]);
