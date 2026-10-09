@@ -3,10 +3,22 @@
 from types import SimpleNamespace
 
 from pipecat.frames.frames import ErrorFrame, UserStartedSpeakingFrame
-from pipecat.metrics.metrics import LLMTokenUsage, LLMUsageMetricsData
+from pipecat.metrics.metrics import LLMTokenUsage, LLMUsageMetricsData, TTSUsageMetricsData
 from pipecat.processors.frame_processor import FrameDirection
 from voice_runtime.execution.exchange import ExchangeTracker
 from voice_runtime.execution.observer import EvidenceObserver
+
+
+def test_tts_usage_sums_all_synthesized_chunks_in_one_operation():
+    observer = object.__new__(EvidenceObserver)
+    observer.llm, observer.tts, observer.stt = object(), object(), object()
+    observer.metrics = {"llm": {}, "stt": {}, "tts": {}}
+    for chars in [20, 39, 71, 40]:
+        observer._metrics(
+            observer.tts,
+            SimpleNamespace(data=[TTSUsageMetricsData(processor="tts", value=chars)]),
+        )
+    assert observer.metrics["tts"]["tts_characters"] == 170
 
 
 def test_usage_metric_preserves_provider_total_instead_of_recomputing_it():
@@ -83,6 +95,8 @@ def test_provider_error_frame_fails_active_operation_and_discards_vendor_payload
     observer.function_calls = []
     observer.metrics = {"llm": {}, "stt": {}, "tts": {}}
     observer._log = None
+    observer._seen_error_frames = []
+    observer.context_summary_idle = None
     observer._mark = lambda *_args, **_kwargs: None
     frame = ErrorFrame(error="function generation failed", processor=llm, exception=ProviderError())
 

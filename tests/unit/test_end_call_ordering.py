@@ -126,6 +126,28 @@ async def test_classify_started_result_is_not_normalized_as_classifier_output():
     assert manager.tracker.tool_result.call_args.args[1]["status"] == "started"
 
 
+async def test_classifier_edge_links_its_tool_before_context_transition():
+    _host, manager, _events = setup_flow()
+    manager.tracker.start_tool.return_value = "classification-invocation"
+    manager._pending_transition = None
+    manager._context_aggregator = SimpleNamespace(
+        assistant=lambda: SimpleNamespace(has_function_calls_in_progress=False)
+    )
+    manager._execute_transition = AsyncMock()
+
+    async def classifier(_args, _manager):
+        return {"lead_temperature": "warm"}, {"name": "hot_followup"}
+
+    async def callback(_result, *, properties):
+        assert manager._transition_tool_id == "classification-invocation"
+        assert properties.run_llm is False
+        await properties.on_context_updated()
+
+    execute = await manager._create_transition_func("classify_lead", classifier)
+    await execute(params("classify_lead", callback))
+    assert manager._execute_transition.await_args.args[0]["next_node"]["name"] == "hot_followup"
+
+
 async def test_shutdown_queue_failure_is_visible_and_allows_cleanup_retry():
     host, manager, _events = setup_flow()
     host.worker.queue_frame.side_effect = RuntimeError("worker stopped")
