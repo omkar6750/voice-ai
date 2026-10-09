@@ -402,7 +402,7 @@ class EvidenceObserver(BaseObserver):
             elif isinstance(metric, STTUsageMetricsData):
                 values["audio_seconds"] = metric.value.audio_seconds
             elif isinstance(metric, TTSUsageMetricsData):
-                values["tts_characters"] = metric.value
+                values["tts_characters"] = values.get("tts_characters", 0) + metric.value
             elif isinstance(metric, TextAggregationMetricsData):
                 values["text_aggregation_ms"] = metric.value * 1000
 

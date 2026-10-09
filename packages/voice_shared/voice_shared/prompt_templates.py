@@ -3,7 +3,6 @@
 import math
 import re
 from collections.abc import Mapping
-from copy import deepcopy
 from typing import Any
 
 VARIABLE = re.compile(r"\{\{\s*([A-Za-z0-9_.:-]+)\s*\}\}")
@@ -174,7 +173,16 @@ def prompt_fields(node: dict):
 
 
 def render_node(node: dict, state: dict, types: dict, sources: dict | None = None):
-    rendered, records = deepcopy(node), []
+    # Native nodes contain executable schemas and bound action handlers. Copy
+    # template containers, never their live runtime objects (tasks, transports).
+    def copy_containers(value):
+        if isinstance(value, dict):
+            return {key: copy_containers(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [copy_containers(item) for item in value]
+        return value
+
+    rendered, records = copy_containers(node), []
     for path, text in prompt_fields(node):
         value, refs = render_template(text, state, types, sources)
         target = rendered

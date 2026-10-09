@@ -55,7 +55,8 @@ class TracedFlowManager(FlowManager):
 
     @property
     def active_tool_invocation_id(self) -> str | None:
-        return self._active_tool_invocation.get()
+        active = getattr(self, "_active_tool_invocation", None)
+        return active.get() if active is not None else None
 
     def _context_message_index(self) -> int | None:
         messages = self._context_for_evidence.get_messages()
@@ -78,7 +79,11 @@ class TracedFlowManager(FlowManager):
         if classifier_messages:
             rendered["task_messages"] = [*rendered.get("task_messages", []), *classifier_messages]
         self._current_node_task_messages = list(rendered.get("task_messages", []))
-        self.tracker.start_visit(node_id, self._transition_tool_id, self._prompt_resolution)
+        self.tracker.start_visit(
+            node_id,
+            self._transition_tool_id or self.active_tool_invocation_id,
+            self._prompt_resolution,
+        )
         self._transition_tool_id = None
         try:
             self._node_rendered = True
@@ -201,7 +206,12 @@ class TracedFlowManager(FlowManager):
                 if isinstance(diagnostic, dict):
                     self.tracker.diagnostic(**diagnostic)
                 result_id = self.tracker.tool_result(invocation_id, result, is_final=is_final)
-                if (name == "change_node" or name.startswith("go_to_")) and is_final:
+                pending = getattr(self, "_pending_transition", None)
+                if is_final and (
+                    name == "change_node"
+                    or name.startswith("go_to_")
+                    or (pending and pending.get("function_name") == name)
+                ):
                     self._transition_tool_id = invocation_id
                 result_properties = properties or FunctionCallResultProperties(is_final=is_final)
                 if (

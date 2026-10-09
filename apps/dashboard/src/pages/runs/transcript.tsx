@@ -29,6 +29,7 @@ import {
   consumingLlm,
   deliveryFor,
   resultsFor,
+  exchangeVisits,
   whatsappReceiptHistory,
   whatsappDeliveryStatus,
 } from "./model";
@@ -214,6 +215,11 @@ export function Transcript({
                     value: diagnostic,
                     at: diagnostic.occurred_at,
                   })),
+                  ...exchangeVisits(timeline, exchange).map((visit) => ({
+                    kind: "visit" as const,
+                    value: visit,
+                    at: visit.entered_at,
+                  })),
                 ].sort(
                   (a, b) =>
                     Date.parse(a.at) - Date.parse(b.at) ||
@@ -239,6 +245,26 @@ export function Transcript({
                         </p>
                       )}
                       {events.map((event) => {
+                        if (event.kind === "visit") {
+                          return (
+                            <Marker key={event.value.id} variant="separator">
+                              <MarkerContent>
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() =>
+                                    onSelect({
+                                      kind: "visit",
+                                      id: event.value.id,
+                                    })
+                                  }
+                                >
+                                  Entered {event.value.node_key}
+                                </Button>
+                              </MarkerContent>
+                            </Marker>
+                          );
+                        }
                         if (event.kind === "tool") {
                           return (
                             <ToolActivity
@@ -256,7 +282,10 @@ export function Transcript({
                             (item) => item.id === operationId,
                           );
                           return (
-                            <Marker key={diagnostic.diagnostic_id} variant="separator">
+                            <Marker
+                              key={diagnostic.diagnostic_id}
+                              variant="separator"
+                            >
                               <MarkerContent>
                                 <Button
                                   type="button"
@@ -264,10 +293,16 @@ export function Transcript({
                                   size="sm"
                                   disabled={!span}
                                   aria-label="View context summary details"
-                                  onClick={() => span && onSelect({ kind: "span", id: span.id })}
+                                  onClick={() =>
+                                    span &&
+                                    onSelect({ kind: "span", id: span.id })
+                                  }
                                 >
-                                  Context summary · {diagnostic.code} · {clock(diagnostic.occurred_at)}
-                                  {span ? ` · ${duration(span.duration_ms)}` : ""}
+                                  Context summary · {diagnostic.code} ·{" "}
+                                  {clock(diagnostic.occurred_at)}
+                                  {span
+                                    ? ` · ${duration(span.duration_ms)}`
+                                    : ""}
                                 </Button>
                               </MarkerContent>
                             </Marker>

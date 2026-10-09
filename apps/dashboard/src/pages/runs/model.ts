@@ -31,6 +31,26 @@ export function exchangeTools(timeline: Timeline, exchange: Exchange): Tool[] {
   return timeline.tools.filter((item) => item.exchange_id === exchange.id);
 }
 
+export function exchangeVisits(timeline: Timeline, exchange: Exchange) {
+  const exchanges = [...timeline.exchanges].sort(
+    (a, b) => Date.parse(a.created_at) - Date.parse(b.created_at),
+  );
+  return timeline.flow_visits.filter((visit) => {
+    const tool = timeline.tools.find(
+      (item) => item.id === visit.triggered_by_tool_id,
+    );
+    if (tool?.exchange_id) return tool.exchange_id === exchange.id;
+    const at = Date.parse(visit.entered_at);
+    // Historical visits may lack the triggering tool link. Use recorded visit
+    // timing, never the current graph or an inferred classifier destination.
+    const owner =
+      [...exchanges]
+        .reverse()
+        .find((item) => Date.parse(item.created_at) <= at) ?? exchanges[0];
+    return owner?.id === exchange.id;
+  });
+}
+
 export function resultsFor(timeline: Timeline, tool: Tool): ToolResult[] {
   return timeline.tool_results
     .filter((item) => item.tool_invocation_id === tool.id)
@@ -58,8 +78,12 @@ export function whatsappDeliveryStatus(
     if (!payload || typeof payload !== "object" || Array.isArray(payload))
       return false;
     const result = (payload as Record<string, unknown>).result;
-    return !!result && typeof result === "object" && !Array.isArray(result)
-      && (result as Record<string, unknown>).status === "accepted";
+    return (
+      !!result &&
+      typeof result === "object" &&
+      !Array.isArray(result) &&
+      (result as Record<string, unknown>).status === "accepted"
+    );
   });
   if (!latest) {
     if (asyncSend)

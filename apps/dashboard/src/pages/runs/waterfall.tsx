@@ -117,7 +117,9 @@ export function Waterfall({
   return (
     <div className="flex flex-col gap-3">
       {timeline.exchanges.map((exchange, index) => {
-        const spans = exchangeSpans(timeline, exchange);
+        const spans = exchangeSpans(timeline, exchange).filter(
+          (span) => span.category !== "http_request",
+        );
         const tools = exchangeTools(timeline, exchange);
         const visits = timeline.flow_visits.filter((visit) =>
           spans.some((span) => span.id === visit.span_id),
@@ -253,30 +255,51 @@ export function Waterfall({
                           kind={op.kind}
                         />
                       </div>
-                      {op.kind === "span" && op.item.category === "summarizer" && (() => {
-                        const lifecycle = timeline.diagnostics.filter(
-                          (item) =>
-                            item.category === "context_summary" &&
-                            item.metadata?.summary_operation_id === op.item.id,
-                        );
-                        const applied = lifecycle.find((item) => item.code === "applied");
-                        const discarded = lifecycle.find((item) => item.code === "discarded");
-                        const failed = lifecycle.find((item) => item.code === "failed");
-                        const consumed = lifecycle.find((item) => item.code === "consumed");
-                        const consumingId = consumed?.metadata?.consuming_llm_operation_id;
-                        const consuming = typeof consumingId === "string"
-                          ? timeline.spans.find((item) => item.id === consumingId)
-                          : null;
-                        return (
-                          <div className="-mt-1 mb-2 pl-9 text-xs text-muted-foreground">
-                            {applied ? `Applied ${clock(applied.occurred_at)}` : ""}
-                            {consumed ? ` · consumed ${clock(consumed.occurred_at)}` : ""}
-                            {consuming ? ` by ${consuming.name}` : ""}
-                            {discarded ? `Discarded: ${discarded.message}` : ""}
-                            {failed ? `Failed: ${failed.message}` : ""}
-                          </div>
-                        );
-                      })()}
+                      {op.kind === "span" &&
+                        op.item.category === "summarizer" &&
+                        (() => {
+                          const lifecycle = timeline.diagnostics.filter(
+                            (item) =>
+                              item.category === "context_summary" &&
+                              item.metadata?.summary_operation_id ===
+                                op.item.id,
+                          );
+                          const applied = lifecycle.find(
+                            (item) => item.code === "applied",
+                          );
+                          const discarded = lifecycle.find(
+                            (item) => item.code === "discarded",
+                          );
+                          const failed = lifecycle.find(
+                            (item) => item.code === "failed",
+                          );
+                          const consumed = lifecycle.find(
+                            (item) => item.code === "consumed",
+                          );
+                          const consumingId =
+                            consumed?.metadata?.consuming_llm_operation_id;
+                          const consuming =
+                            typeof consumingId === "string"
+                              ? timeline.spans.find(
+                                  (item) => item.id === consumingId,
+                                )
+                              : null;
+                          return (
+                            <div className="-mt-1 mb-2 pl-9 text-xs text-muted-foreground">
+                              {applied
+                                ? `Applied ${clock(applied.occurred_at)}`
+                                : ""}
+                              {consumed
+                                ? ` · consumed ${clock(consumed.occurred_at)}`
+                                : ""}
+                              {consuming ? ` by ${consuming.name}` : ""}
+                              {discarded
+                                ? `Discarded: ${discarded.message}`
+                                : ""}
+                              {failed ? `Failed: ${failed.message}` : ""}
+                            </div>
+                          );
+                        })()}
                       {op.kind === "tool" &&
                         whatsappDeliveryStatus(timeline, op.item) && (
                           <div className="pl-9 pb-2 text-xs text-muted-foreground">
@@ -289,16 +312,27 @@ export function Waterfall({
                             )}
                           </div>
                         )}
-                      {op.kind === "tool" && timeline.context_events
-                        .filter((event) => event.tool_invocation_id === op.item.id)
-                        .map((event) => (
-                          <div key={event.id} className="pl-9 pb-2 text-xs text-muted-foreground">
-                            {event.source.replaceAll("_", " ")} · {event.status.replaceAll("_", " ")}
-                            {` · ${new Date(event.occurred_at).toLocaleTimeString()}`}
-                            {event.delivered_at ? " · added to context" : " · not delivered to context"}
-                            {event.consumed_at ? " · consumed by LLM" : " · not consumed by LLM"}
-                          </div>
-                        ))}
+                      {op.kind === "tool" &&
+                        timeline.context_events
+                          .filter(
+                            (event) => event.tool_invocation_id === op.item.id,
+                          )
+                          .map((event) => (
+                            <div
+                              key={event.id}
+                              className="pl-9 pb-2 text-xs text-muted-foreground"
+                            >
+                              {event.source.replaceAll("_", " ")} ·{" "}
+                              {event.status.replaceAll("_", " ")}
+                              {` · ${new Date(event.occurred_at).toLocaleTimeString()}`}
+                              {event.delivered_at
+                                ? " · added to context"
+                                : " · not delivered to context"}
+                              {event.consumed_at
+                                ? " · consumed by LLM"
+                                : " · not consumed by LLM"}
+                            </div>
+                          ))}
                       {op.kind === "span" &&
                         op.item.category === "classifier" &&
                         classifierResultsFor(timeline, op.item).map(
@@ -375,13 +409,16 @@ export function Waterfall({
           </Collapsible>
         );
       })}
-      {timeline.spans.some((span) => !span.exchange_id) ||
-      timeline.tools.some((tool) => !tool.exchange_id) ? (
+      {timeline.spans.some(
+        (span) => !span.exchange_id && span.category !== "http_request",
+      ) || timeline.tools.some((tool) => !tool.exchange_id) ? (
         <div className="rounded-lg border bg-card p-3">
           <p className="mb-2 text-sm font-medium">Outside exchange</p>
           {[
             ...timeline.spans
-              .filter((span) => !span.exchange_id)
+              .filter(
+                (span) => !span.exchange_id && span.category !== "http_request",
+              )
               .map((span) => ({
                 kind: "span" as const,
                 id: span.id,
@@ -414,6 +451,36 @@ export function Waterfall({
           ))}
         </div>
       ) : null}
+      {timeline.spans.some((span) => span.category === "http_request") && (
+        <Collapsible className="rounded-lg border bg-card p-3">
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" className="w-full justify-between">
+              API request details (
+              {
+                timeline.spans.filter(
+                  (span) => span.category === "http_request",
+                ).length
+              }
+              )
+              <ChevronDown className="size-4" />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            {timeline.spans
+              .filter((span) => span.category === "http_request")
+              .map((span) => (
+                <Button
+                  key={span.id}
+                  variant="ghost"
+                  className="w-full justify-start"
+                  onClick={() => onSelect({ kind: "span", id: span.id })}
+                >
+                  {span.name} · {span.status}
+                </Button>
+              ))}
+          </CollapsibleContent>
+        </Collapsible>
+      )}
     </div>
   );
 }
