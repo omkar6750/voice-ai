@@ -915,13 +915,21 @@ test("fallback groups preserve literal text, paste, edits and undo", () => {
   });
   assert.equal(editor.getText(), text);
   assert.equal(
-    new Set(
-      Array.from(
-        editor.view.dom.querySelectorAll("[data-prompt-expression-start]"),
-        (element) => element.getAttribute("data-prompt-expression-start"),
-      ),
-    ).size,
+    editor.view.dom.querySelectorAll("[data-prompt-expression-start]").length,
     2,
+  );
+  for (const group of editor.view.dom.querySelectorAll(
+    '[data-prompt-reference="fallback"]',
+  )) {
+    assert.equal(
+      group.querySelectorAll('[data-prompt-reference="variable"]').length,
+      0,
+    );
+  }
+  assert.ok(
+    editor.view.dom
+      .querySelector('[data-prompt-reference="fallback"]')
+      .classList.contains("bg-linear-to-r"),
   );
   assert.ok(editor.view.dom.querySelector('[title*="Boolean"]'));
   editor.commands.setTextSelection(1);
