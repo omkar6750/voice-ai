@@ -223,7 +223,7 @@ export function RunDetailPage() {
                   <span className="truncate text-muted-foreground">
                     {item.channel}
                   </span>
-                  <StatusBadge status={item.status} />
+                  <StatusBadge status={item.status} outcome={item.call_outcome} />
                 </span>
               </Link>
             ))}
@@ -264,7 +264,7 @@ export function RunDetailPage() {
                     : "Conversation"}
                 </h1>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <StatusBadge status={run.status} />
+                  <StatusBadge status={run.status} outcome={run.call_outcome} />
                   <span className="text-xs text-muted-foreground">
                     {stamp(run.started_at ?? run.created_at)}
                   </span>

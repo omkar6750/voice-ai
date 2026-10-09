@@ -10,7 +10,7 @@ from pipecat.frames.frames import EndFrame, TTSSpeakFrame
 from voice_runtime.diagnostics import (
     text_error_diagnostic,
 )
-from voice_runtime.safe_logs import RuntimeEvent, error_category, opaque_id, operational_event
+from voice_runtime.safe_logs import RuntimeEvent, opaque_id, operational_event
 from voice_runtime.telephony.base import CallState
 
 
@@ -72,6 +72,8 @@ class NativePipelineLifecycle:
 
     async def _pipeline_failed(self, frame) -> None:
         """A shutdown request does not make a subsequent pipeline failure successful."""
+        if self.answer_detection is not None and id(frame) in self.answer_detection.error_frames:
+            return
         self.termination.request("pipeline_failure")
         err_msg = getattr(frame, "error", None) or "inspect evidence"
         operational_event(
@@ -104,8 +106,11 @@ class NativePipelineLifecycle:
           - An async callable returning bool (True=still active) (Twilio/generic)
           - None (no liveness polling; pipeline ends on its own)
         """
+        if self.answer_detection is not None:
+            self.answer_detection.start()
         self.tracker.begin("greeting")
         await self.flow.initialize(self._node(self._snapshot["flow"]["initial_node"]))
+
         async def _check_active() -> bool:
             if modem_or_check is None:
                 return True
@@ -163,77 +168,26 @@ class NativePipelineLifecycle:
                 uncertain=True,
             )
             return
-        try:
-            status = await modem_or_check.status()
-        except Exception as exc:
-            self.tracker.diagnostic(
-                severity="error",
-                category="modem_failure",
-                source="modem",
-                code="termination_status_unavailable",
-                message="Could not read modem state at call termination",
-                detail=error_category(exc),
-                uncertain=True,
-            )
-            return
-        metadata = {
-            "alive": status.alive,
-            "serial_connected": status.serial_connected,
-            "sim_ready": status.sim_ready,
-            "voice_registered": status.voice_registered,
-            "call_state": status.call_state.value,
-            "rssi": status.rssi,
-            "signal_quality": status.signal_quality,
-            "operator": status.operator,
-            "radio_access": status.radio_access,
-            "usb_audio_active": status.usb_audio_active,
-        }
-        if status.rssi is not None and status.rssi <= 5:
-            self.tracker.diagnostic(
-                severity="warning",
-                category="modem_signal",
-                source="modem",
-                code="low_signal_observed",
-                message="Low modem signal was observed near call termination",
-                uncertain=True,
-                metadata=metadata,
-            )
-        if not status.voice_registered:
-            code, message, category = (
-                "network_unregistered",
-                "Modem was not voice-registered when the call ended",
-                "modem_network",
-            )
-        elif not status.alive or not status.serial_connected:
-            code, message, category = (
-                "modem_disconnected",
-                "Modem connection was unavailable when the call ended",
-                "modem_failure",
-            )
-        elif status.last_error:
-            code, message, category = (
-                "modem_command_error",
-                "Modem reported an error near call termination",
-                "modem_failure",
-            )
-        else:
-            code, message, category = (
-                "remote_hangup",
-                "The call ended without an agent hangup request",
-                "call_termination",
-            )
+        if hasattr(modem_or_check, "capture_release"):
+            evidence = await modem_or_check.capture_release()
+            if isinstance(evidence, dict):
+                self.termination.summary.transport_evidence = evidence
+                if self.termination.summary.cause == "disconnect_unknown":
+                    self.termination.summary.cause = evidence["reason"]
+                return
+        # Legacy/fake transports: absence of a status field cannot prove registration loss.
         self.tracker.diagnostic(
-            severity="warning" if category == "call_termination" else "error",
-            category=category,
-            source="modem",
-            code=code,
-            message=message,
-            detail=None,
-            uncertain=category == "call_termination",
-            metadata=metadata,
+            severity="warning",
+            category="call_termination",
+            source="transport",
+            code="disconnect_unknown",
+            message="Call ended without release-cause evidence",
+            uncertain=True,
         )
 
     async def close(self) -> None:
+        if self.answer_detection is not None:
+            await self.answer_detection.close()
         async with self._close_lock:
             if self._close_error is not None:
                 raise self._close_error
@@ -271,7 +225,9 @@ class NativePipelineLifecycle:
                     if event["status"] == "pending":
                         event["status"] = "ended_before_delivery"
                         if getattr(self, "broker", None):
-                            await self.broker.context_update({"id": event["id"], "status": "ended_before_delivery"})
+                            await self.broker.context_update(
+                                {"id": event["id"], "status": "ended_before_delivery"}
+                            )
             except asyncio.CancelledError as exc:
                 self.termination.request("cancelled")
                 primary_error = exc

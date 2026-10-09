@@ -191,6 +191,13 @@ async def execute_call(
                         message="Call artifacts could not be finalized",
                     )
                 )
+        transport_evidence = getattr(driver, "call_outcome", None)
+        if isinstance(transport_evidence, dict):
+            final_state = dict(final_state or {})
+            if isinstance(final_state.get("termination"), dict):
+                final_state["termination"]["transport_evidence"] = transport_evidence
+            else:
+                final_state["call_outcome"] = transport_evidence
         if spool is None:
             incomplete = True
         else:

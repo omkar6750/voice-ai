@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import AwareDatetime, BaseModel
-from sqlalchemy import or_, select, tuple_
+from sqlalchemy import func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner
 from voice_api.core.read_metrics import timed_read
@@ -112,6 +112,11 @@ async def list_runs(
             Run.contact_snapshot["name"].as_string().label("contact_name"),
             Run.endpoint_id,
             Run.status,
+            func.coalesce(
+                Run.final_state["termination"]["cause"].as_string(),
+                Run.final_state["runtime"]["termination"]["cause"].as_string(),
+                Run.final_state["runtime"]["call_outcome"]["reason"].as_string(),
+            ).label("call_outcome"),
             Run.created_at,
             Run.started_at,
             Run.ended_at,
@@ -193,6 +198,13 @@ async def get_run(run_id: str, session: AsyncSession = Session, _: None = Operat
         "contact_id": run.contact_id,
         "endpoint_id": run.endpoint_id,
         "status": run.status,
+        "termination": (run.final_state or {}).get("termination")
+        or ((run.final_state or {}).get("runtime") or {}).get("termination"),
+        "call_outcome": (
+            (run.final_state or {}).get("termination")
+            or ((run.final_state or {}).get("runtime") or {}).get("termination")
+            or {}
+        ).get("cause"),
         "config_hash": run.config_hash,
         "contact_snapshot": run.contact_snapshot,
         "resolved_config": run.resolved_config,

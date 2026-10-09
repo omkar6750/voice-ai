@@ -18,8 +18,7 @@ export function AudioPanel({
   change: (next: AgentConfig) => void;
   disabled: boolean;
 }) {
-  const sarvamRealtime =
-    config.stt.provider === "sarvam";
+  const sarvamRealtime = config.stt.provider === "sarvam";
 
   return (
     <section className="grid max-w-5xl gap-8 lg:grid-cols-2">
@@ -214,6 +213,46 @@ export function AudioPanel({
             }
           />
           <Field>
+            <FieldLabel htmlFor="voicemail-detection">
+              Phone voicemail detection
+            </FieldLabel>
+            <NativeSelect
+              id="voicemail-detection"
+              value={String(
+                config.call_limits.voicemail_detection_enabled ?? true,
+              )}
+              disabled={disabled}
+              onChange={(event) =>
+                change({
+                  ...config,
+                  call_limits: {
+                    ...config.call_limits,
+                    voicemail_detection_enabled: event.target.value === "true",
+                  },
+                })
+              }
+            >
+              <option value="true">Enabled</option>
+              <option value="false">Disabled</option>
+            </NativeSelect>
+          </Field>
+          <NumberField
+            id="voicemail-timeout"
+            label="Maximum answer detection wait, seconds"
+            value={config.call_limits.voicemail_detection_timeout_secs ?? 5}
+            min={1}
+            disabled={disabled}
+            onChange={(voicemail_detection_timeout_secs) =>
+              change({
+                ...config,
+                call_limits: {
+                  ...config.call_limits,
+                  voicemail_detection_timeout_secs,
+                },
+              })
+            }
+          />
+          <Field>
             <FieldLabel htmlFor="interruptions">Interruptions</FieldLabel>
             <NativeSelect
               id="interruptions"
@@ -235,9 +274,9 @@ export function AudioPanel({
           </Field>
         </FieldGroup>
         <p className="text-xs text-muted-foreground">
-          Interruptions control barge-in; the idle timeout starts after the agent
-          finishes speaking, reprompts once, then ends the call after another idle
-          period. Verify thresholds on a real carrier call.
+          Interruptions control barge-in; the idle timeout starts after the
+          agent finishes speaking, reprompts once, then ends the call after
+          another idle period. Verify thresholds on a real carrier call.
         </p>
       </div>
     </section>

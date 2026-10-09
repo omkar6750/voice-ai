@@ -134,6 +134,8 @@ function Evidence({
             </Value>
             <Value label="Hash">{run.config_hash ?? "Not recorded"}</Value>
           </dl>
+          <Json label="Call termination evidence" value={run.termination ?? undefined} />
+          <Json label="Observed modem URCs (sensitive payloads redacted)" value={diagnostics.filter((d) => d.category === "modem_event")} />
           {run.error && <Json label="Run error" value={run.error} />}
           {issues.length ? (
             <section className="flex flex-col gap-2">
