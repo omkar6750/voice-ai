@@ -81,6 +81,31 @@ def test_sarvam_can_be_selected_as_fallback(monkeypatch):
     assert keys == [("llm", "groq"), ("llm_fallback", "sarvam")]
 
 
+def test_groq_converts_developer_messages_for_primary_and_fallback():
+    service = llm_factory.build_llm_service(
+        SimpleNamespace(provider_stage_keys={"llm": "primary-key", "llm_fallback": "fallback-key"}),
+        {
+            "provider": "groq",
+            "model": "qwen/qwen3.8-27b",
+            "fallback": {
+                "provider": "groq",
+                "model": "qwen/qwen3.8-27b",
+                "first_token_timeout_seconds": 3,
+            },
+        },
+        stage="llm",
+    )
+
+    assert service.supports_developer_role is False
+    assert service._fallback_service.supports_developer_role is False
+
+
+def test_fallback_only_retries_transient_provider_statuses():
+    assert not llm_factory._fallback_worthy(llm_factory._Non200ProviderStatusError(400))
+    assert llm_factory._fallback_worthy(llm_factory._Non200ProviderStatusError(429))
+    assert llm_factory._fallback_worthy(llm_factory._Non200ProviderStatusError(503))
+
+
 @pytest.mark.asyncio
 async def test_fallback_provider_error_cycles_once_to_primary(monkeypatch):
     class PrimaryService:

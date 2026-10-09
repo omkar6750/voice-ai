@@ -7,7 +7,7 @@ import json
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 
 class Contract(BaseModel):
@@ -39,6 +39,18 @@ class SessionIdentity(Contract):
     run_id: UUID
     generation: UUID
     boot_id: UUID
+
+
+class TextTestCommand(SessionIdentity):
+    id: str = Field(min_length=1, max_length=100)
+    type: Literal["user_message", "cancel", "end"]
+    text: str | None = Field(default=None, max_length=8000)
+
+    @model_validator(mode="after")
+    def validate_message(self):
+        if self.type == "user_message" and not (self.text and self.text.strip()):
+            raise ValueError("A caller message is required")
+        return self
 
 
 class RuntimeSync(SessionIdentity):
@@ -85,3 +97,7 @@ class ModemProbe(Contract):
     baudrate: int = Field(default=115200, gt=0)
     at_timeout_secs: float = Field(default=2, gt=0, le=30)
     sample_rates: list[Literal[8000, 16000]] = Field(default_factory=lambda: [16000])
+
+
+class ModemRecovery(ModemProbe):
+    session: SessionIdentity | None = None

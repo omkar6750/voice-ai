@@ -22,8 +22,7 @@ def _install_service_mocks(monkeypatch):
     stt = _ServiceConstructor("SarvamSTTService")
     sarvam_tts = _ServiceConstructor("SarvamTTSService")
     cartesia_tts = _ServiceConstructor("CartesiaTTSService")
-    monkeypatch.setattr(speech_module, "SarvamSTTService", stt)
-    monkeypatch.setattr(speech_module, "_WavChunkSarvamSTTService", stt)
+    monkeypatch.setattr(speech_module, "SarvamRealtimeSTTService", stt)
     monkeypatch.setattr(speech_module, "SarvamTTSService", sarvam_tts)
     monkeypatch.setattr(speech_module, "CartesiaTTSService", cartesia_tts)
     return stt, sarvam_tts, cartesia_tts
@@ -39,7 +38,7 @@ def test_sarvam_settings_and_credentials_reach_service_constructors(monkeypatch)
     build_speech_services(
         settings,
         {
-            "stt": {"provider": "sarvam", "model": "saaras:v3"},
+            "stt": {"provider": "sarvam", "model": "saaras:v3-realtime"},
             "tts": {
                 "provider": "sarvam",
                 "model": "bulbul:v3",
@@ -51,10 +50,10 @@ def test_sarvam_settings_and_credentials_reach_service_constructors(monkeypatch)
         8000,
     )
 
-    stt_mock.Settings.assert_called_once_with(model="saaras:v3")
-    stt_mock.construct.assert_called_once_with(
-        api_key="sarvam-secret", settings={"model": "saaras:v3"}, sample_rate=8000
-    )
+    assert stt_mock.Settings.call_args.kwargs["model"] == "saaras:v3-realtime"
+    assert stt_mock.construct.call_args.kwargs["endpointing"] == "vad"
+    assert stt_mock.construct.call_args.kwargs["sample_rate"] == 8000
+    assert stt_mock.construct.call_args.kwargs["api_key"] == "sarvam-secret"
     tts_mock.Settings.assert_called_once_with(
         model="bulbul:v3", voice="anushka", language="hi-IN", pace=1.15
     )
@@ -71,17 +70,18 @@ def test_sarvam_settings_and_credentials_reach_service_constructors(monkeypatch)
     cartesia_mock.construct.assert_not_called()
 
 
-def test_saaras_v4_uses_realtime_server_vad_and_codemix(monkeypatch):
+@pytest.mark.parametrize("model", ["saaras:v3-realtime", "saaras:v4"])
+def test_saaras_uses_realtime_server_vad_and_codemix(monkeypatch, model):
+    _install_service_mocks(monkeypatch)
     realtime = _ServiceConstructor("SarvamRealtimeSTTService")
     monkeypatch.setattr(speech_module, "SarvamRealtimeSTTService", realtime)
-    _, _, _ = _install_service_mocks(monkeypatch)
 
     stt, _ = build_speech_services(
         SimpleNamespace(sarvam_api_key="sarvam-secret"),
         {
             "stt": {
                 "provider": "sarvam",
-                "model": "saaras:v4",
+                "model": model,
                 "realtime": {
                     "language_code": "auto",
                     "mode": "codemix",
@@ -105,7 +105,7 @@ def test_saaras_v4_uses_realtime_server_vad_and_codemix(monkeypatch):
     )
 
     realtime.Settings.assert_called_once_with(
-        model="saaras:v4",
+        model=model,
         language_code="auto",
         mode="codemix",
         stream_type="fast",
@@ -116,7 +116,7 @@ def test_saaras_v4_uses_realtime_server_vad_and_codemix(monkeypatch):
     realtime.construct.assert_called_once_with(
         api_key="sarvam-secret",
         settings={
-            "model": "saaras:v4",
+            "model": model,
             "language_code": "auto",
             "mode": "codemix",
             "stream_type": "fast",
@@ -163,7 +163,7 @@ def test_cartesia_settings_credentials_and_audio_format_reach_constructor(monkey
     _, tts = build_speech_services(
         settings,
         {
-            "stt": {"provider": "sarvam", "model": "saaras:v3"},
+            "stt": {"provider": "sarvam", "model": "saaras:v3-realtime"},
             "tts": {
                 "provider": "cartesia",
                 "model": "sonic-3",
@@ -209,7 +209,7 @@ def test_unsupported_provider_raises_without_constructing_wrong_service(
 ):
     stt_mock, sarvam_tts_mock, cartesia_tts_mock = _install_service_mocks(monkeypatch)
     snapshot = {
-        "stt": {"provider": "sarvam", "model": "saaras:v3"},
+        "stt": {"provider": "sarvam", "model": "saaras:v3-realtime"},
         "tts": {"provider": "sarvam", "model": "bulbul:v3"},
     }
     snapshot[slot]["provider"] = provider
@@ -223,3 +223,14 @@ def test_unsupported_provider_raises_without_constructing_wrong_service(
         stt_mock.construct.assert_called_once()
     sarvam_tts_mock.construct.assert_not_called()
     cartesia_tts_mock.construct.assert_not_called()
+
+
+def test_legacy_sarvam_model_is_rejected(monkeypatch):
+    stt, _, _ = _install_service_mocks(monkeypatch)
+    with pytest.raises(ValueError, match="Legacy Sarvam STT"):
+        build_speech_services(
+            SimpleNamespace(sarvam_api_key="fake"),
+            {"stt": {"provider": "sarvam", "model": "saaras:v3"}},
+            16000,
+        )
+    stt.construct.assert_not_called()

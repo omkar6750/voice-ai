@@ -577,6 +577,11 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
         else:
             session.add(ConversationMessage(id=record.id, **fields))
     elif isinstance(record, (OperationStarted, OperationEnded)):
+        visit_id = record.attributes.get("node_visit_id")
+        if visit_id is not None:
+            visit = await session.get(FlowNodeVisit, visit_id)
+            if visit is None or visit.run_id != run_id:
+                raise HTTPException(422, "Operation node visit must belong to run")
         fields = dict(
             run_id=run_id,
             exchange_id=record.exchange_id,

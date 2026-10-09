@@ -60,7 +60,6 @@ export function FlowPanel({
   const availableVariables = [
     ...temporalKeys,
     ...contactVariables,
-    ...contactVariables.map((v) => `contact.${v}`),
     ...(config.fact_slots ?? [])
       .filter((slot) => slot.key)
       .map((slot) => slot.key),

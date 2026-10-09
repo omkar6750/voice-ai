@@ -7,6 +7,7 @@ import hashlib
 import secrets
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from uuid import uuid4
 
 import httpx
@@ -15,7 +16,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from voice_runtime.safe_logs import configure_safe_logging
-from voice_shared.contracts import ModemProbe, PrepareSession, SessionIdentity, configuration_hash
+from voice_shared.contracts import (
+    ModemProbe,
+    ModemRecovery,
+    PrepareSession,
+    SessionIdentity,
+    TextTestCommand,
+    configuration_hash,
+)
 from voice_shared.http_clients import install
 from voice_shared.logging import HttpLoggingMiddleware, configure, exception_event
 
@@ -23,7 +31,12 @@ from voice_runner.capacity import Capacity
 from voice_runner.session import Session
 from voice_runner.settings import DeploymentConfigurationError, RuntimeSettings, get_settings
 
-configure_safe_logging()
+configure_safe_logging(
+    env_files=(
+        Path(__file__).resolve().parents[1] / ".env",
+        Path(__file__).resolve().parents[1] / ".env.local",
+    )
+)
 
 
 class Manager:
@@ -400,6 +413,9 @@ async def session_status(run_id: str, request: Request):
 @app.post("/v1/sessions/browser-ticket", dependencies=[Depends(authenticate)])
 async def ticket(body: SessionIdentity, request: Request):
     s = request.app.state.manager.get(body.run_id, body.generation, body.boot_id)
+    if s.request.channel == "text_test" and s.text and s.text.paused:
+        # Let the API resume from the persisted safe checkpoint in a new session.
+        raise HTTPException(404, "Text session paused; resume from its saved checkpoint")
     if (
         s.request.channel not in {"browser", "text_test"}
         or s.connected
@@ -416,6 +432,41 @@ async def ticket(body: SessionIdentity, request: Request):
     )
     route = "text" if s.request.channel == "text_test" else "browser"
     return {"ticket": ticket, "ws_url": f"{base}/v1/{route}/{s.run_id}?ticket={ticket}"}
+
+
+@app.post("/v1/sessions/text-start", dependencies=[Depends(authenticate)])
+async def start_text_test(body: SessionIdentity, request: Request):
+    manager = request.app.state.manager
+    session = manager.get(body.run_id, body.generation, body.boot_id)
+    if session.request.channel != "text_test" or not session.text:
+        raise HTTPException(404, "Text-test session unavailable")
+    if session.text.paused or session.closed.is_set():
+        raise HTTPException(404, "Text-test session paused; resume from its saved checkpoint")
+    async with manager.lock:
+        if session.task and not session.task.done():
+            return {"run_id": session.run_id, "state": session.state}
+        session.ticket_hash = None
+        session.connected = True
+        session.state = "running"
+        from voice_runner.text import run_text
+
+        session.task = asyncio.create_task(run_text(session), name=f"text-{session.run_id}")
+    return {"run_id": session.run_id, "state": session.state}
+
+
+@app.post("/v1/sessions/text-command", dependencies=[Depends(authenticate)])
+async def text_command(body: TextTestCommand, request: Request):
+    session = request.app.state.manager.get(body.run_id, body.generation, body.boot_id)
+    if session.request.channel != "text_test" or not session.text:
+        raise HTTPException(404, "Text-test session unavailable")
+    await session.text.ready.wait()
+    if session.text.paused or session.closed.is_set() or not session.host:
+        raise HTTPException(409, "Text-test session is no longer accepting messages")
+    try:
+        await session.text.command({"id": body.id, "type": body.type, "text": body.text})
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    return {"run_id": session.run_id, "command_id": body.id, "status": "accepted"}
 
 
 @app.websocket("/v1/browser/{run_id}")
@@ -593,6 +644,13 @@ async def probe_modem(body: ModemProbe, request: Request):
         finally:
             async with m.lock:
                 m.probe_ports.difference_update(ports)
+
+
+@app.post("/v1/modems/reconcile", dependencies=[Depends(authenticate)])
+async def reconcile_modem(body: ModemRecovery, request: Request):
+    from voice_runner.modem_recovery import verify_modem_recovery
+
+    return await verify_modem_recovery(request.app.state.manager, body)
 
 
 @app.websocket("/v1/text/{run_id}")

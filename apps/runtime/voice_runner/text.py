@@ -379,6 +379,13 @@ async def run_text(session):
     from voice_shared.logging import run_id
 
     scope = run_id.set(session.run_id)
+    from voice_shared.request_evidence import capture_payloads
+    from voice_shared.request_evidence import sink as request_sink
+
+    request_token = request_sink.set(session.tracker.request_attempt)
+    payload_token = capture_payloads.set(
+        bool(session.request.snapshot.get("_resolved", {}).get("pipeline_logs_enabled"))
+    )
     session.task = asyncio.current_task()
     session.state = "running"
     state = session.text
@@ -484,3 +491,5 @@ async def run_text(session):
             }
         )
         run_id.reset(scope)
+        request_sink.reset(request_token)
+        capture_payloads.reset(payload_token)

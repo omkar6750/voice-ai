@@ -106,6 +106,49 @@ class BackendToolDispatch:
 
     def _handler(self, name: str):
         async def execute(args: dict, _manager: FlowManager):
+            definition = (
+                self._snapshot.get("_resolved", {})
+                .get("tools", {})
+                .get(name, {})
+                .get("definition", {})
+            )
+            if definition.get("handler") == "save_referral":
+                from fastapi import HTTPException
+                from pydantic import ValidationError
+                from voice_runtime.contracts.referrals import SaveReferralArguments
+
+                from voice_api.db.session import SessionFactory
+                from voice_api.db.tenant_scope import bind_run_organization
+                from voice_api.schemas.referrals import ReferralResponse
+                from voice_api.services.referral_service import save_referral
+
+                try:
+                    arguments = SaveReferralArguments.model_validate(args)
+                    async with SessionFactory() as session:
+                        await bind_run_organization(session, self.run_id)
+                        row = await save_referral(
+                            session,
+                            run_id=self.run_id,
+                            invocation_id=getattr(_manager, "active_tool_invocation_id", ""),
+                            arguments=arguments,
+                        )
+                        result = ReferralResponse.model_validate(row).model_dump(mode="json")
+                        await session.commit()
+                    return {"status": "saved", "referral_id": result["id"], "referral": result}
+                except HTTPException as exc:
+                    return {
+                        "status": "error",
+                        "error": exc.detail,
+                        "code": "referral_validation_failed",
+                    }
+                except ValidationError as exc:
+                    return {
+                        "status": "error",
+                        "code": "invalid_referral_arguments",
+                        "errors": exc.errors(
+                            include_input=False, include_context=False, include_url=False
+                        ),
+                    }
             if name == "check_whatsapp_window":
                 connection_id = self._snapshot["_resolved"]["tools"][name]["definition"].get(
                     "whatsapp_connection_id"
@@ -372,7 +415,9 @@ class BackendToolDispatch:
                     operational_event(RuntimeEvent.RECIPIENT_MISSING, level="WARNING")
                     return {"status": "error", "error": "No valid phone number for contact"}
 
-                caller_name = (args.get("caller_name") or contact.get("name") or "there").strip()
+                caller_name = (
+                    args.get("caller_name") or contact.get("first_name") or "there"
+                ).strip()
                 template_name = str(whatsapp_config.get("template_name") or "").strip()
                 if not template_name:
                     return {
@@ -541,15 +586,14 @@ class BackendToolDispatch:
                     from voice_api.models import Callback
                     from voice_api.services.calendar_service import (
                         SchedulingError,
-                        format_local_callback_time,
                         resolve_timeframe,
                     )
 
                     try:
-                        due_at = resolve_timeframe(raw_time, timezone).start
+                        window = resolve_timeframe(raw_time, timezone)
+                        due_at = window.start
                     except SchedulingError:
                         return {"status": "error", "error": "Callback time could not be resolved"}
-                    formatted_time = format_local_callback_time(due_at, timezone)
                     request_key = f"{self.run_id}_{uuid4().hex[:8]}"
                     async with SessionFactory() as session:
                         await bind_run_organization(session, self.run_id)
@@ -560,6 +604,9 @@ class BackendToolDispatch:
                             due_at=due_at,
                             timezone=timezone,
                             original_phrase=raw_time.strip(),
+                            callback_mode="human",
+                            requested_window_start=window.start,
+                            requested_window_end=window.end,
                             status="scheduled",
                             reason=reason,
                         )
@@ -574,8 +621,12 @@ class BackendToolDispatch:
                         return {
                             "status": "ok",
                             "callback_id": cb.id,
-                            "scheduled_time": formatted_time,
-                            "message": f"Callback request recorded for {formatted_time}.",
+                            "requested_timeframe": raw_time.strip(),
+                            "booking_confirmed": False,
+                            "message": (
+                                f"Callback request recorded for {raw_time.strip()}. "
+                                "Our team will reach out to confirm a suitable time."
+                            ),
                         }
                 except Exception as exc:
                     operational_event(

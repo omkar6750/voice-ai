@@ -66,6 +66,63 @@ def test_plain_transcript_contains_only_finalized_speech():
     assert tracker.plain_transcript() == "Caller: नमस्कार\nAgent: नमस्कार, कसे आहात?"
 
 
+def test_booking_evidence_preserves_confirmed_and_uncertain_results_only():
+    tracker = ExchangeTracker("run-one", SimpleNamespace(submit=lambda _: None))
+    for name, payload, final in [
+        ("check_callback_availability", {"status": "ok", "slots": []}, True),
+        ("book_callback", {"status": "started"}, False),
+        ("book_callback", {"status": "confirmed", "scheduled_time": "Tuesday 15:30 IST"}, True),
+        ("book_callback", {"status": "uncertain"}, True),
+    ]:
+        invocation = tracker.start_tool(
+            name, "version", "function", {"reason": "Technical Solutions scoping"}
+        )
+        tracker.tool_result(invocation, payload, is_final=final)
+    assert tracker.booking_results() == [
+        {
+            "arguments": {"reason": "Technical Solutions scoping"},
+            "payload": {"status": "confirmed", "scheduled_time": "Tuesday 15:30 IST"},
+        },
+        {
+            "arguments": {"reason": "Technical Solutions scoping"},
+            "payload": {"status": "uncertain"},
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_composer_receives_structured_booking_evidence(monkeypatch):
+    captured = {}
+
+    class Service:
+        async def run_inference(self, context, *, max_tokens):
+            captured["messages"] = context.get_messages()
+            return '{"caller_name":"there","message":"Tuesday 15:30 IST"}'
+
+    def build(_settings, _model, *, stage, system_instruction):
+        captured["system"] = system_instruction
+        return Service()
+
+    monkeypatch.setattr("voice_runtime.execution.whatsapp_composer.build_llm_service", build)
+    evidence = [
+        {
+            "arguments": {"reason": "Technical Solutions scoping"},
+            "payload": {"status": "confirmed", "scheduled_time": "Tuesday 15:30 IST"},
+        }
+    ]
+    await compose_whatsapp(
+        settings=object(),
+        config={"model": {"max_tokens": 200}},
+        template={"system_prompt": "Use confirmed facts."},
+        definition=DEFINITION,
+        transcript="Caller: Tomorrow afternoon please",
+        booking_results=evidence,
+    )
+    assert "status confirmed" in captured["system"]
+    assert "Tuesday 15:30 IST" in captured["messages"][1]["content"]
+    assert "Technical Solutions scoping" in captured["messages"][1]["content"]
+
+
 @pytest.mark.asyncio
 async def test_composer_receives_only_plain_transcript(monkeypatch):
     captured = {}
@@ -109,7 +166,10 @@ def test_agent_composer_requires_bound_template_key():
         AgentConfig.model_validate(
             {
                 "name": "Test",
-                "flow": {"initial_node": "start", "nodes": [{"id": "start", "terminal": True}]},
+                "flow": {
+                    "initial_node": "start",
+                    "nodes": [{"id": "start", "terminal": True, "respond_immediately": False}],
+                },
                 "composer": {
                     "enabled": True,
                     "templates": {

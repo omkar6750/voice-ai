@@ -12,11 +12,7 @@ import {
 } from "@/components/record-page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from "@/components/ui/field";
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { NativeSelect } from "@/components/ui/native-select";
 import {
   Sheet,
@@ -46,6 +42,8 @@ type CallbackRecord = {
   due_at: string | null;
   timezone: string;
   original_phrase: string;
+  callback_mode: string;
+  scheduled_start: string | null;
   status: string;
   automatic_attempts: number;
   call_id: string | null;
@@ -143,7 +141,9 @@ export function CallbacksPage() {
                 data.automatic_callbacks_enabled ? "default" : "secondary"
               }
             >
-              {data.automatic_callbacks_enabled ? "Automation On" : "Manual Only"}
+              {data.automatic_callbacks_enabled
+                ? "Automation On"
+                : "Manual Only"}
             </Badge>
             <span className="text-xs text-muted-foreground">
               Total: {data.total}
@@ -208,23 +208,30 @@ export function CallbacksPage() {
                 <TableCell>{cb.contact_phone || "—"}</TableCell>
                 <TableCell>
                   <div className="text-sm">
-                    {cb.due_at
-                      ? new Date(cb.due_at).toLocaleString(undefined, {
-                          timeZone: cb.timezone || undefined,
-                          dateStyle: "short",
-                          timeStyle: "short",
-                        })
-                      : "Unset"}
+                    {cb.callback_mode === "human" && !cb.scheduled_start
+                      ? `${cb.original_phrase} · time awaiting confirmation`
+                      : cb.due_at
+                        ? new Date(cb.due_at).toLocaleString(undefined, {
+                            timeZone: cb.timezone || undefined,
+                            dateStyle: "short",
+                            timeStyle: "short",
+                          })
+                        : "Unset"}
                   </div>
                   <div className="text-xs text-muted-foreground">
                     {cb.timezone}
                   </div>
                 </TableCell>
-                <TableCell className="max-w-xs truncate text-xs text-muted-foreground" title={cb.original_phrase}>
+                <TableCell
+                  className="max-w-xs truncate text-xs text-muted-foreground"
+                  title={cb.original_phrase}
+                >
                   “{cb.original_phrase}”
                 </TableCell>
                 <TableCell>
-                  {cb.agent_version_number ? `v${cb.agent_version_number}` : "—"}
+                  {cb.agent_version_number
+                    ? `v${cb.agent_version_number}`
+                    : "—"}
                 </TableCell>
                 <TableCell>
                   <StatusBadge value={cb.status} />
@@ -236,9 +243,7 @@ export function CallbacksPage() {
                       variant="outline"
                       onClick={() => {
                         setSelectedCallback(cb);
-                        setSelectedEndpoint(
-                          availableEndpoints[0]?.id || "",
-                        );
+                        setSelectedEndpoint(availableEndpoints[0]?.id || "");
                       }}
                     >
                       <Play className="mr-1 size-3.5" />
@@ -259,76 +264,82 @@ export function CallbacksPage() {
       </LoadState>
 
       {/* Manual Launch Sheet */}
-      <AdminOnly><Sheet
-        open={Boolean(selectedCallback)}
-        onOpenChange={(open) => !open && setSelectedCallback(null)}
-      >
-        <SheetContent>
-          <SheetHeader>
-            <SheetTitle>Launch Callback</SheetTitle>
-            <SheetDescription>
-              Select an available modem runtime endpoint to place this return call now.
-            </SheetDescription>
-          </SheetHeader>
+      <AdminOnly>
+        <Sheet
+          open={Boolean(selectedCallback)}
+          onOpenChange={(open) => !open && setSelectedCallback(null)}
+        >
+          <SheetContent>
+            <SheetHeader>
+              <SheetTitle>Launch Callback</SheetTitle>
+              <SheetDescription>
+                Select an available modem runtime endpoint to place this return
+                call now.
+              </SheetDescription>
+            </SheetHeader>
 
-          {selectedCallback && (
-            <div className="mt-6 flex flex-col gap-5">
-              <div className="rounded-md border p-3 text-sm">
-                <p className="font-semibold text-foreground">
-                  {selectedCallback.contact_name || "Contact"}
-                </p>
-                <p className="text-muted-foreground">{selectedCallback.contact_phone}</p>
-                <p className="mt-2 text-xs italic text-muted-foreground">
-                  “{selectedCallback.original_phrase}”
-                </p>
+            {selectedCallback && (
+              <div className="mt-6 flex flex-col gap-5">
+                <div className="rounded-md border p-3 text-sm">
+                  <p className="font-semibold text-foreground">
+                    {selectedCallback.contact_name || "Contact"}
+                  </p>
+                  <p className="text-muted-foreground">
+                    {selectedCallback.contact_phone}
+                  </p>
+                  <p className="mt-2 text-xs italic text-muted-foreground">
+                    “{selectedCallback.original_phrase}”
+                  </p>
+                </div>
+
+                <Field>
+                  <FieldLabel htmlFor="callback-endpoint">
+                    Runtime Endpoint
+                  </FieldLabel>
+                  <NativeSelect
+                    id="callback-endpoint"
+                    value={selectedEndpoint}
+                    onChange={(e) => setSelectedEndpoint(e.target.value)}
+                  >
+                    <option value="">Select an endpoint...</option>
+                    {dialOptions.data?.endpoints.map((ep) => (
+                      <option
+                        key={ep.id}
+                        value={ep.id}
+                        disabled={Boolean(ep.active_run_id)}
+                      >
+                        {ep.name}{" "}
+                        {ep.active_run_id ? "(Occupied)" : "(Available)"}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                  <FieldDescription>
+                    Uncertain attempts are never redialed automatically.
+                  </FieldDescription>
+                </Field>
+
+                <SheetFooter className="mt-auto">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setSelectedCallback(null)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={!selectedEndpoint || launchBusy}
+                    onClick={() => void launchCallback()}
+                  >
+                    <PhoneCall className="mr-1.5 size-4" />
+                    {launchBusy ? "Launching…" : "Dial Now"}
+                  </Button>
+                </SheetFooter>
               </div>
-
-              <Field>
-                <FieldLabel htmlFor="callback-endpoint">
-                  Runtime Endpoint
-                </FieldLabel>
-                <NativeSelect
-                  id="callback-endpoint"
-                  value={selectedEndpoint}
-                  onChange={(e) => setSelectedEndpoint(e.target.value)}
-                >
-                  <option value="">Select an endpoint...</option>
-                  {dialOptions.data?.endpoints.map((ep) => (
-                    <option
-                      key={ep.id}
-                      value={ep.id}
-                      disabled={Boolean(ep.active_run_id)}
-                    >
-                      {ep.name} {ep.active_run_id ? "(Occupied)" : "(Available)"}
-                    </option>
-                  ))}
-                </NativeSelect>
-                <FieldDescription>
-                  Uncertain attempts are never redialed automatically.
-                </FieldDescription>
-              </Field>
-
-              <SheetFooter className="mt-auto">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setSelectedCallback(null)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  disabled={!selectedEndpoint || launchBusy}
-                  onClick={() => void launchCallback()}
-                >
-                  <PhoneCall className="mr-1.5 size-4" />
-                  {launchBusy ? "Launching…" : "Dial Now"}
-                </Button>
-              </SheetFooter>
-            </div>
-          )}
-        </SheetContent>
-      </Sheet></AdminOnly>
+            )}
+          </SheetContent>
+        </Sheet>
+      </AdminOnly>
     </PageBody>
   );
 }

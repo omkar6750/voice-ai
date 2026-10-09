@@ -10,6 +10,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
+from voice_shared.dev_visibility import is_development, redact_api_keys
+
 _EVENTS = frozenset(
     {
         "runtime_started",
@@ -22,6 +24,7 @@ _EVENTS = frozenset(
         "pipeline_frame",
         "pipeline_error",
         "pcm_transport_failure",
+        "turn_diag_pcm_window",
         "processor_setup",
         "run_finalized",
     }
@@ -80,7 +83,7 @@ _FRAME_TYPES = frozenset(
         "VADUserStoppedSpeakingFrame",
     }
 )
-_COMPONENTS = frozenset({"runner", "modem", "telephony", "pipecat", "transport", "api"})
+_COMPONENTS = frozenset({"runner", "modem", "telephony", "pipecat", "transport", "api", "sim_rx"})
 _PROCESSORS = frozenset({"llm", "stt", "tts", "input", "output", "other"})
 _FIELDS = frozenset(
     {
@@ -93,6 +96,10 @@ _FIELDS = frozenset(
         "processor_usable",
         "status",
         "duration_ms",
+        "rms_dbfs",
+        "peak_dbfs",
+        "clipped_samples",
+        "samples",
         "sequence",
         "sample_rate",
         "source",
@@ -132,7 +139,9 @@ class LocalRuntimeTrace:
             "event": event,
             "component": component,
         }
-        for key, value in fields.items():
+        if is_development():
+            row.update(redact_api_keys(fields))
+        for key, value in ({} if is_development() else fields).items():
             if key not in _FIELDS:
                 continue
             if key == "command" and value not in _COMMANDS:
@@ -151,6 +160,12 @@ class LocalRuntimeTrace:
                 value = "other"
             elif key in {"duration_ms"}:
                 if type(value) not in {int, float} or not 0 <= value <= 86_400_000:
+                    continue
+            elif key in {"rms_dbfs", "peak_dbfs"}:
+                if type(value) not in {int, float} or not -120 <= value <= 0:
+                    continue
+            elif key in {"clipped_samples", "samples"}:
+                if type(value) is not int or not 0 <= value <= 10_000_000:
                     continue
             elif key == "sequence":
                 if type(value) is not int or not 0 <= value <= 2**53:

@@ -1,6 +1,14 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Activity, Edit3, Phone, Plus, ShieldCheck, Trash2, User } from "lucide-react";
+import {
+  Activity,
+  Edit3,
+  Phone,
+  Plus,
+  ShieldCheck,
+  Trash2,
+  User,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useApi } from "@/app/api";
 import { AdminOnly } from "@/app/access";
@@ -64,6 +72,8 @@ type ContactRunRecord = {
 type ContactDetailResponse = {
   id: string;
   name: string;
+  first_name?: string | null;
+  last_name?: string | null;
   phone_number: string;
   timezone: string | null;
   business: string | null;
@@ -78,14 +88,16 @@ type ContactDetailResponse = {
 export function ContactDetailPage() {
   const { contactId = "" } = useParams();
   const api = useApi();
-  const { data, loading, error, reload } =
-    useResource<ContactDetailResponse>(`/contacts/${contactId}`);
+  const { data, loading, error, reload } = useResource<ContactDetailResponse>(
+    `/contacts/${contactId}`,
+  );
 
   const [editOpen, setEditOpen] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
 
   // Edit form state
-  const [name, setName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [phone, setPhone] = useState("");
   const [timezone, setTimezone] = useState("");
   const [business, setBusiness] = useState("");
@@ -99,7 +111,11 @@ export function ContactDetailPage() {
     setMetadataEntries((prev) => [...prev, { key: "", value: "" }]);
   }
 
-  function updateMetadataEntry(index: number, field: "key" | "value", val: string) {
+  function updateMetadataEntry(
+    index: number,
+    field: "key" | "value",
+    val: string,
+  ) {
     setMetadataEntries((prev) => {
       const next = [...prev];
       next[index] = { ...next[index], [field]: val };
@@ -113,7 +129,9 @@ export function ContactDetailPage() {
 
   useEffect(() => {
     if (data) {
-      setName(data.name);
+      const nameParts = data.name.trim().split(/\s+/);
+      setFirstName(data.first_name || nameParts[0] || "");
+      setLastName(data.last_name ?? nameParts.slice(1).join(" "));
       setPhone(data.phone_number);
       setTimezone(data.timezone || "");
       setBusiness(data.business || "");
@@ -124,7 +142,7 @@ export function ContactDetailPage() {
         Object.entries(meta).map(([key, value]) => ({
           key,
           value: value === null || value === undefined ? "" : String(value),
-        }))
+        })),
       );
     }
   }, [data]);
@@ -135,7 +153,10 @@ export function ContactDetailPage() {
 
     const metadata_json: Record<string, string> = {};
     for (const entry of metadataEntries) {
-      const k = entry.key.trim().toLowerCase().replace(/[^a-z0-9_.]+/g, "_");
+      const k = entry.key
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_.]+/g, "_");
       if (k && entry.value.trim()) {
         metadata_json[k] = entry.value.trim();
       }
@@ -145,7 +166,8 @@ export function ContactDetailPage() {
       await api(`/contacts/${contactId}`, {
         method: "PATCH",
         body: JSON.stringify({
-          name: name.trim(),
+          first_name: firstName.trim(),
+          last_name: lastName.trim() || null,
           phone_number: phone.trim(),
           timezone: timezone.trim() || null,
           business: business.trim() || null,
@@ -192,7 +214,11 @@ export function ContactDetailPage() {
             </Button>
           </div>
         }
-        readOnlyAction={<Button asChild variant="outline"><Link to="/contacts">All contacts</Link></Button>}
+        readOnlyAction={
+          <Button asChild variant="outline">
+            <Link to="/contacts">All contacts</Link>
+          </Button>
+        }
       />
 
       <LoadState
@@ -202,6 +228,11 @@ export function ContactDetailPage() {
       >
         {data && (
           <div className="flex flex-col gap-10">
+            <Button asChild variant="outline" className="self-start">
+              <Link to={`/referrals?contact=${contactId}`}>
+                View referrals from this contact
+              </Link>
+            </Button>
             {/* Profile Overview */}
             <section className="grid max-w-4xl gap-6 md:grid-cols-2">
               <div className="rounded-lg border bg-card p-5 text-card-foreground">
@@ -219,7 +250,9 @@ export function ContactDetailPage() {
               </div>
 
               <div className="rounded-lg border bg-card p-5 text-card-foreground">
-                <h3 className="mb-4 text-sm font-semibold">Context & Provenance</h3>
+                <h3 className="mb-4 text-sm font-semibold">
+                  Context & Provenance
+                </h3>
                 <ReadOnlyValue
                   label="Acquisition source"
                   value={data.source || "—"}
@@ -247,9 +280,12 @@ export function ContactDetailPage() {
               <div className="rounded-lg border bg-card p-5 text-card-foreground md:col-span-2">
                 <div className="flex items-center justify-between mb-3">
                   <div>
-                    <h3 className="text-sm font-semibold">Custom Ad & Lead Metadata</h3>
+                    <h3 className="text-sm font-semibold">
+                      Custom Ad & Lead Metadata
+                    </h3>
                     <p className="text-xs text-muted-foreground">
-                      Dynamic variables passed to voice agent prompts during calls.
+                      Dynamic variables passed to voice agent prompts during
+                      calls.
                     </p>
                   </div>
                   <Badge variant="outline" className="text-xs">
@@ -258,12 +294,16 @@ export function ContactDetailPage() {
                 </div>
                 {Object.keys(data.metadata || {}).length === 0 ? (
                   <p className="text-xs text-muted-foreground italic">
-                    No custom metadata stored for this contact. Click "Edit details" to add ad or campaign variables.
+                    No custom metadata stored for this contact. Click "Edit
+                    details" to add ad or campaign variables.
                   </p>
                 ) : (
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                     {Object.entries(data.metadata || {}).map(([key, val]) => (
-                      <div key={key} className="rounded border bg-muted/30 p-2.5">
+                      <div
+                        key={key}
+                        className="rounded border bg-muted/30 p-2.5"
+                      >
                         <div className="text-[11px] font-medium text-muted-foreground">
                           <code>{`{{ ${key} }}`}</code>
                         </div>
@@ -285,13 +325,15 @@ export function ContactDetailPage() {
               <div>
                 <h2 className="text-base font-semibold">Observed Facts</h2>
                 <p className="text-xs text-muted-foreground">
-                  Durable context extracted from call evidence and caller statements.
+                  Durable context extracted from call evidence and caller
+                  statements.
                 </p>
               </div>
 
               {data.facts.length === 0 ? (
                 <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-                  No facts recorded for this contact yet. Facts are populated during call analysis.
+                  No facts recorded for this contact yet. Facts are populated
+                  during call analysis.
                 </div>
               ) : (
                 <Table>
@@ -336,7 +378,8 @@ export function ContactDetailPage() {
               <div>
                 <h2 className="text-base font-semibold">Call & Run History</h2>
                 <p className="text-xs text-muted-foreground">
-                  All telephone calls placed to or received from this destination.
+                  All telephone calls placed to or received from this
+                  destination.
                 </p>
               </div>
 
@@ -362,7 +405,9 @@ export function ContactDetailPage() {
                         <TableCell className="font-mono text-xs font-semibold">
                           #{r.id.slice(0, 8)}
                         </TableCell>
-                        <TableCell className="capitalize">{r.channel}</TableCell>
+                        <TableCell className="capitalize">
+                          {r.channel}
+                        </TableCell>
                         <TableCell>
                           <StatusBadge value={r.status} />
                         </TableCell>
@@ -392,165 +437,195 @@ export function ContactDetailPage() {
       </LoadState>
 
       {/* Edit Contact Sheet */}
-      <AdminOnly><Sheet open={editOpen} onOpenChange={setEditOpen}>
-        <SheetContent>
-          <form onSubmit={updateContact} className="flex min-h-full flex-col justify-between gap-4">
-            <SheetHeader className="pb-1">
-              <SheetTitle>Edit Contact</SheetTitle>
-              <SheetDescription>
-                Profile, international destination, and regional timezone settings.
-              </SheetDescription>
-            </SheetHeader>
+      <AdminOnly>
+        <Sheet open={editOpen} onOpenChange={setEditOpen}>
+          <SheetContent>
+            <form
+              onSubmit={updateContact}
+              className="flex min-h-full flex-col justify-between gap-4"
+            >
+              <SheetHeader className="pb-1">
+                <SheetTitle>Edit Contact</SheetTitle>
+                <SheetDescription>
+                  Profile, international destination, and regional timezone
+                  settings.
+                </SheetDescription>
+              </SheetHeader>
 
-            <FieldGroup className="gap-3">
-              <Field className="gap-1">
-                <FieldLabel htmlFor="edit-name">Full name</FieldLabel>
-                <Input
-                  id="edit-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Jane Doe"
-                  required
-                />
-              </Field>
-
-              <Field className="gap-1">
-                <div className="flex items-center justify-between">
-                  <FieldLabel htmlFor="edit-phone">Phone number</FieldLabel>
-                  <span className="text-[11px] text-muted-foreground">Select country or type +E.164</span>
-                </div>
-                <PhoneInput
-                  id="edit-phone"
-                  value={phone}
-                  onChange={setPhone}
-                  required
-                />
-              </Field>
-
-              <Field className="gap-1">
-                <div className="flex items-center justify-between">
-                  <FieldLabel htmlFor="edit-timezone">IANA Timezone</FieldLabel>
-                  <span className="text-[11px] text-muted-foreground">For callback due calculations</span>
-                </div>
-                <SearchableSelect
-                  id="edit-timezone"
-                  value={timezone}
-                  onChange={setTimezone}
-                  options={getTimezones()}
-                  placeholder="Search timezone (e.g. Asia/Kolkata, America/New_York)..."
-                />
-              </Field>
-
-              <div className="grid grid-cols-2 gap-3">
+              <FieldGroup className="gap-3">
                 <Field className="gap-1">
-                  <FieldLabel htmlFor="edit-business">Organization</FieldLabel>
-                  <Input
-                    id="edit-business"
-                    value={business}
-                    onChange={(e) => setBusiness(e.target.value)}
-                    placeholder="e.g. Acme Corp"
+                  <FieldLabel>Contact name</FieldLabel>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Input
+                      id="edit-first-name"
+                      aria-label="First name"
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      placeholder="First name"
+                      required
+                    />
+                    <Input
+                      id="edit-last-name"
+                      aria-label="Last name"
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      placeholder="Last name (optional)"
+                    />
+                  </div>
+                </Field>
+
+                <Field className="gap-1">
+                  <div className="flex items-center justify-between">
+                    <FieldLabel htmlFor="edit-phone">Phone number</FieldLabel>
+                    <span className="text-[11px] text-muted-foreground">
+                      Select country or type +E.164
+                    </span>
+                  </div>
+                  <PhoneInput
+                    id="edit-phone"
+                    value={phone}
+                    onChange={setPhone}
+                    required
                   />
                 </Field>
 
                 <Field className="gap-1">
-                  <FieldLabel htmlFor="edit-source">Acquisition</FieldLabel>
-                  <Input
-                    id="edit-source"
-                    value={source}
-                    onChange={(e) => setSource(e.target.value)}
-                    placeholder="e.g. Inbound / Web"
+                  <div className="flex items-center justify-between">
+                    <FieldLabel htmlFor="edit-timezone">
+                      IANA Timezone
+                    </FieldLabel>
+                    <span className="text-[11px] text-muted-foreground">
+                      For callback due calculations
+                    </span>
+                  </div>
+                  <SearchableSelect
+                    id="edit-timezone"
+                    value={timezone}
+                    onChange={setTimezone}
+                    options={getTimezones()}
+                    placeholder="Search timezone (e.g. Asia/Kolkata, America/New_York)..."
                   />
                 </Field>
-              </div>
 
-              <Field className="gap-1">
-                <FieldLabel htmlFor="edit-language">Preferred language</FieldLabel>
-                <SearchableSelect
-                  id="edit-language"
-                  value={language}
-                  onChange={setLanguage}
-                  options={LANGUAGES}
-                  placeholder="Search language (e.g. en-US, hi-IN)..."
-                />
-              </Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field className="gap-1">
+                    <FieldLabel htmlFor="edit-business">
+                      Organization
+                    </FieldLabel>
+                    <Input
+                      id="edit-business"
+                      value={business}
+                      onChange={(e) => setBusiness(e.target.value)}
+                      placeholder="e.g. Acme Corp"
+                    />
+                  </Field>
 
-              <div className="flex flex-col gap-2 rounded-lg border p-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-xs font-semibold">Custom Ad & Lead Metadata</span>
-                    <p className="text-[11px] text-muted-foreground">
-                      Key-values usable as prompt variables (e.g. campaign, ad_headline)
+                  <Field className="gap-1">
+                    <FieldLabel htmlFor="edit-source">Acquisition</FieldLabel>
+                    <Input
+                      id="edit-source"
+                      value={source}
+                      onChange={(e) => setSource(e.target.value)}
+                      placeholder="e.g. Inbound / Web"
+                    />
+                  </Field>
+                </div>
+
+                <Field className="gap-1">
+                  <FieldLabel htmlFor="edit-language">
+                    Preferred language
+                  </FieldLabel>
+                  <SearchableSelect
+                    id="edit-language"
+                    value={language}
+                    onChange={setLanguage}
+                    options={LANGUAGES}
+                    placeholder="Search language (e.g. en-US, hi-IN)..."
+                  />
+                </Field>
+
+                <div className="flex flex-col gap-2 rounded-lg border p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-semibold">
+                        Custom Ad & Lead Metadata
+                      </span>
+                      <p className="text-[11px] text-muted-foreground">
+                        Key-values usable as prompt variables (e.g. campaign,
+                        ad_headline)
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={addMetadataEntry}
+                    >
+                      <Plus className="mr-1 size-3" />
+                      Add field
+                    </Button>
+                  </div>
+
+                  {metadataEntries.length === 0 ? (
+                    <p className="py-1 text-[11px] text-muted-foreground italic">
+                      No custom metadata. Click "Add field" to store ad or lead
+                      tags.
                     </p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 text-xs"
-                    onClick={addMetadataEntry}
-                  >
-                    <Plus className="mr-1 size-3" />
-                    Add field
-                  </Button>
+                  ) : (
+                    <div className="flex flex-col gap-2 pt-1">
+                      {metadataEntries.map((entry, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <Input
+                            placeholder="Key (e.g. campaign)"
+                            value={entry.key}
+                            onChange={(e) =>
+                              updateMetadataEntry(idx, "key", e.target.value)
+                            }
+                            className="h-8 text-xs font-mono"
+                          />
+                          <Input
+                            placeholder="Value (e.g. spring_sale)"
+                            value={entry.value}
+                            onChange={(e) =>
+                              updateMetadataEntry(idx, "value", e.target.value)
+                            }
+                            className="h-8 text-xs"
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="size-8 text-muted-foreground hover:text-destructive"
+                            onClick={() => removeMetadataEntry(idx)}
+                            aria-label="Remove metadata entry"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
+              </FieldGroup>
 
-                {metadataEntries.length === 0 ? (
-                  <p className="py-1 text-[11px] text-muted-foreground italic">
-                    No custom metadata. Click "Add field" to store ad or lead tags.
-                  </p>
-                ) : (
-                  <div className="flex flex-col gap-2 pt-1">
-                    {metadataEntries.map((entry, idx) => (
-                      <div key={idx} className="flex items-center gap-2">
-                        <Input
-                          placeholder="Key (e.g. campaign)"
-                          value={entry.key}
-                          onChange={(e) =>
-                            updateMetadataEntry(idx, "key", e.target.value)
-                          }
-                          className="h-8 text-xs font-mono"
-                        />
-                        <Input
-                          placeholder="Value (e.g. spring_sale)"
-                          value={entry.value}
-                          onChange={(e) =>
-                            updateMetadataEntry(idx, "value", e.target.value)
-                          }
-                          className="h-8 text-xs"
-                        />
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-8 text-muted-foreground hover:text-destructive"
-                          onClick={() => removeMetadataEntry(idx)}
-                          aria-label="Remove metadata entry"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </FieldGroup>
-
-            <SheetFooter className="border-t pt-3 mt-auto">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setEditOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button type="submit" size="sm" disabled={editBusy}>
-                {editBusy ? "Saving…" : "Save Changes"}
-              </Button>
-            </SheetFooter>
-          </form>
-        </SheetContent>
-      </Sheet></AdminOnly>
+              <SheetFooter className="border-t pt-3 mt-auto">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setEditOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" size="sm" disabled={editBusy}>
+                  {editBusy ? "Saving…" : "Save Changes"}
+                </Button>
+              </SheetFooter>
+            </form>
+          </SheetContent>
+        </Sheet>
+      </AdminOnly>
     </PageBody>
   );
 }

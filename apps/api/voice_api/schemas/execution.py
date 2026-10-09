@@ -63,6 +63,15 @@ class EndpointProbeResponse(ConfigModel):
     status: EndpointStatus
 
 
+class EndpointRecoveryResponse(ConfigModel):
+    status: Literal["recovered", "available", "blocked"]
+    run_id: str | None = None
+    reason: str
+    message: str
+    endpoint_status: EndpointStatus | None = None
+    redialed: Literal[False] = False
+
+
 class Claim(ConfigModel):
     token: str = Field(min_length=1, max_length=36)
     endpoint_id: str

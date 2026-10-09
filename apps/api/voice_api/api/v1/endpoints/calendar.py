@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_legacy_owner, require_runtime_service
+from voice_api.core.config import get_settings
 from voice_api.db.tenant_scope import bind_calendar_oauth_organization, required_organization
 from voice_api.models import (
     AgentVersion,
@@ -208,7 +209,8 @@ async def oauth_callback(
         )
         await session.commit()
         raise HTTPException(502, "Google authorization could not be completed") from exc
-    return RedirectResponse("/integrations?calendar=connected")
+    dashboard_origin = (get_settings().dashboard_base_url or "").rstrip("/")
+    return RedirectResponse(f"{dashboard_origin}/integrations/calendar?calendar=connected")
 
 
 @router.post("/calendar-integrations/{integration_id}/reconnect")

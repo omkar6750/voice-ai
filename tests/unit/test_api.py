@@ -291,6 +291,8 @@ async def test_contacts_variables_endpoint(monkeypatch) -> None:
         # Check introspected columns
         col_keys = [c["key"] for c in data["columns"]]
         assert "name" in col_keys
+        assert "first_name" in col_keys
+        assert "last_name" in col_keys
         assert "business" in col_keys
         assert "source" in col_keys
         assert "language" in col_keys
@@ -385,6 +387,16 @@ async def test_create_and_patch_contact_with_metadata(monkeypatch) -> None:
             "campaign": "updated_campaign_q4",
             "ad_headline": "Free Consultation",
         }
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            name_res = await client.patch(
+                "/api/v1/contacts/c-test-id",
+                headers=headers,
+                json={"first_name": "Alex", "last_name": "Rivera"},
+            )
+        assert name_res.status_code == 200
+        assert existing_contact.name == "Alex Rivera"
+        assert existing_contact.first_name == "Alex"
+        assert existing_contact.last_name == "Rivera"
     finally:
         app.dependency_overrides.pop(get_session, None)
 

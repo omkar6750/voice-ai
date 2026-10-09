@@ -236,6 +236,8 @@ async def create_browser_session(
         contact_snapshot = {
             "id": contact.id,
             "name": contact.name,
+            "first_name": contact.first_name,
+            "last_name": contact.last_name,
             "timezone": contact.timezone or "UTC",
             "phone_number": effective_phone,
             "business": contact.business,

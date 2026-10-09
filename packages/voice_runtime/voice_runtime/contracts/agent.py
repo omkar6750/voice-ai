@@ -12,6 +12,7 @@ from pydantic import (
     model_validator,
 )
 from pydantic_core import PydanticCustomError
+from voice_shared.contact_variables import normalize_contact_config
 
 from .base import ConfigModel, Identifier
 from .cadence import ClassifierConfig, SummarizerConfig, lead_classifier_contract
@@ -335,6 +336,11 @@ class ComposerConfig(ConfigModel):
 
 
 class AgentConfig(ConfigModel):
+    @model_validator(mode="before")
+    @classmethod
+    def canonical_contact_variables(cls, value):
+        return normalize_contact_config(value) if isinstance(value, dict) else value
+
     name: str = Field(min_length=1)
     system_prompt: str = ""
     # Deprecated compatibility input. The runtime folds this into the initial

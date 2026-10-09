@@ -118,7 +118,7 @@ async def test_duplicate_terminal_completion_queues_end_once():
     value.tracker.diagnostic.assert_called_once()
 
 
-async def test_terminal_queue_failure_cannot_become_success():
+async def test_terminal_queue_failure_keeps_failure_cause_with_completed_terminal_outcome():
     value = host()
     value.worker.queue_frame.side_effect = RuntimeError("worker unavailable")
     with pytest.raises(RuntimeError, match="worker unavailable"):
@@ -127,6 +127,6 @@ async def test_terminal_queue_failure_cannot_become_success():
         )
     value.termination.pipeline_finished()
     assert value.termination.summary.cause == "pipeline_failure"
-    assert value.termination.summary.execution_status == "failed"
+    assert value.termination.summary.execution_status == "completed"
     assert value.errors == ["Terminal shutdown could not be queued"]
     assert value.tracker.diagnostic.call_args.kwargs["code"] == "terminal_shutdown_failed"

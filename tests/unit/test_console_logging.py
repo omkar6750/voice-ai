@@ -55,6 +55,16 @@ def test_runtime_timings_have_bounded_precision():
     assert event["duration_ms"] == 1.2346
 
 
+def test_pretty_perf_timing_with_null_http_status(monkeypatch):
+    monkeypatch.setenv("VOICE_LOG_FORMAT", "pretty")
+    monkeypatch.setenv("VOICE_LOG_COLOR", "always")
+    event = {"event": "perf_timing", "http_status": None, "duration_ms": 12.5}
+    output = ConsoleFormatter(io.StringIO()).format(record(event))
+    assert "perf_timing" in output
+    assert "12.5000 ms" in output
+    assert "\x1b[32m" in output
+
+
 def test_configure_loads_console_options_and_keeps_file_sink_json(tmp_path, monkeypatch):
     from voice_shared import logging as diagnostics
 

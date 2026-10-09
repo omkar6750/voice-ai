@@ -28,6 +28,7 @@ from pipecat.utils.context.llm_context_summarization import (
     LLMContextSummaryConfig,
 )
 from pipecat.workers.runner import WorkerRunner
+from voice_shared.dev_visibility import is_development
 
 from voice_runtime.call_capture import CallCapture
 from voice_runtime.contracts import FactSlotConfig, is_registered_handler, validate_node_actions
@@ -51,6 +52,12 @@ from voice_runtime.execution.observer import EvidenceObserver
 from voice_runtime.execution.pipecat_flow import compile_pipecat_flow
 from voice_runtime.execution.pipeline_lifecycle import NativePipelineLifecycle
 from voice_runtime.execution.speech import build_speech_services as build_speech_services
+from voice_runtime.execution.summarization import (
+    ContextSummaryCoordinator,
+    SummaryLLMRecorder,
+    estimate_context_tokens,
+    should_summarize,
+)
 from voice_runtime.execution.temporal import resolve_local_time_context
 from voice_runtime.execution.termination import CallTermination
 from voice_runtime.execution.tool_dispatch import NativeToolDispatch
@@ -90,6 +97,9 @@ class NativePipelineHost(
             raise ValueError("Graceful close timeout must be finite and positive")
         self._graceful_close_timeout_secs = graceful_close_timeout_secs
         self.run_id, self.directory, self.settings = run_id, recordings_dir / run_id, settings
+        from voice_shared.dev_visibility import register_api_keys
+
+        register_api_keys((getattr(settings, "provider_stage_keys", None) or {}).values())
         self.broker = None
         self.pending_context = {}
         self.worker = self.flow = self.capture = self.observer = None
@@ -120,6 +130,8 @@ class NativePipelineHost(
 
     def _node(self, key: str) -> NodeConfig:
         """Add versioned application tools to Pipecat's compiled native node."""
+        from voice_shared.contact_variables import normalize_contact_prompt
+
         if self._flow_nodes_enriched:
             return dict(self._pipecat_flow.node(key))
         node = self._nodes[key]
@@ -127,6 +139,11 @@ class NativePipelineHost(
             self._pipecat_flow = compile_pipecat_flow(self._snapshot)
         transitions = node.get("transitions", [])
         config = dict(self._pipecat_flow.node(key))
+        config["role_message"] = normalize_contact_prompt(config.get("role_message", ""))
+        config["task_messages"] = [
+            {**message, "content": normalize_contact_prompt(message["content"])}
+            for message in config.get("task_messages", [])
+        ]
         callback_config = self._snapshot.get("callback_scheduling", {})
         callback_role_keys = {
             role.get("key")
@@ -509,14 +526,9 @@ class NativePipelineHost(
                 )
             )
         summarizer_cfg = snapshot.get("context", {}).get("summarizer", {})
-        if summarizer_cfg.get("enabled"):
-            summary_provider = (summarizer_cfg.get("model") or {}).get("provider", llm_provider)
-            required_credentials.append(
-                (
-                    f"summarizer:{summary_provider}",
-                    stage_api_key(self.settings, "summarizer", summary_provider),
-                )
-            )
+        summary_model = summarizer_cfg.get("model") or {}
+        summary_provider = summary_model.get("provider", "gemini")
+        summary_credential = stage_api_key(self.settings, "summarizer", summary_provider)
         if composer_config.get("enabled"):
             composer_provider = (composer_config.get("model") or {}).get("provider", "groq")
             required_credentials.append(
@@ -558,45 +570,79 @@ class NativePipelineHost(
             stage="llm",
             system_instruction=snapshot["system_prompt"],
         )
+        context = LLMContext([])
+        self.context = context
 
         summarizer_cfg = snapshot.get("context", {}).get("summarizer", {})
         assistant_params = None
+        summary_coordinator = None
         if summarizer_cfg.get("enabled"):
             summary_model = summarizer_cfg.get("model") or {}
-            summary_provider = summary_model.get("provider", llm_config["provider"])
+            summary_provider = summary_model.get("provider", "gemini")
             summary_settings = {
-                "model": summary_model.get("model", llm_config["model"]),
-                "temperature": summary_model.get("temperature", 0.4),
-                "max_tokens": summary_model.get(
-                    "max_tokens", summarizer_cfg.get("output_budget_tokens", 512)
+                "model": summary_model.get(
+                    "model",
+                    "gemini-2.5-flash" if summary_provider == "gemini" else llm_config["model"],
+                ),
+                "temperature": summary_model.get("temperature", 0.1),
+                "max_tokens": summarizer_cfg.get(
+                    "output_budget_tokens", summary_model.get("max_tokens", 256)
                 ),
             }
-            summary_llm = build_llm_service(
-                self.settings,
-                {
-                    **summary_model,
-                    **summary_settings,
-                    "provider": summary_provider,
-                    "reasoning_effort": "none",
-                },
-                stage="summarizer",
+            summary_llm = (
+                build_llm_service(
+                    self.settings,
+                    {
+                        **summary_model,
+                        **summary_settings,
+                        "provider": summary_provider,
+                        "reasoning_effort": summary_model.get(
+                            "reasoning_effort",
+                            "provider_default"
+                            if summary_provider in {"gemini", "openrouter"}
+                            else "none",
+                        ),
+                    },
+                    stage="summarizer",
+                )
+                if summary_credential
+                else None
             )
+            summary_coordinator = ContextSummaryCoordinator(
+                tracker=tracker,
+                context=context,
+                config=summarizer_cfg,
+                provider=summary_provider,
+                model=summary_settings["model"],
+                llm=summary_llm,
+                credential_available=bool(summary_credential),
+            )
+            if summary_llm is not None:
+                summary_llm = SummaryLLMRecorder(summary_llm, summary_coordinator)
+            else:
+
+                class MissingSummaryCredential:
+                    async def _generate_summary(self, _frame):
+                        raise RuntimeError(
+                            f"Summarizer credential is not configured for {summary_provider}"
+                        )
+
+                summary_llm = SummaryLLMRecorder(MissingSummaryCredential(), summary_coordinator)
 
             summary_config = LLMContextSummaryConfig(
-                target_context_tokens=summarizer_cfg.get("output_budget_tokens", 512),
-                min_messages_after_summary=summarizer_cfg.get("preserve_recent_messages", 6),
+                target_context_tokens=summarizer_cfg.get("output_budget_tokens", 256),
+                min_messages_after_summary=summarizer_cfg.get("preserve_recent_messages", 4),
                 summarization_prompt=summarizer_cfg.get("prompt"),
                 llm=summary_llm,
             )
             assistant_params = LLMAssistantAggregatorParams(
-                enable_auto_context_summarization=True,
+                enable_auto_context_summarization=False,
                 auto_context_summarization_config=LLMAutoContextSummarizationConfig(
-                    max_context_tokens=summarizer_cfg.get("context_window_tokens", 8192),
-                    # Pipecat measures messages; a normal caller/assistant
-                    # exchange contributes two messages. Tool messages may
-                    # cause an earlier safe compaction.
+                    # Thresholds are evaluated after complete assistant turns by
+                    # ContextSummaryCoordinator; native auto mode remains off.
+                    max_context_tokens=int(summarizer_cfg.get("context_window_tokens", 3072)),
                     max_unsummarized_messages=max(
-                        2, int(summarizer_cfg.get("every_n_exchanges", 10)) * 2
+                        2, int(summarizer_cfg.get("every_n_exchanges", 4)) * 2
                     ),
                     summary_config=summary_config,
                 ),
@@ -606,7 +652,7 @@ class NativePipelineHost(
         if text_output:
             vad = None
         else:
-            # Sarvam Realtime owns turn boundaries for saaras:v4. Pipecat
+            # Sarvam Realtime owns turn boundaries for both supported models. Pipecat
             # still requires local Silero VAD on the user aggregator for
             # speech timing/TTFB measurements.
             vad = SileroVADAnalyzer(
@@ -626,17 +672,15 @@ class NativePipelineHost(
         sanitized_contact = sanitize_contact_variables(contact, allowed_vars)
 
         flow_state: dict[str, Any] = dict(temporal)
-        flow_state["contact"] = sanitized_contact
         flow_state.update(sanitized_contact)
         for slot in snapshot.get("fact_slots", []):
             flow_state.setdefault(slot["key"], "")
         for variable in allowed_vars:
-            flow_state.setdefault(variable, "")
+            if variable != "name" and not variable.startswith("contact."):
+                flow_state.setdefault(variable, "")
 
         # Opening behavior belongs to the initial node's system instruction. Do not
         # synthesize a user turn or speak a separate verbatim greeting here.
-        context = LLMContext([])
-        self.context = context
         aggregators = LLMContextAggregatorPair(
             context,
             user_params=text_user_params()
@@ -667,6 +711,10 @@ class NativePipelineHost(
         @aggregators.user().event_handler("on_user_turn_message_added")
         async def on_user_turn_message_added(_aggregator, _message):
             self._exchange_count += 1
+            if summary_coordinator is not None:
+                self._summary_pending_caller_turns = (
+                    getattr(self, "_summary_pending_caller_turns", 0) + 1
+                )
             await self._run_classifier_cadence()
 
         @aggregators.user().event_handler("on_user_turn_stop_timeout")
@@ -675,6 +723,53 @@ class NativePipelineHost(
 
         bind_transcripts(aggregators, tracker)
         self.aggregators = aggregators
+        if summary_coordinator is not None:
+            summary_coordinator.attach(aggregators.assistant())
+            summary_coordinator.flow = self.flow
+            self._summary_exchanges_since_apply = 0
+
+            @aggregators.assistant().event_handler("on_assistant_turn_stopped")
+            async def on_assistant_turn_stopped(assistant, message):
+                pending = getattr(self, "_summary_pending_caller_turns", 0)
+                if (
+                    pending <= 0
+                    or bool(getattr(message, "interrupted", False))
+                    or assistant.has_function_calls_in_progress
+                ):
+                    return
+                self._summary_pending_caller_turns = pending - 1
+                self._summary_exchanges_since_apply += 1
+                messages = context.get_messages()
+                measured_input_tokens = self.observer.metrics["llm"].get("prompt_tokens")
+                context_tokens = (
+                    int(measured_input_tokens)
+                    if isinstance(measured_input_tokens, (int, float)) and measured_input_tokens > 0
+                    else estimate_context_tokens(messages)
+                )
+                context_token_source = (
+                    "provider_usage"
+                    if isinstance(measured_input_tokens, (int, float)) and measured_input_tokens > 0
+                    else "pipecat_context_estimate"
+                )
+                reason = should_summarize(
+                    completed_exchanges=self._summary_exchanges_since_apply,
+                    estimated_context_tokens=context_tokens,
+                    every_n_exchanges=int(summarizer_cfg.get("every_n_exchanges", 4)),
+                    context_window_tokens=int(summarizer_cfg.get("context_window_tokens", 3072)),
+                )
+                if reason:
+                    summary_coordinator.request(
+                        reason=reason,
+                        completed_exchanges=self._summary_exchanges_since_apply,
+                        caller_turns=self._exchange_count,
+                        context_tokens=context_tokens,
+                        context_token_source=context_token_source,
+                    )
+
+            @aggregators.assistant().event_handler("on_summary_applied")
+            async def on_summary_applied(_assistant, _summarizer, _event):
+                self._summary_exchanges_since_apply = 0
+
         pipeline = Pipeline(
             [
                 aggregators.user(),
@@ -708,10 +803,19 @@ class NativePipelineHost(
             stt_model=snapshot["stt"]["model"],
             tts_model=tts_config["model"],
             log_path=self.directory / "pipeline.log"
-            if snapshot["_resolved"]["pipeline_logs_enabled"]
+            if snapshot["_resolved"]["pipeline_logs_enabled"] or is_development()
             else None,
         )
-        self.observer.context_event_consumer = self._mark_context_events_consumed
+        if summary_coordinator is None:
+            self.observer.context_event_consumer = self._mark_context_events_consumed
+        else:
+            self.observer.context_summary_idle = summary_coordinator.apply_deferred_if_idle
+
+            async def context_event_consumer(messages, exchange_id, operation_id):
+                await self._mark_context_events_consumed(messages, exchange_id, operation_id)
+                await summary_coordinator.context_consumed(messages, exchange_id, operation_id)
+
+            self.observer.context_event_consumer = context_event_consumer
         self.worker = PipelineWorker(
             pipeline,
             observers=[self.observer]
@@ -741,7 +845,12 @@ class NativePipelineHost(
             global_functions=self._global_function_schemas(),
             classifier_runner=self._run_node_classifier,
             end_call_runner=self._finish_end_call,
+            termination=self.termination,
         )
+        if summary_coordinator is not None:
+            summary_coordinator.observer = self.observer
+        if summary_coordinator is not None:
+            summary_coordinator.flow = self.flow
         self.flow.state.update(flow_state)
         if text_output:
             text_output.host = self

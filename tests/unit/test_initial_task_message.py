@@ -59,7 +59,8 @@ def test_legacy_version_readable_but_write_rejected():
         RevisionBody(revision=1, config=config)
 
 
-async def test_clone_published_version_without_opening_task_preserves_draft(monkeypatch):
+@pytest.mark.parametrize("old_stt", [False, True])
+async def test_clone_published_version_without_opening_task_preserves_draft(monkeypatch, old_stt):
     from copy import deepcopy
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, Mock
@@ -69,6 +70,8 @@ async def test_clone_published_version_without_opening_task_preserves_draft(monk
     from voice_runtime.contracts import AgentConfig
 
     source_config = {"name": "Legacy", "flow": flow([])}
+    if old_stt:
+        source_config["stt"] = {"provider": "sarvam", "model": "saaras:v3"}
     source = AgentVersion(
         id="source",
         agent_id="agent",
@@ -93,7 +96,10 @@ async def test_clone_published_version_without_opening_task_preserves_draft(monk
     assert result["status"] == "draft"
     assert result["version"] == 3
     assert draft.parent_id == source.id
-    assert draft.config == source_config
+    expected = deepcopy(source_config)
+    if old_stt:
+        expected["stt"]["model"] = "saaras:v3-realtime"
+    assert draft.config == expected
     assert source.status == "published"
     assert source.config == source_config
     with pytest.raises(ValidationError):

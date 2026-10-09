@@ -22,6 +22,11 @@ class ClerkPrincipal:
 
 
 async def require_clerk_user(request: Request) -> ClerkPrincipal:
+    # Only InternalDispatch can insert this ASGI object. No HTTP header/token
+    # grants this identity, and all existing live membership checks still run.
+    internal = request.scope.get("voice.mcp_principal")
+    if isinstance(internal, ClerkPrincipal):
+        return internal
     settings = get_settings()
     if not settings.clerk_secret_key:
         raise HTTPException(503, "Clerk authentication is not configured")

@@ -15,6 +15,7 @@ from voice_runtime.diagnostics import exception_diagnostic
 from voice_runtime.execution.classifier import model_visible_result, normalize_classifier_result
 from voice_runtime.execution.exchange import ExchangeTracker
 from voice_runtime.execution.observer import EvidenceObserver
+from voice_runtime.execution.termination import CallTermination
 from voice_runtime.execution.whatsapp_state import begin_send, finish_send
 
 
@@ -29,6 +30,7 @@ class TracedFlowManager(FlowManager):
         context: LLMContext,
         classifier_runner: Callable[[str, str], Awaitable[tuple[str, dict[str, str]] | None]],
         end_call_runner: Callable[[], Awaitable[None]] | None = None,
+        termination: CallTermination | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -39,7 +41,10 @@ class TracedFlowManager(FlowManager):
         self._context_for_evidence = context
         self._classifier_runner = classifier_runner
         self._end_call_runner = end_call_runner
+        self.termination = termination
         self._transition_tool_id: str | None = None
+        self.context_generation = 0
+        self._current_node_task_messages: list[dict] = []
         self._active_tool_invocation: ContextVar[str | None] = ContextVar(
             f"active_tool_invocation_{id(self)}", default=None
         )
@@ -70,10 +75,22 @@ class TracedFlowManager(FlowManager):
                 *node_config.get("task_messages", []),
                 *classifier_messages,
             ]
+        self._current_node_task_messages = list(node_config.get("task_messages", []))
         self.tracker.start_visit(node_id, self._transition_tool_id)
         self._transition_tool_id = None
         try:
             await super()._set_node(node_id, node_config)
+            self.context_generation += 1
+            if next(
+                (
+                    node.get("terminal", False)
+                    for node in self._snapshot["flow"]["nodes"]
+                    if node["id"] == node_id
+                ),
+                False,
+            ):
+                if self.termination is not None:
+                    self.termination.summary.terminal_node = node_id
         except BaseException:
             self.tracker.end_visit("failed")
             raise

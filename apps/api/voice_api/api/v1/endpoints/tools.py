@@ -54,9 +54,7 @@ Operator = Depends(require_legacy_owner)
 
 async def _whatsapp_media_issue(session: AsyncSession, config: ToolConfig) -> str | None:
     if config.whatsapp_connection_id is not None:
-        direct_connection = await session.get(
-            IntegrationConnection, config.whatsapp_connection_id
-        )
+        direct_connection = await session.get(IntegrationConnection, config.whatsapp_connection_id)
         if (
             direct_connection is None
             or direct_connection.provider != "whatsapp"
@@ -224,8 +222,15 @@ async def tools(
 @router.get("/tools/handlers")
 @allow_organization_member
 async def tool_handlers(_: None = Operator) -> ToolHandlerCatalog:
+    from voice_runtime.contracts.registry import registered_handler_specs
+
     return {
         "handlers": [
+            next(
+                spec.model_dump()
+                for spec in registered_handler_specs()
+                if spec.name == "save_referral"
+            ),
             {
                 "name": "change_node",
                 "description": "Transfer conversation flow to another connected node in the agent flow graph.",

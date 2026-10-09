@@ -4,10 +4,19 @@ from voice_runtime.telephony.base import CallState
 from voice_runtime.telephony.protocols import Modem
 
 
+class Sim7600ConnectionTimeout(TimeoutError):
+    def __init__(self, timeout_seconds: float, last_state: CallState):
+        self.timeout_seconds = timeout_seconds
+        self.last_state = last_state
+        super().__init__(
+            f"SIM7600 did not confirm call connection within {timeout_seconds:g}s; last state: {last_state.value}"
+        )
+
+
 class TelephonySession:
     """Coordinates SIM7600 call control with the Pipecat audio bridge."""
 
-    def __init__(self, modem: Modem, connect_timeout: float = 30.0) -> None:
+    def __init__(self, modem: Modem, connect_timeout: float = 90.0) -> None:
         self.modem = modem
         self.connect_timeout = connect_timeout
         self._audio_started = False
@@ -16,6 +25,7 @@ class TelephonySession:
         # COM audio is already open, but PCM registration requires an active call.
         await self.modem.dial(phone_number)
         deadline = asyncio.get_running_loop().time() + self.connect_timeout
+        state = CallState.DIALING
         while asyncio.get_running_loop().time() < deadline:
             state = await self.modem.state()
             if state == CallState.ACTIVE:
@@ -25,12 +35,11 @@ class TelephonySession:
             if state == CallState.DISCONNECTED:
                 raise RuntimeError("call disconnected before becoming active")
             await asyncio.sleep(0.25)
-        raise TimeoutError("timed out waiting for SIM7600 call connection")
+        raise Sim7600ConnectionTimeout(self.connect_timeout, state)
 
-    async def end_call(self) -> None:
+    async def end_call(self, *, force: bool = False) -> None:
         try:
-            state = await self.modem.state()
-            if state not in (CallState.IDLE, CallState.DISCONNECTED):
+            if force or await self.modem.state() not in (CallState.IDLE, CallState.DISCONNECTED):
                 await self.modem.hangup()
         finally:
             if self._audio_started:

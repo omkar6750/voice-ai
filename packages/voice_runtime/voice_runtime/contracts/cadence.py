@@ -217,12 +217,36 @@ class ClassifierConfig(CadenceConfig):
 
 class SummarizerConfig(CadenceConfig):
     enabled: bool = False
-    every_n_exchanges: int = Field(default=10, gt=0)
-    model: LLMConfig = Field(default_factory=lambda: LLMConfig(max_tokens=512))
-    prompt: str = "Summarize the supplied history faithfully; preserve decisions and facts."
-    context_window_tokens: int = Field(default=8192, gt=0)
-    output_budget_tokens: int = Field(default=512, gt=0)
-    preserve_recent_messages: int = Field(default=6, ge=0)
+    every_n_exchanges: int = Field(default=4, gt=0)
+    model: LLMConfig = Field(
+        default_factory=lambda: LLMConfig(
+            provider="gemini",
+            model="gemini-2.5-flash",
+            temperature=0.1,
+            max_tokens=256,
+            reasoning_effort="provider_default",
+        )
+    )
+    prompt: str = (
+        "Write compact field/value notes for the next agent turn. Keep caller-confirmed "
+        "business, current process and pain, desired outcome, constraints, objections, "
+        "and commitments or completed tool outcomes. Preserve exact names, numbers, "
+        "and dates. Omit unknown fields."
+    )
+    context_window_tokens: int = Field(default=3072, gt=0)
+    output_budget_tokens: int = Field(default=256, gt=0)
+    preserve_recent_exchanges: int = Field(default=2, ge=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_preservation(cls, value):
+        """Read historical message counts as conservative complete-exchange counts."""
+        if isinstance(value, dict) and "preserve_recent_exchanges" not in value:
+            value = dict(value)
+            legacy_messages = value.pop("preserve_recent_messages", None)
+            if legacy_messages is not None:
+                value["preserve_recent_exchanges"] = max(1, (int(legacy_messages) + 1) // 2)
+        return value
 
     @model_validator(mode="before")
     @classmethod

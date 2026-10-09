@@ -148,6 +148,16 @@ def test_safe_fields_reject_payloads_and_never_stringify_objects(sinks):
         assert_safe(output)
 
 
+def test_untrusted_vendor_info_spam_is_dropped_but_warning_keeps_severity(sinks):
+    console, path = sinks
+    logger.info("verbose vendor details that cannot be safely shown")
+    logger.warning("vendor warning details that cannot be safely shown")
+    for output in (console.getvalue(), path.read_text()):
+        records = assert_safe(output)
+        assert len(records) == 1
+        assert records[0] == {"event": "untrusted_log", "level": "WARNING"}
+
+
 def test_validation_diagnostic_event_accepts_only_allowlisted_locations():
     assert safe_event_payload(
         RuntimeEvent.API_VALIDATION_FAILED,
@@ -225,6 +235,50 @@ def test_modem_raw_response_is_evidence_not_an_operational_log(sinks):
     for output in (sinks[0].getvalue(), sinks[1].read_text()):
         records = assert_safe(output)
         assert records[-1]["response"] == "ok"
+        assert records[-1]["at_command"] == "ATD<number>;"
+        assert records[-1]["at_response_line"] == "OK"
+
+
+def test_modem_status_logs_show_safe_command_and_response(sinks):
+    modem = Sim7600Modem("fake")
+    modem._serial = type(
+        "Serial",
+        (),
+        {
+            "write": lambda self, payload: setattr(
+                self, "responses", iter([b"+CSQ: 18,0\r\n", b"OK\r\n"])
+            ),
+            "readline": lambda self: next(self.responses),
+        },
+    )()
+    modem._command_sync("AT+CSQ")
+    records = assert_safe(sinks[0].getvalue())
+    command = next(row for row in records if row["event"] == "modem_command")
+    response = next(row for row in records if row["event"] == "modem_response")
+    assert command["at_command"] == "AT+CSQ"
+    assert response["at_response_line"] == "+CSQ: 18,0"
+
+
+def test_pcm_io_emits_periodic_read_write_totals(sinks):
+    import time
+
+    from voice_runtime.telephony.usb_audio import Sim7600UsbAudioParams, _SerialPcmOwner
+
+    owner = _SerialPcmOwner(Sim7600UsbAudioParams(audio_port="COM7"))
+    owner._io_summary["input"] = {
+        "started": time.monotonic() - 5,
+        "bytes": 6400,
+        "samples": 3200,
+        "count": 10,
+    }
+    owner._record_io("input", b"\x00\x00" * 320, 16000)
+    records = assert_safe(sinks[0].getvalue())
+    summary = next(row for row in records if row["event"] == "pcm_io_summary")
+    assert summary["direction"] == "input"
+    assert summary["phase"] == "read"
+    assert summary["bytes"] == 7040
+    assert summary["samples"] == 3520
+    assert summary["sample_rate"] == 16000
 
 
 @pytest.mark.asyncio

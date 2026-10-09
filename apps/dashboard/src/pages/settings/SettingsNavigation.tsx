@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 const items = [
   { label: "Organization", href: "/settings/organization" },
   { label: "Provider credentials", href: "/settings/credentials" },
+  { label: "MCP access", href: "/settings/mcp" },
 ];
 
 export function SettingsNavigation({ active }: { active: string }) {

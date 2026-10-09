@@ -98,6 +98,8 @@ class Contact(Identity, Created, OrganizationOwned, Base):
     __tablename__ = "contacts"
     __table_args__ = (UniqueConstraint("org_id", "phone_number", name="uq_contacts_org_phone"),)
     name: Mapped[str] = mapped_column(String(120))
+    first_name: Mapped[str | None] = mapped_column(String(120))
+    last_name: Mapped[str | None] = mapped_column(String(120))
     phone_number: Mapped[str] = mapped_column(String(40))
     timezone: Mapped[str | None] = mapped_column(String(80))
     business: Mapped[str | None] = mapped_column(String(240))

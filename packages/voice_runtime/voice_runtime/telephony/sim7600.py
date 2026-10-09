@@ -24,8 +24,10 @@ class ModemCommandTimeoutError(ModemCommandError):
 def redact_at_response(line: str) -> str:
     """Remove subscriber, device, and phone identifiers from AT logs."""
     redacted = re.sub(r"(?i)\b(IMEI|IMSI|ICCID)\s*:?\s*\d+", r"\1: <redacted>", line)
+    redacted = re.sub(r"(?<!\d)\d{14,20}(?!\d)", "<redacted>", redacted)
     redacted = re.sub(r'"\+?\d{7,}"', '"<number>"', redacted)
-    return re.sub(r"(?<!\d)\d{14,20}(?!\d)", "<redacted>", redacted)
+    redacted = re.sub(r"(?<!\d)\+?\d{7,15}(?!\d)", "<number>", redacted)
+    return redacted[:240]
 
 
 class Sim7600Modem(TelephonyTransport):
@@ -231,11 +233,16 @@ class Sim7600Modem(TelephonyTransport):
     def _command_sync(self, command: str, timeout: float | None = None) -> list[str]:
         serial_port = self._serial
         label = "ATD<number>;" if command.startswith("ATD") else command
-        safe_command = "ATD" if command.startswith("ATD") else command
+        safe_command = label
         started = time.monotonic()
         if self.trace is not None:
             self.trace.record("command_started", component="modem", command=safe_command)
-        operational_event(RuntimeEvent.MODEM_COMMAND, status="started")
+        operational_event(
+            RuntimeEvent.MODEM_COMMAND,
+            status="started",
+            component="modem",
+            at_command=safe_command,
+        )
         lines: list[str] = []
         pending = bytearray()
         outcome = "unknown"
@@ -273,7 +280,13 @@ class Sim7600Modem(TelephonyTransport):
                                 response=response,
                                 source="urc",
                             )
-                        operational_event(RuntimeEvent.MODEM_RESPONSE, response="rejected")
+                        operational_event(
+                            RuntimeEvent.MODEM_RESPONSE,
+                            response="rejected",
+                            component="modem",
+                            at_command=safe_command,
+                            at_response_line=line,
+                        )
                         raise ModemCommandError(f"modem rejected {label}: {line}")
                     response_class = (
                         "ok"
@@ -282,7 +295,13 @@ class Sim7600Modem(TelephonyTransport):
                         if line == "ERROR" or line.startswith(("+CME ERROR", "+CMS ERROR"))
                         else "data"
                     )
-                    operational_event(RuntimeEvent.MODEM_RESPONSE, response=response_class)
+                    operational_event(
+                        RuntimeEvent.MODEM_RESPONSE,
+                        response=response_class,
+                        component="modem",
+                        at_command=safe_command,
+                        at_response_line=redact_at_response(line),
+                    )
                     lines.append(line)
                     if line == "OK":
                         outcome = "ok"

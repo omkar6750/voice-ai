@@ -196,6 +196,10 @@ async def require_runtime_service(
 
 def safe_evidence(data: Any) -> Any:
     """Strip authorization headers and credentials from JSON payloads before persistence."""
+    from voice_shared.dev_visibility import is_development, redact_api_keys
+
+    if is_development():
+        return redact_api_keys(data)
     if isinstance(data, dict):
         return {
             k: "[REDACTED]"

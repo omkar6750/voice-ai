@@ -36,7 +36,8 @@ import type {
   Timeline,
 } from "./types";
 
-function PipelineDebugLog({ artifact }: { artifact: Artifact }) {
+function DebugLog({ artifact }: { artifact: Artifact }) {
+  const logName = artifact.kind === "runtime_log" ? "Runtime" : "Pipeline";
   const { getToken } = useAuth();
   const supportSession = useSupportSession();
   const [content, setContent] = useState<string | null>(null);
@@ -50,7 +51,7 @@ function PipelineDebugLog({ artifact }: { artifact: Artifact }) {
       setContent(await blob.text());
     } catch (cause) {
       toast.error(
-        cause instanceof Error ? cause.message : "Could not load pipeline log",
+        cause instanceof Error ? cause.message : "Could not load debug log",
       );
     } finally {
       setBusy(false);
@@ -59,7 +60,7 @@ function PipelineDebugLog({ artifact }: { artifact: Artifact }) {
   return (
     <Card className="mt-4">
       <CardHeader>
-        <CardTitle>Pipeline debug log</CardTitle>
+        <CardTitle>{logName} debug log</CardTitle>
         <CardDescription>
           Timestamped provider, VAD, turn, interruption, and playback events.
           Open only when the structured diagnosis needs more detail.
@@ -75,11 +76,11 @@ function PipelineDebugLog({ artifact }: { artifact: Artifact }) {
             ) : (
               <Activity data-icon="inline-start" />
             )}
-            {busy ? "Loading…" : "Load pipeline log"}
+            {busy ? "Loading…" : `Load ${logName.toLowerCase()} log`}
           </Button>
         ) : (
           <pre className="max-h-96 overflow-auto rounded-md bg-muted p-3 font-mono text-xs whitespace-pre-wrap break-all">
-            {content || "The pipeline log is empty."}
+            {content || "The debug log is empty."}
           </pre>
         )}
       </CardContent>
@@ -154,8 +155,12 @@ export function RunDetailPage() {
     }, 3000);
     return () => window.clearInterval(timer);
   }, [isLoaded, isSignedIn, run?.status, load]);
-  const recorded = artifacts.filter((item) => item.kind !== "pipeline_log");
-  const pipelineLog = artifacts.find((item) => item.kind === "pipeline_log");
+  const recorded = artifacts.filter((item) =>
+    ["input", "output", "mixed"].includes(item.kind),
+  );
+  const debugLogs = artifacts.filter((item) =>
+    ["pipeline_log", "runtime_log"].includes(item.kind),
+  );
   const durationMs =
     run?.started_at && run.ended_at
       ? Date.parse(run.ended_at) - Date.parse(run.started_at)
@@ -232,6 +237,7 @@ export function RunDetailPage() {
         >
           <ArrowLeft className="size-4" /> All runs
         </Link>
+        <Button asChild variant="outline" size="sm" className="mb-3 ml-3"><Link to={`/referrals?run=${runId}`}>Referrals from this conversation</Link></Button>
         {loading && !run ? (
           <div className="flex flex-col gap-3">
             <Skeleton className="h-10 w-2/3" />
@@ -403,7 +409,7 @@ export function RunDetailPage() {
                     )}
                   </CardContent>
                 </Card>
-                {pipelineLog && <PipelineDebugLog artifact={pipelineLog} />}
+                {debugLogs.map((artifact) => <DebugLog key={artifact.id} artifact={artifact} />)}
               </div>
               <Inspector
                 selection={selection}

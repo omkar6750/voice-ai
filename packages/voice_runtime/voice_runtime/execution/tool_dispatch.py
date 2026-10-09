@@ -91,6 +91,7 @@ class NativeToolDispatch:
                 definition = self._snapshot["_resolved"]["tools"][name]["definition"]
                 fields = composer_fields(definition)
                 transcript = self.tracker.plain_transcript()
+                booking_results = self.tracker.booking_results()
                 model = composer["model"]
                 function_call_id = self.tracker._tool_invocation_metadata.get(
                     invocation_id, {}
@@ -110,6 +111,7 @@ class NativeToolDispatch:
                     input_payload={
                         "system_prompt": composer_instruction(template, fields),
                         "transcript": transcript,
+                        "booking_results": booking_results,
                         "template_fields": fields,
                         "required_urls": template.get("required_urls", []),
                     },
@@ -122,6 +124,7 @@ class NativeToolDispatch:
                         template=template,
                         definition=definition,
                         transcript=transcript,
+                        booking_results=booking_results,
                     )
                 except asyncio.CancelledError:
                     self.tracker.finish_operation(

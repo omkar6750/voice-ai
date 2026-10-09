@@ -89,6 +89,21 @@ def test_sanitize_contact_variables_allowlist_filtering():
     assert "internal_secret_tag" not in sanitized
 
 
+def test_contact_names_are_flat_and_legacy_snapshot_names_are_split():
+    contact = {"name": "Omkar Pawar", "first_name": "Omkar", "last_name": "Pawar"}
+
+    assert sanitize_contact_variables(contact, ["first_name", "last_name"]) == {
+        "first_name": "Omkar",
+        "last_name": "Pawar",
+    }
+    assert sanitize_contact_variables({"name": "Omkar Pawar"}, ["name"]) == {"first_name": "Omkar"}
+    assert sanitize_contact_variables({}, ["first_name"]) == {}
+    assert sanitize_contact_variables({"business": "Test"}, ["first_name", "last_name"]) == {
+        "first_name": "",
+        "last_name": "",
+    }
+
+
 def test_sanitize_contact_variables_empty():
     assert sanitize_contact_variables(None, ["business"]) == {}
     assert sanitize_contact_variables({"business": "Test"}, []) == {}

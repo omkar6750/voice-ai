@@ -158,6 +158,9 @@ function ProviderIntegrationsPage({ section }: { section: Section }) {
   >([]);
   const [credentialId, setCredentialId] = useState("");
   const [calendarLabel, setCalendarLabel] = useState("My Google Calendar");
+  const [reconnectingCalendarId, setReconnectingCalendarId] = useState<
+    string | null
+  >(null);
   const [renameTarget, setRenameTarget] = useState<CalendarIntegration | null>(
     null,
   );
@@ -238,6 +241,8 @@ function ProviderIntegrationsPage({ section }: { section: Section }) {
   }
 
   async function reconnectCalendar(calendar: CalendarIntegration) {
+    if (reconnectingCalendarId) return;
+    setReconnectingCalendarId(calendar.id);
     try {
       const result = await api<{ authorization_url: string }>(
         `/calendar-integrations/${calendar.id}/reconnect`,
@@ -248,6 +253,7 @@ function ProviderIntegrationsPage({ section }: { section: Section }) {
       toast.error(
         cause instanceof Error ? cause.message : "Could not reconnect calendar",
       );
+      setReconnectingCalendarId(null);
     }
   }
 
@@ -602,6 +608,7 @@ function ProviderIntegrationsPage({ section }: { section: Section }) {
               }}
               onDisconnect={setDisconnectTarget}
               onReconnect={reconnectCalendar}
+              reconnectingCalendarId={reconnectingCalendarId}
               connected
             />
           </LoadState>
@@ -627,6 +634,7 @@ function ProviderIntegrationsPage({ section }: { section: Section }) {
                 }}
                 onDisconnect={setDisconnectTarget}
                 onReconnect={reconnectCalendar}
+                reconnectingCalendarId={reconnectingCalendarId}
                 connected={false}
               />
             </section>
@@ -834,12 +842,14 @@ function CalendarList({
   onRename,
   onDisconnect,
   onReconnect,
+  reconnectingCalendarId,
   connected,
 }: {
   calendars: CalendarIntegration[];
   onRename: (calendar: CalendarIntegration) => void;
   onDisconnect: (calendar: CalendarIntegration) => void;
   onReconnect: (calendar: CalendarIntegration) => void;
+  reconnectingCalendarId: string | null;
   connected: boolean;
 }) {
   return (
@@ -868,15 +878,17 @@ function CalendarList({
               disabled={!connected}
             />
           )}
-          {!connected && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void onReconnect(calendar)}
-            >
-              Reconnect Google
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            size="sm"
+            aria-label={`Reconnect ${calendar.display_name}`}
+            disabled={reconnectingCalendarId !== null}
+            onClick={() => void onReconnect(calendar)}
+          >
+            {reconnectingCalendarId === calendar.id
+              ? "Reconnecting…"
+              : "Reconnect Google"}
+          </Button>
           <Button
             variant="ghost"
             size="icon"

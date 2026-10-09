@@ -49,6 +49,8 @@ import { useResource } from "@/lib/resources";
 type EndpointsResponse = components["schemas"]["RuntimeEndpointsResponse"];
 type EndpointStatus = components["schemas"]["EndpointStatus"];
 type EndpointProbeResponse = components["schemas"]["EndpointProbeResponse"];
+type EndpointRecoveryResponse =
+  components["schemas"]["EndpointRecoveryResponse"];
 
 export function EndpointsPage() {
   const api = useApi();
@@ -68,6 +70,9 @@ export function EndpointsPage() {
   const [registerOpen, setRegisterOpen] = useState(false);
   const [registerBusy, setRegisterBusy] = useState(false);
   const [recoverBusy, setRecoverBusy] = useState<string | null>(null);
+  const [recoveryResults, setRecoveryResults] = useState<
+    Record<string, EndpointRecoveryResponse>
+  >({});
 
   // Form fields
   const [name, setName] = useState("");
@@ -188,10 +193,21 @@ export function EndpointsPage() {
   async function recoverEndpoint(endpointId: string) {
     setRecoverBusy(endpointId);
     try {
-      await api(`/runtime-endpoints/${endpointId}/recover`, {
-        method: "POST",
-      });
-      toast.success("Lease recovery triggered");
+      const result = await api<EndpointRecoveryResponse>(
+        `/runtime-endpoints/${endpointId}/recover`,
+        {
+          method: "POST",
+        },
+      );
+      setRecoveryResults((previous) => ({ ...previous, [endpointId]: result }));
+      if (result.endpoint_status) {
+        setProbeStatuses((previous) => ({
+          ...previous,
+          [endpointId]: result.endpoint_status!,
+        }));
+      }
+      if (result.status === "blocked") toast.error(result.message);
+      else toast.success(result.message);
       await reload();
     } catch (cause) {
       toast.error(
@@ -526,7 +542,19 @@ export function EndpointsPage() {
                   )}
                 </CardContent>
 
-                <CardFooter className="border-t pt-3">
+                <CardFooter className="flex-col items-stretch gap-3 border-t pt-3">
+                  {recoveryResults[ep.id] && (
+                    <p
+                      role="status"
+                      className={
+                        recoveryResults[ep.id].status === "blocked"
+                          ? "text-xs text-destructive"
+                          : "text-xs text-muted-foreground"
+                      }
+                    >
+                      {recoveryResults[ep.id].message}
+                    </p>
+                  )}
                   <Button
                     size="sm"
                     variant="outline"

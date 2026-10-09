@@ -3,8 +3,9 @@ import { Plus, X } from "lucide-react";
 import { ReadOnlyValue } from "@/components/record-page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { PromptEditor } from "./PromptEditor";
 import type { AgentConfig, ContactVariablesResponse } from "./types";
 
@@ -32,7 +33,6 @@ export function PromptsPanel({
   const availableVariables = [
     ...temporalKeys,
     ...contactVariables,
-    ...contactVariables.map((v) => `contact.${v}`),
     ...(config.fact_slots ?? []).filter((slot) => slot.key).map((slot) => slot.key),
   ];
 
@@ -66,6 +66,29 @@ export function PromptsPanel({
   return (
     <section className="flex max-w-3xl flex-col gap-6">
       <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="prompt-composition">Prompt composition</FieldLabel>
+          <NativeSelect
+            id="prompt-composition"
+            value={config.flow.prompt_composition ?? "node_only"}
+            disabled={disabled}
+            onChange={(event) =>
+              change({
+                ...config,
+                flow: {
+                  ...config.flow,
+                  prompt_composition: event.target.value as AgentConfig["flow"]["prompt_composition"],
+                },
+              })
+            }
+          >
+            <NativeSelectOption value="node_only">Node prompt only</NativeSelectOption>
+            <NativeSelectOption value="global_plus_node">Global prompt plus node prompt</NativeSelectOption>
+          </NativeSelect>
+          <FieldDescription>
+            Choose whether each node receives only its own role message or also the shared global system instruction.
+          </FieldDescription>
+        </Field>
         <PromptEditor
           id="system-prompt"
           label="Global system instruction"

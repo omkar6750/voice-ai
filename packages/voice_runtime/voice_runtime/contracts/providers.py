@@ -3,7 +3,7 @@
 from copy import deepcopy
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, ValidationInfo, model_validator
 
 from .base import ConfigModel
 from .gnani import GNANI_LANGUAGES, GNANI_VOICES
@@ -86,14 +86,23 @@ class SarvamRealtimeSTTConfig(ConfigModel):
 
 class STTConfig(ConfigModel):
     provider: Literal["sarvam", "gnani"] = "sarvam"
-    model: Literal["saaras:v3", "saaras:v4", "gnani-prisma-v2.5"] = "saaras:v3"
+    model: Literal["saaras:v3-realtime", "saaras:v4", "saaras:v3", "gnani-prisma-v2.5"] = (
+        "saaras:v3-realtime"
+    )
     language: str = "en-IN"
     realtime: SarvamRealtimeSTTConfig = Field(default_factory=SarvamRealtimeSTTConfig)
 
     @model_validator(mode="after")
-    def validate_provider_model(self):
+    def validate_provider_model(self, info: ValidationInfo):
+        # Historical snapshots remain readable; new writes and runtime execution reject v3.
+        if (
+            self.provider == "sarvam"
+            and self.model == "saaras:v3"
+            and (info.context or {}).get("read_legacy_config")
+        ):
+            return self
         expected = {
-            "sarvam": {"saaras:v3", "saaras:v4"},
+            "sarvam": {"saaras:v3-realtime", "saaras:v4"},
             "gnani": {"gnani-prisma-v2.5"},
         }[self.provider]
         if self.model not in expected:
@@ -248,7 +257,7 @@ RUNTIME_PROVIDER_CAPABILITIES: dict[str, dict] = {
         "slots": ["llm", "stt", "tts"],
         "models_by_slot": {
             "llm": list(SARVAM_LLM_MODELS),
-            "stt": ["saaras:v3", "saaras:v4"],
+            "stt": ["saaras:v3-realtime", "saaras:v4"],
             "tts": ["bulbul:v3"],
         },
         "languages": ["en-IN", "hi-IN", "mr-IN", "te-IN"],

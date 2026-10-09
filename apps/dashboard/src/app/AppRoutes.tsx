@@ -32,6 +32,9 @@ const AgentEditorPage = lazy(() =>
 const ContactsPage = lazy(() =>
   import("@/pages/contacts").then((page) => ({ default: page.ContactsPage })),
 );
+const ReferralsPage = lazy(() =>
+  import("@/pages/referrals").then((page) => ({ default: page.ReferralsPage })),
+);
 const ContactDetailPage = lazy(() =>
   import("@/pages/contacts/detail").then((page) => ({
     default: page.ContactDetailPage,
@@ -97,6 +100,9 @@ const CredentialsSettingsPage = lazy(() =>
     default: page.CredentialsSettingsPage,
   })),
 );
+const McpAccessPage = lazy(() =>
+  import("@/pages/settings/McpAccess").then((page) => ({ default: page.McpAccessPage })),
+);
 
 export function AppRoutes({ platformAdmin }: { platformAdmin: boolean }) {
   return (
@@ -109,6 +115,7 @@ export function AppRoutes({ platformAdmin }: { platformAdmin: boolean }) {
       }
     >
       <Routes>
+        <Route path="/settings/mcp" element={<McpAccessPage />} />
         <Route path="/" element={<Navigate to="/runs" replace />} />
         <Route
           path="/platform/support"
@@ -124,6 +131,7 @@ export function AppRoutes({ platformAdmin }: { platformAdmin: boolean }) {
           element={<AgentEditorPage />}
         />
         <Route path="/contacts" element={<ContactsPage />} />
+        <Route path="/referrals" element={<ReferralsPage />} />
         <Route path="/contacts/:contactId" element={<ContactDetailPage />} />
         <Route path="/knowledge" element={<KnowledgePage />} />
         <Route path="/knowledge/:baseId" element={<KnowledgeDetailPage />} />

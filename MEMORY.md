@@ -89,3 +89,53 @@ current separate runtime and editor. No membership authorization cache, Storyboo
 main merge or deployment. See ADR-0049 and docs/deployment/WORKTREE-INTEGRATION.md.
 Migration 0047_dashboard_read_index follows 0046_text_tests. Live provider/modem
 acceptance remains operator-run.
+
+## 2026-10-06 — Referral capture and review
+
+Added the canonical registered `save_referral` business tool, migration
+0049_referrals (after contact name parts 0048), scoped review/list/promotion APIs,
+and the Referrals dashboard with Contact/Run provenance links. Caller readback
+confirmation is separate from operator phone/email verification. Optional phone,
+email or name-only referrals are saved independently from Contacts. Only explicit
+promotion with a verified international phone creates or links a Contact. No
+outreach is triggered. Nullable references survive run/contact cleanup.
+
+Local localhost:55432/voice migrated through 0049; canonical published tool added
+to the local Ritu organization's catalog, without changing Ritu's saved prompts,
+bindings or published version. Referrals remain backend-only under Supabase RLS;
+the migration conditionally grants the server voice_app role and revokes browser
+roles. Production has not been migrated/deployed for this feature. See ADR-0051.
+
+## 2026-10-07 — Flat contact prompt variables
+
+Removed name and contact.* from prompt catalogs/runtime state; first_name and
+last_name are canonical. Chat snapshots now include these components, matching
+browser/modem/Twilio setup. Legacy prompts are translated on copied configuration
+and legacy name-only snapshots derive components. Published rows/history remain
+immutable. Local drafts updated with revision increments (v11 revision 19).
+Migration 0050 repairs missing contact components; full name remains a display
+label. Local migration applied, 32 focused tests and dashboard build pass. No
+production deployment or live provider acceptance performed. See ADR-0052.
+
+## 2026-10-08 — Secure MCP access and selective run debugging
+
+The control plane now serves stateless Streamable HTTP MCP at /mcp. Dashboard
+Settings → MCP access issues environment-bound, hashed, revocable user/org tokens
+and copies the token, Codex command or PowerShell setup. Live Clerk membership,
+existing member/admin guards and tenant filtering apply on every invocation.
+Reviewed OpenAPI tools expose configuration authoring and dashboard operations;
+credential writes/deletion, OAuth and platform/runtime control are excluded.
+Mutations have durable audit admission and PostgreSQL shared rate limiting.
+
+Run overview includes one full transcript and a compact exchange/node/operation
+map, API attempt timings and errors. Selected IDs expose payloads, explicit
+deduplicated context, config sections and retained logs. HTTP and modern
+WebSocket setup capture never consumes media; coverage states historical,
+policy-disabled and uninstrumented gaps. Migration 0051 rehearsed on disposable
+PostgreSQL; scoped schema parity and focused MCP/evidence tests pass. Dashboard
+build passes. Existing prompt-format, logging-inventory, route-inventory and
+run-index parity failures remain unrelated. No production deployment or real
+hardware/provider acceptance performed. See ADR-0053 and deployment/MCP-ACCESS.md.
+Integrated into the working checkout with backups under .cache/mcp-integration-backup.
+Local development PostgreSQL on port 55432 upgraded from 0050 to 0051; 31 focused
+tests pass in the integrated checkout. The existing local DB container was started.

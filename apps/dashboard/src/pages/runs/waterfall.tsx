@@ -15,6 +15,7 @@ import {
 import { Marker, MarkerContent } from "@/components/ui/marker";
 import { cn } from "@/lib/utils";
 import {
+  clock,
   classifierDeliveryFor,
   classifierResultsFor,
   duration,
@@ -252,6 +253,30 @@ export function Waterfall({
                           kind={op.kind}
                         />
                       </div>
+                      {op.kind === "span" && op.item.category === "summarizer" && (() => {
+                        const lifecycle = timeline.diagnostics.filter(
+                          (item) =>
+                            item.category === "context_summary" &&
+                            item.metadata?.summary_operation_id === op.item.id,
+                        );
+                        const applied = lifecycle.find((item) => item.code === "applied");
+                        const discarded = lifecycle.find((item) => item.code === "discarded");
+                        const failed = lifecycle.find((item) => item.code === "failed");
+                        const consumed = lifecycle.find((item) => item.code === "consumed");
+                        const consumingId = consumed?.metadata?.consuming_llm_operation_id;
+                        const consuming = typeof consumingId === "string"
+                          ? timeline.spans.find((item) => item.id === consumingId)
+                          : null;
+                        return (
+                          <div className="-mt-1 mb-2 pl-9 text-xs text-muted-foreground">
+                            {applied ? `Applied ${clock(applied.occurred_at)}` : ""}
+                            {consumed ? ` · consumed ${clock(consumed.occurred_at)}` : ""}
+                            {consuming ? ` by ${consuming.name}` : ""}
+                            {discarded ? `Discarded: ${discarded.message}` : ""}
+                            {failed ? `Failed: ${failed.message}` : ""}
+                          </div>
+                        );
+                      })()}
                       {op.kind === "tool" &&
                         whatsappDeliveryStatus(timeline, op.item) && (
                           <div className="pl-9 pb-2 text-xs text-muted-foreground">
