@@ -107,7 +107,7 @@ function decorate(doc: import("@tiptap/pm/model").Node, catalog: Catalog) {
           Decoration.inline(pos + from, pos + to, {
             class: errors.length
               ? "rounded bg-destructive/20 text-destructive underline decoration-wavy"
-              : "rounded bg-linear-to-r from-primary/10 via-primary/20 to-primary/40 text-foreground ring-1 ring-inset ring-primary/50",
+              : "rounded bg-primary/15 text-foreground ring-1 ring-inset ring-primary/50",
             "data-prompt-reference": "fallback",
             "data-prompt-expression-start": String(token.start),
             title:

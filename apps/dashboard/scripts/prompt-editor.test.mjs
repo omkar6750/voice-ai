@@ -929,7 +929,7 @@ test("fallback groups preserve literal text, paste, edits and undo", () => {
   assert.ok(
     editor.view.dom
       .querySelector('[data-prompt-reference="fallback"]')
-      .classList.contains("bg-linear-to-r"),
+      .classList.contains("bg-primary/15"),
   );
   assert.ok(editor.view.dom.querySelector('[title*="Boolean"]'));
   editor.commands.setTextSelection(1);
