@@ -280,8 +280,16 @@ class NativePipelineHost(
                 if slot.key == "whatsapp_sent":
                     from voice_runtime.execution.whatsapp_state import record_send_fact
 
-                    return record_send_fact(manager.state, value)
-                manager.state[slot.key] = value
+                    result = record_send_fact(manager.state, value)
+                    if result.get("status") != "ok":
+                        return result
+                else:
+                    manager.state[slot.key] = value
+                if hasattr(manager, "fact_sources"):
+                    manager.fact_sources[slot.key] = {
+                        "kind": "record_tool",
+                        "invocation_id": manager.active_tool_invocation_id,
+                    }
                 return {"status": "ok", "key": slot.key, "value": value}
 
             value_schema: dict[str, Any] = {
@@ -431,6 +439,11 @@ class NativePipelineHost(
         enable_rtvi=False,
         text_output=None,
     ) -> None:
+        from voice_shared.prompt_templates import validate_config_templates
+
+        validate_config_templates(snapshot)
+        for slot in snapshot.get("fact_slots", []):
+            FactSlotConfig.model_validate(slot)
         self.tracker, self._snapshot = tracker, snapshot
         self._nodes = {node["id"]: node for node in snapshot["flow"]["nodes"]}
         self._global_function_keys = {
@@ -674,7 +687,7 @@ class NativePipelineHost(
         flow_state: dict[str, Any] = dict(temporal)
         flow_state.update(sanitized_contact)
         for slot in snapshot.get("fact_slots", []):
-            flow_state.setdefault(slot["key"], "")
+            flow_state.setdefault(slot["key"], slot.get("default_value", ""))
         for variable in allowed_vars:
             if variable != "name" and not variable.startswith("contact."):
                 flow_state.setdefault(variable, "")

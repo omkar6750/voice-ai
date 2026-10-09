@@ -46,6 +46,56 @@ export function Json({ label, value }: { label: string; value: unknown }) {
   );
 }
 
+function PromptResolutionEvidence({
+  input,
+  timeline,
+}: {
+  input: unknown;
+  timeline: Timeline;
+}) {
+  const resolution =
+    input && typeof input === "object" && "prompt_resolution" in input
+      ? (input as { prompt_resolution: unknown }).prompt_resolution
+      : undefined;
+  const state =
+    resolution && typeof resolution === "object" && "state" in resolution
+      ? String(resolution.state)
+      : "historical";
+  const latest = Object.fromEntries(
+    timeline.tools
+      .filter(
+        (t) =>
+          t.binding_key.startsWith("record_") &&
+          t.status === "completed" &&
+          t.result !== null &&
+          typeof t.result === "object" &&
+          "status" in t.result &&
+          t.result.status === "ok",
+      )
+      .sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at))
+      .map((t) => [t.binding_key.slice(7), t.result]),
+  );
+  return (
+    <section className="flex flex-col gap-2">
+      <h4 className="text-sm font-medium">Prompt resolution</h4>
+      <p className="text-xs text-muted-foreground">
+        {state === "historical"
+          ? "Historical run: resolution evidence was not recorded."
+          : state === "policy_disabled"
+            ? "Resolution details were disabled by policy."
+            : "These values were used on node entry. Later fact recordings do not rewrite this node’s instructions."}
+      </p>
+      {resolution !== undefined && (
+        <Json label="Values used on node entry" value={resolution} />
+      )}
+      <Json
+        label="Latest recorded facts (may differ from node entry)"
+        value={latest}
+      />
+    </section>
+  );
+}
+
 function Evidence({
   selection,
   timeline,
@@ -357,6 +407,18 @@ function Evidence({
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <dl>
+            {typeof span.attributes.node_visit_id === "string" && (
+              <Value label="Prompt node">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="link"
+                  onClick={() => onSelect({ kind: "visit", id: String(span.attributes.node_visit_id) })}
+                >
+                  View node-entry resolution
+                </Button>
+              </Value>
+            )}
             <Value label="Provider">{span.provider ?? "Runtime"}</Value>
             <Value label="Model">{span.model ?? "Not recorded"}</Value>
             <Value label="Output state">
@@ -684,6 +746,7 @@ function Evidence({
   }
   const visit = timeline.flow_visits.find((item) => item.id === selection.id);
   if (!visit) return null;
+  const visitSpan = timeline.spans.find((s) => s.id === visit.span_id);
   return (
     <>
       <CardHeader>
@@ -702,6 +765,7 @@ function Evidence({
         >
           Timing span
         </Button>
+        <PromptResolutionEvidence input={visitSpan?.input} timeline={timeline} />
         {visit.triggered_by_tool_id && (
           <Button
             variant="outline"

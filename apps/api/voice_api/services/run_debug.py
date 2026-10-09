@@ -372,6 +372,13 @@ async def details(session, run_id, ids, sections, materialize_context=False):
             }
             if "input" in sections or "context" in sections:
                 result[identity]["node_config"] = payload(node)
+                visit_span = await session.get(TraceSpan, visit.span_id)
+                resolution = (
+                    (visit_span.input_payload or {}).get("prompt_resolution")
+                    if visit_span
+                    else None
+                )
+                result[identity]["prompt_resolution"] = payload(resolution)
             continue
         if not span and not tool and not diagnostic:
             raise HTTPException(404, "Requested evidence not found in run")

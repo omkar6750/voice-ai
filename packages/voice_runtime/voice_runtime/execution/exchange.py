@@ -123,7 +123,12 @@ class ExchangeTracker:
         self.emit("exchange_ended", exchange_id=self.current, status=status)
         self._closed_exchanges.add(self.current)
 
-    def start_visit(self, node_key: str, triggered_by_tool_id: str | None = None) -> str:
+    def start_visit(
+        self,
+        node_key: str,
+        triggered_by_tool_id: str | None = None,
+        prompt_resolution: dict | None = None,
+    ) -> str:
         self.end_visit("completed")
         self._visit_sequence += 1
         visit = {
@@ -142,6 +147,7 @@ class ExchangeTracker:
             node_key=node_key,
             started_ns=visit["started_ns"],
             triggered_by_tool_id=triggered_by_tool_id,
+            prompt_resolution=prompt_resolution,
         )
         return visit["visit_id"]
 

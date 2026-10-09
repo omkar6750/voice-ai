@@ -31,6 +31,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
+import { FactDefault } from "./FactDefault";
+import { PromptPreview } from "./PromptPreview";
 import { PromptEditor } from "./PromptEditor";
 import { needsOpeningTask } from "./flow-validation";
 import type {
@@ -42,6 +44,7 @@ import type {
 
 export function FlowPanel({
   config,
+  versionId,
   change,
   registeredTools,
   variablesCatalog,
@@ -49,6 +52,7 @@ export function FlowPanel({
   disabled,
 }: {
   config: AgentConfig;
+  versionId?: string;
   change: (next: AgentConfig) => void;
   registeredTools: string[];
   variablesCatalog?: ContactVariablesResponse | null;
@@ -367,6 +371,7 @@ export function FlowPanel({
           key,
           description: "A useful fact shared by the caller",
           value_type: "string",
+          default_value: "",
           enum: null,
           minimum: null,
           maximum: null,
@@ -570,6 +575,9 @@ export function FlowPanel({
                   ]}
                   registeredTools={registeredTools}
                   availableVariables={availableVariables}
+                  booleanVariables={config.fact_slots
+                    .filter((s) => s.value_type === "boolean")
+                    .map((s) => s.key)}
                   disabled={disabled}
                 />
               </FieldGroup>
@@ -685,6 +693,14 @@ export function FlowPanel({
               </FieldGroup>
             </TabsContent>
             <TabsContent value="preview" className="min-w-0 p-4">
+              {versionId && (
+                <PromptPreview
+                  key={node.id}
+                  config={config}
+                  nodeId={node.id}
+                  versionId={versionId}
+                />
+              )}
               <p className="mb-3 text-xs text-muted-foreground">
                 Saved instructions for this node, before runtime variable
                 substitution and conversation history.
@@ -1330,6 +1346,7 @@ export function FlowPanel({
                         updateFactSlot(index, {
                           value_type: event.target
                             .value as typeof slot.value_type,
+                          default_value: "",
                           minimum: null,
                           maximum: null,
                           enum: null,
@@ -1342,6 +1359,14 @@ export function FlowPanel({
                       <option value="boolean">boolean</option>
                     </NativeSelect>
                   </Field>
+                  <FactDefault
+                    key={`${slot.key}:${slot.value_type}`}
+                    slot={slot}
+                    disabled={disabled}
+                    change={(value) =>
+                      updateFactSlot(index, { default_value: value })
+                    }
+                  />
                   {slot.value_type === "integer" ||
                   slot.value_type === "number" ? (
                     <div className="grid gap-3 sm:grid-cols-2">

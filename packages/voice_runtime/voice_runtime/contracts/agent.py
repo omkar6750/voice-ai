@@ -1,5 +1,6 @@
 """Agent-owned graphs, prompts, exact tool bindings, and runtime settings."""
 
+import math
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -13,6 +14,10 @@ from pydantic import (
 )
 from pydantic_core import PydanticCustomError
 from voice_shared.contact_variables import normalize_contact_config
+from voice_shared.prompt_templates import (
+    TEMPORAL_KEYS,
+    validate_config_templates,
+)
 
 from .base import ConfigModel, Identifier
 from .cadence import ClassifierConfig, SummarizerConfig, lead_classifier_contract
@@ -75,6 +80,7 @@ class FactSlotConfig(ConfigModel):
     key: Identifier
     description: str = Field(min_length=1, max_length=500)
     value_type: Literal["string", "integer", "number", "boolean"] = "string"
+    default_value: str | int | float | bool = ""
     enum: list[str | int | float | bool] | None = None
     minimum: float | None = None
     maximum: float | None = None
@@ -88,6 +94,8 @@ class FactSlotConfig(ConfigModel):
             self.minimum is not None or self.maximum is not None
         ):
             raise ValueError("fact slot ranges require an integer or number value_type")
+        if self.default_value != "":
+            self.validate_value(self.default_value)
         if self.enum is not None and not self.enum:
             raise ValueError("fact slot enum must not be empty")
         if self.enum is not None:
@@ -102,6 +110,8 @@ class FactSlotConfig(ConfigModel):
             "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
             "boolean": lambda v: isinstance(v, bool),
         }[self.value_type](value)
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError(f"fact slot '{self.key}' must be finite")
         if not valid_type:
             raise ValueError(f"fact slot '{self.key}' expects {self.value_type}")
         if self.minimum is not None and value < self.minimum:
@@ -485,6 +495,19 @@ class AgentConfig(ConfigModel):
             raise ValueError(
                 f"generated flow functions collide with tool bindings: {sorted(collisions)}"
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_prompt_templates(self, info: ValidationInfo):
+        if (info.context or {}).get("read_legacy_config"):
+            return self
+        cfg = self.model_dump(mode="python")
+        collisions = {s.key for s in self.fact_slots} & (
+            set(self.contact_variables) | TEMPORAL_KEYS
+        )
+        if collisions:
+            raise ValueError(f"Fact keys collide with prompt variables: {sorted(collisions)}")
+        validate_config_templates(cfg)
         return self
 
     @model_validator(mode="before")

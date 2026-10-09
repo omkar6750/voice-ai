@@ -629,6 +629,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agent-versions/{version_id}/prompt-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prompt Preview */
+        post: operations["prompt_preview_api_v1_agent_versions__version_id__prompt_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools": {
         parameters: {
             query?: never;
@@ -2982,6 +2999,23 @@ export interface paths {
         post?: never;
         /** Delete Agent */
         delete: operations["delete_agent_api_agents__agent_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-versions/{version_id}/prompt-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prompt Preview */
+        post: operations["prompt_preview_api_agent_versions__version_id__prompt_preview_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -6264,6 +6298,11 @@ export interface components {
              * @enum {string}
              */
             value_type: "string" | "integer" | "number" | "boolean";
+            /**
+             * Default Value
+             * @default
+             */
+            default_value: string | number | boolean;
             /** Enum */
             enum?: (string | number | boolean)[] | null;
             /** Minimum */
@@ -6429,6 +6468,7 @@ export interface components {
             started_ns: number;
             /** Triggered By Tool Id */
             triggered_by_tool_id?: string | null;
+            prompt_resolution?: components["schemas"]["PromptResolution"] | null;
         };
         /** GenerateTemplateToolBody */
         GenerateTemplateToolBody: {
@@ -7301,6 +7341,93 @@ export interface components {
             transport_released: boolean;
             /** Diagnostics */
             diagnostics?: components["schemas"]["DiagnosticInput"][];
+        };
+        /** PromptCandidate */
+        PromptCandidate: {
+            /** Key */
+            key: string;
+            value: components["schemas"]["JsonValue"];
+            /** Empty Reason */
+            empty_reason?: ("empty_string" | "zero") | null;
+            source: components["schemas"]["PromptValueSource"];
+        };
+        /** PromptPreviewBody */
+        PromptPreviewBody: {
+            config: components["schemas"]["AgentConfig"];
+            /** Node Id */
+            node_id: string;
+            /** Contact Values */
+            contact_values?: {
+                [key: string]: string | number | boolean | null;
+            };
+            /** Fact Values */
+            fact_values?: {
+                [key: string]: string | number | boolean;
+            };
+        };
+        /** PromptPreviewResponse */
+        PromptPreviewResponse: {
+            /** Node Id */
+            node_id: string;
+            /** Rendered */
+            rendered: {
+                [key: string]: unknown;
+            };
+            /** Resolution */
+            resolution: components["schemas"]["PromptResolutionRecord"][];
+            /** Refresh */
+            refresh: string;
+        };
+        /** PromptResolution */
+        PromptResolution: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "recorded" | "policy_disabled";
+            /**
+             * Rendered At
+             * Format: date-time
+             */
+            rendered_at: string;
+            /** Node Key */
+            node_key: string;
+            /** Records */
+            records?: components["schemas"]["PromptResolutionRecord"][];
+        };
+        /** PromptResolutionRecord */
+        PromptResolutionRecord: {
+            /** Field */
+            field: string;
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Expression */
+            expression: string;
+            /** Fallback */
+            fallback: boolean;
+            /** Candidates */
+            candidates: components["schemas"]["PromptCandidate"][];
+            /** Selected Key */
+            selected_key?: string | null;
+            /** Value */
+            value: string;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "selected" | "all_empty";
+        };
+        /** PromptValueSource */
+        PromptValueSource: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "state" | "contact" | "default" | "record_tool" | "sample";
+            /** Invocation Id */
+            invocation_id?: string | null;
         };
         /** ProviderCatalogResponse */
         ProviderCatalogResponse: {
@@ -10496,6 +10623,41 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prompt_preview_api_v1_agent_versions__version_id__prompt_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromptPreviewBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptPreviewResponse"];
                 };
             };
             /** @description Validation Error */
@@ -15786,6 +15948,41 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prompt_preview_api_agent_versions__version_id__prompt_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromptPreviewBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptPreviewResponse"];
                 };
             };
             /** @description Validation Error */

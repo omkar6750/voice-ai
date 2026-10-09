@@ -139,3 +139,13 @@ hardware/provider acceptance performed. See ADR-0053 and deployment/MCP-ACCESS.m
 Integrated into the working checkout with backups under .cache/mcp-integration-backup.
 Local development PostgreSQL on port 55432 upgraded from 0050 to 0051; 31 focused
 tests pass in the integrated checkout. The existing local DB container was started.
+
+
+## 2026-10-09 — Conversation fact defaults and fallback prompts
+
+Isolated feature worktree adds typed or empty fact defaults, rightmost nonempty
+fallback chains, node-entry-only rendering, read-only unsaved previews, Tiptap
+fallback insertion and span-linked resolution/provenance evidence. Historical
+configurations are not rewritten; no database migration or saved-agent edits.
+See ADR-0058 and docs/deployment/PROMPT-FALLBACKS.md. Real provider/modem
+acceptance remains operator-run.

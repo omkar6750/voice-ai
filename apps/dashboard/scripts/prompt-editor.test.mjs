@@ -740,7 +740,6 @@ test("shared classifier routing can be cleared and availability disabled", async
   assert.equal(screen.queryByLabelText("Shared classifier routing mode"), null);
 });
 
-
 test("chat shows one completed tool call and opens its actual evidence", () => {
   const entries = [
     {
@@ -872,4 +871,239 @@ test("chat distinguishes agent classifier calls from automatic cadence", () => {
       name: "Automatic classifier (cadence) - completed",
     }),
   );
+});
+
+const { parsePrompt, promptErrors } = await vite.ssrLoadModule(
+  "/src/pages/agents/prompt-templates.ts",
+);
+const { FactDefault } = await vite.ssrLoadModule(
+  "/src/pages/agents/FactDefault.tsx",
+);
+
+test("fallback parser agrees with shared backend fixtures", () => {
+  const fixtures = JSON.parse(
+    readFileSync(
+      new URL(
+        "../../../contracts/prompt-template-fixtures.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+  for (const fixture of fixtures) {
+    if (fixture.error) assert.throws(() => parsePrompt(fixture.text));
+    else assert.deepEqual(parsePrompt(fixture.text), fixture.tokens);
+  }
+  assert.match(
+    promptErrors("[ {{a}} | {{b}} ]", ["a", "b"], ["b"])[0],
+    /Boolean/,
+  );
+});
+
+test("fallback groups preserve literal text, paste, edits and undo", () => {
+  const text =
+    "Speak [ {{language}} | {{confirmed}} ].\n[ {{language}} | {{flag}} ]";
+  const catalog = {
+    tools: [],
+    variables: ["language", "confirmed", "flag"],
+    booleans: ["flag"],
+  };
+  const editor = new Editor({
+    element: document.createElement("div"),
+    extensions: [...promptExtensions(() => catalog), UndoRedo],
+    content: promptDocument(text),
+  });
+  assert.equal(editor.getText(), text);
+  assert.equal(
+    new Set(
+      Array.from(
+        editor.view.dom.querySelectorAll("[data-prompt-expression-start]"),
+        (element) => element.getAttribute("data-prompt-expression-start"),
+      ),
+    ).size,
+    2,
+  );
+  assert.ok(editor.view.dom.querySelector('[title*="Boolean"]'));
+  editor.commands.setTextSelection(1);
+  editor.commands.insertContent({
+    type: "text",
+    text: "[ {{confirmed}} | {{language}} ]\n",
+  });
+  assert.ok(editor.commands.undo());
+  assert.equal(editor.getText(), text);
+  assert.ok(editor.commands.redo());
+  assert.ok(editor.getText().startsWith("[ {{confirmed}} | {{language}} ]\n"));
+  editor.destroy();
+});
+
+test("fallback Unicode decoration uses document positions", () => {
+  const text = "🙂 [ {{language}} | {{confirmed}} ]";
+  const editor = new Editor({
+    element: document.createElement("div"),
+    extensions: promptExtensions(() => ({
+      tools: [],
+      variables: ["language", "confirmed"],
+    })),
+    content: promptDocument(text),
+  });
+  const highlighted = Array.from(
+    editor.view.dom.querySelectorAll("[data-prompt-expression-start]"),
+  )
+    .map((element) => element.textContent)
+    .join("");
+  assert.equal(highlighted, "[ {{language}} | {{confirmed}} ]");
+  assert.equal(editor.getText(), text);
+  editor.destroy();
+});
+
+test("fallback picker inserts ordered variables and excludes booleans", async () => {
+  let latest = "";
+  render(
+    React.createElement(PromptEditor, {
+      id: "fallback-test",
+      label: "Prompt",
+      value: "",
+      onChange: (value) => {
+        latest = value;
+      },
+      availableTools: [],
+      registeredTools: [],
+      availableVariables: ["language", "confirmed", "flag"],
+      booleanVariables: ["flag"],
+    }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Insert fallback" }));
+  const second = screen.getByRole("combobox", { name: "Fallback variable 2" });
+  assert.ok(!Array.from(second.options).some((o) => o.value === "flag"));
+  fireEvent.change(second, { target: { value: "confirmed" } });
+  fireEvent.click(screen.getByRole("button", { name: "Add variable" }));
+  fireEvent.change(
+    screen.getByRole("combobox", { name: "Fallback variable 3" }),
+    { target: { value: "confirmed" } },
+  );
+  fireEvent.click(screen.getAllByRole("button", { name: "Move earlier" })[2]);
+  fireEvent.click(screen.getByRole("button", { name: "Insert expression" }));
+  await waitFor(() =>
+    assert.equal(latest, "[ {{language}} | {{confirmed}} | {{confirmed}} ]"),
+  );
+});
+
+test("prompt preview sends unsaved samples and explains empty resolution", async () => {
+  const { PromptPreview } = await vite.ssrLoadModule(
+    "/src/pages/agents/PromptPreview.tsx",
+  );
+  const { ApiContext } = await vite.ssrLoadModule("/src/app/api.ts");
+  const config = flowFixture();
+  config.contact_variables = ["language"];
+  config.fact_slots = [
+    { key: "confirmed", value_type: "string", default_value: "" },
+  ];
+  config.system_prompt = "Speak [ {{language}} | {{confirmed}} ].";
+  const calls = [];
+  const api = async (path, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ path, method: init.method, body });
+    return {
+      rendered: { role_message: "Speak ." },
+      resolution: [
+        {
+          field: "role_message",
+          start: 6,
+          expression: "[ {{language}} | {{confirmed}} ]",
+          outcome: "all_empty",
+          selected_key: null,
+          value: "",
+          candidates: [
+            {
+              key: "language",
+              value: "",
+              empty_reason: "empty_string",
+              source: { kind: "contact" },
+            },
+          ],
+        },
+      ],
+    };
+  };
+  render(
+    React.createElement(
+      ApiContext.Provider,
+      { value: api },
+      React.createElement(PromptPreview, {
+        config,
+        nodeId: "greeting",
+        versionId: "draft-test",
+      }),
+    ),
+  );
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Contact sample language" }),
+    { target: { value: "mr-IN" } },
+  );
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Fact sample confirmed" }),
+    { target: { value: "hi-IN" } },
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Render preview" }));
+  await waitFor(() => assert.equal(calls.length, 1));
+  assert.equal(calls[0].path, "/agent-versions/draft-test/prompt-preview");
+  assert.equal(calls[0].method, "POST");
+  assert.deepEqual(calls[0].body.contact_values, { language: "mr-IN" });
+  assert.deepEqual(calls[0].body.fact_values, { confirmed: "hi-IN" });
+  assert.equal(calls[0].body.config.system_prompt, config.system_prompt);
+  await waitFor(() =>
+    assert.ok(
+      screen.getByText("All candidates empty; renders an empty string."),
+    ),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Try all empty" }));
+  await waitFor(() => assert.equal(calls.length, 2));
+  assert.deepEqual(calls[1].body.contact_values, { language: "" });
+  assert.deepEqual(calls[1].body.fact_values, { confirmed: "" });
+});
+
+test("fact defaults allow unset, typed zero and false without losing false", () => {
+  let value;
+  const slot = {
+    key: "flag",
+    description: "Fact",
+    value_type: "boolean",
+    default_value: "",
+    enum: null,
+    minimum: null,
+    maximum: null,
+    nodes: [],
+  };
+  const view = render(
+    React.createElement(FactDefault, {
+      slot,
+      disabled: false,
+      change: (v) => {
+        value = v;
+      },
+    }),
+  );
+  fireEvent.change(
+    screen.getByRole("combobox", { name: "Default mode for flag" }),
+    { target: { value: "value" } },
+  );
+  assert.equal(value, false);
+  view.rerender(
+    React.createElement(FactDefault, {
+      slot: { ...slot, default_value: false },
+      disabled: false,
+      change: (v) => {
+        value = v;
+      },
+    }),
+  );
+  assert.equal(
+    screen.getByRole("combobox", { name: "Default for flag" }).value,
+    "false",
+  );
+  fireEvent.change(
+    screen.getByRole("combobox", { name: "Default mode for flag" }),
+    { target: { value: "unset" } },
+  );
+  assert.equal(value, "");
 });

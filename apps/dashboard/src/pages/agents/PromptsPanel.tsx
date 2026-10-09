@@ -104,6 +104,7 @@ export function PromptsPanel({
           ]}
           registeredTools={registeredTools}
           availableVariables={availableVariables}
+          booleanVariables={config.fact_slots.filter(s => s.value_type === "boolean").map(s => s.key)}
           disabled={disabled}
         />
       </FieldGroup>

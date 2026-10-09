@@ -67,3 +67,11 @@ acceptance remains operator-run.
 the API boundary with live user membership and reviewed OpenAPI operations;
 exclude credential mutation and use an overview-first, explicitly selected,
 nonduplicating run evidence contract. Deployment: [MCP access](docs/deployment/MCP-ACCESS.md).
+
+
+## 2026-10-09 — Conversation fact defaults and prompt fallback chains
+
+[ADR-0058](docs/adr/ADR-0058-conversation-fact-defaults-and-fallbacks.md): initialize
+facts per run, resolve rightmost nonempty nonboolean alternatives on node entry,
+and retain selection/provenance on the node span. Read-only editor previews use
+the same resolver. No agent publication or provider-setting changes.

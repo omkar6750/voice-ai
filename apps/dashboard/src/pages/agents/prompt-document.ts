@@ -1,3 +1,4 @@
+import { parsePrompt, promptErrors } from "./prompt-templates";
 import { Extension, Node, type JSONContent } from "@tiptap/core";
 import Document from "@tiptap/extension-document";
 import Text from "@tiptap/extension-text";
@@ -52,7 +53,7 @@ const PromptText = Node.create({
   },
 });
 
-type Catalog = { tools: string[]; variables: string[] };
+type Catalog = { tools: string[]; variables: string[]; booleans?: string[] };
 export function promptExtensions(catalog: () => Catalog) {
   const References = Extension.create({
     name: "promptReferences",
@@ -88,8 +89,42 @@ function decorate(doc: import("@tiptap/pm/model").Node, catalog: Catalog) {
   const decorations: Decoration[] = [];
   doc.descendants((node, pos) => {
     if (!node.isText) return;
+    const position = (offset: number) =>
+      Array.from(node.text!).slice(0, offset).join("").length;
+    try {
+      for (const token of parsePrompt(node.text!).filter(
+        (t) => t.fallback && !t.escaped,
+      )) {
+        const errors = promptErrors(
+          token.expression,
+          catalog.variables,
+          catalog.booleans,
+        );
+        decorations.push(
+          Decoration.inline(
+            pos + position(token.start),
+            pos + position(token.end),
+            {
+              class: errors.length
+                ? "rounded bg-destructive/20 text-destructive underline decoration-wavy"
+                : "rounded bg-primary/10 ring-1 ring-inset ring-primary/50",
+              "data-prompt-reference": "fallback",
+              "data-prompt-expression-start": String(token.start),
+              title: errors.join("; ") || "Rightmost nonempty variable wins",
+            },
+          ),
+        );
+      }
+    } catch (error) {
+      decorations.push(
+        Decoration.inline(pos, pos + node.text!.length, {
+          class: "underline decoration-destructive decoration-wavy",
+          title: (error as Error).message,
+        }),
+      );
+    }
     for (const match of node.text!.matchAll(
-      /(?:#([a-z][a-z0-9_]*)\b)|(?:\{\{\s*([a-zA-Z0-9_.]+)\s*\}\})/g,
+      /(?:#([a-z][a-z0-9_]*)\b)|(?:\{\{\s*([a-zA-Z0-9_.:-]+)\s*\}\})/g,
     )) {
       const valid = match[1]
         ? catalog.tools.includes(match[1])

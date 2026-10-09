@@ -154,7 +154,19 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
                     "triggered_by_tool_id": record.triggered_by_tool_id,
                 },
             )
-            verify_same(await session.get(TraceSpan, visit.span_id), {"started_at": started_at})
+            verify_same(
+                await session.get(TraceSpan, visit.span_id),
+                {
+                    "started_at": started_at,
+                    "input_payload": {
+                        "prompt_resolution": safe_evidence(
+                            record.prompt_resolution.model_dump(mode="json")
+                        )
+                    }
+                    if record.prompt_resolution
+                    else None,
+                },
+            )
         else:
             session.add(
                 TraceSpan(
@@ -162,6 +174,13 @@ async def store_record(session: AsyncSession, run_id: str, record) -> None:
                     run_id=run_id,
                     name=record.node_key,
                     category="flow_node",
+                    input_payload={
+                        "prompt_resolution": safe_evidence(
+                            record.prompt_resolution.model_dump(mode="json")
+                        )
+                    }
+                    if record.prompt_resolution
+                    else None,
                     status="running",
                     started_at=started_at,
                 )
