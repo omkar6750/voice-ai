@@ -52,7 +52,8 @@ export function ContactsPage() {
   );
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [name, setName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [phone, setPhone] = useState("");
   const [timezone, setTimezone] = useState("");
   const [business, setBusiness] = useState("");
@@ -94,7 +95,8 @@ export function ContactsPage() {
       await api("/contacts", {
         method: "POST",
         body: JSON.stringify({
-          name: name.trim(),
+          first_name: firstName.trim(),
+          last_name: lastName.trim() || null,
           phone_number: phone.trim(),
           timezone: timezone.trim() || null,
           business: business.trim() || null,
@@ -105,7 +107,8 @@ export function ContactsPage() {
       });
       toast.success("Contact created");
       setOpen(false);
-      setName("");
+      setFirstName("");
+      setLastName("");
       setPhone("");
       setTimezone("");
       setBusiness("");
@@ -143,15 +146,26 @@ export function ContactsPage() {
 
                 <FieldGroup className="gap-3">
                   <Field className="gap-1">
-                    <FieldLabel htmlFor="contact-name">Name</FieldLabel>
-                    <Input
-                      id="contact-name"
-                      value={name}
-                      onChange={(event) => setName(event.target.value)}
-                      maxLength={120}
-                      placeholder="e.g. Omkar Pawar"
-                      required
-                    />
+                    <FieldLabel>Contact name</FieldLabel>
+                    <div className="grid grid-cols-2 gap-3">
+                      <Input
+                        id="contact-first-name"
+                        aria-label="First name"
+                        value={firstName}
+                        onChange={(event) => setFirstName(event.target.value)}
+                        maxLength={120}
+                        placeholder="First name"
+                        required
+                      />
+                      <Input
+                        id="contact-last-name"
+                        aria-label="Last name"
+                        value={lastName}
+                        onChange={(event) => setLastName(event.target.value)}
+                        maxLength={120}
+                        placeholder="Last name (optional)"
+                      />
+                    </div>
                   </Field>
 
                   <Field className="gap-1">

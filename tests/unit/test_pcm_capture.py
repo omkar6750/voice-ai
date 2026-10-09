@@ -1,4 +1,5 @@
 import asyncio
+import json
 import wave
 from unittest.mock import AsyncMock
 
@@ -7,6 +8,44 @@ import pytest
 from pipecat.frames.frames import OutputAudioRawFrame
 from voice_runtime.call_capture import CallCapture
 from voice_runtime.telephony.usb_audio import Sim7600UsbAudioParams, _Sim7600AudioOutput
+
+
+def test_modem_turn_audio_diagnostics_are_opt_in_and_store_levels_only(tmp_path, monkeypatch):
+    from voice_runtime.execution.local_trace import LocalRuntimeTrace
+    from voice_runtime.telephony.usb_audio import _SerialPcmOwner
+
+    monkeypatch.setenv("VOICE_MODEM_TURN_DIAGNOSTICS", "1")
+    trace_path = tmp_path / "modem-trace.jsonl"
+    trace = LocalRuntimeTrace(trace_path, "80000000-0000-4000-8000-000000000001")
+    owner = _SerialPcmOwner(Sim7600UsbAudioParams(audio_port="fake"), trace=trace)
+    frame = np.full(320, 16384, dtype="<i2").tobytes()
+    for _ in range(13):
+        owner.record_turn_pcm(frame)
+    owner._flush_turn_pcm()
+    trace.close()
+
+    rows = [json.loads(line) for line in trace_path.read_text().splitlines()]
+    levels = [row for row in rows if row["event"] == "turn_diag_pcm_window"]
+    assert len(levels) == 1
+    assert levels[0]["component"] == "sim_rx"
+    assert levels[0]["samples"] == 4160
+    assert levels[0]["rms_dbfs"] == -6.0
+    assert levels[0]["peak_dbfs"] == -6.0
+    assert "audio" not in levels[0]
+
+
+def test_modem_turn_audio_diagnostics_are_disabled_by_default(tmp_path, monkeypatch):
+    from voice_runtime.execution.local_trace import LocalRuntimeTrace
+    from voice_runtime.telephony.usb_audio import _SerialPcmOwner
+
+    monkeypatch.delenv("VOICE_MODEM_TURN_DIAGNOSTICS", raising=False)
+    trace_path = tmp_path / "modem-trace.jsonl"
+    trace = LocalRuntimeTrace(trace_path, "80000000-0000-4000-8000-000000000002")
+    owner = _SerialPcmOwner(Sim7600UsbAudioParams(audio_port="fake"), trace=trace)
+    owner.record_turn_pcm(np.full(320, 16384, dtype="<i2").tobytes())
+    trace.close()
+
+    assert "turn_diag_pcm_window" not in trace_path.read_text()
 
 
 def test_recordings_share_timeline_and_mix_with_clipping(tmp_path):

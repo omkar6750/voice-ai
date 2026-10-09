@@ -47,6 +47,9 @@ scratch/
 *.sqlite
 *.db
 .worktrees/
+.cache/
+.codex-remote-attachments/
+tmp-resume-review.png
 
 # Editors
 .DS_Store

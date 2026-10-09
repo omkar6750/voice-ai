@@ -101,6 +101,9 @@ async def clone_version(session: AsyncSession, source_id: str, kind: str, revisi
         parent_id=source.id,
         config=deepcopy(source.config),
     )
+    if kind == "agent" and clone.config.get("stt", {}).get("model") == "saaras:v3":
+        # Upgrade only the new draft. The source snapshot remains immutable.
+        clone.config["stt"]["model"] = "saaras:v3-realtime"
     session.add(clone)
     await session.flush()
     if kind == "agent":

@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 from time import perf_counter
 
 from fastapi import FastAPI
@@ -15,7 +16,12 @@ from voice_runtime import perf_diagnostics
 
 # Install before importing routes, Pipecat or SDKs: wire logs and exception
 # renderers must never acquire caller/provider data, even during startup.
-configure_safe_logging()
+configure_safe_logging(
+    env_files=(
+        Path(__file__).resolve().parents[1] / ".env",
+        Path(__file__).resolve().parents[1] / ".env.local",
+    )
+)
 
 from voice_shared.http_clients import install as install_http_logging  # noqa: E402
 from voice_shared.logging import HttpLoggingMiddleware  # noqa: E402
@@ -41,7 +47,9 @@ async def lifespan(_app: FastAPI):
     perf_diagnostics.configure(env=settings.env, enabled=settings.debug_perf)
     monitor = asyncio.create_task(perf_diagnostics.loop_lag_monitor())
     try:
-        yield
+        mcp_application.operations = registry(app)
+        async with mcp_application.manager.run():
+            yield
     finally:
         set_event_sink(None)
         monitor.cancel()
@@ -55,6 +63,12 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Voice AI API", version="0.2.0", lifespan=lifespan)
+from starlette.routing import Route  # noqa: E402
+
+from voice_api.mcp_server import McpApplication, registry  # noqa: E402
+
+mcp_application = McpApplication(app)
+app.router.routes.append(Route("/mcp", mcp_application, methods=["GET", "POST", "DELETE"]))
 from voice_api.core.read_metrics import ReadMetricsMiddleware  # noqa: E402
 
 app.add_middleware(ReadMetricsMiddleware)

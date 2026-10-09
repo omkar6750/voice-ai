@@ -78,6 +78,37 @@ class OperationEnded(OperationStarted):
     audio_seconds: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 
 
+class PromptValueSource(ConfigModel):
+    kind: Literal["state", "contact", "default", "record_tool", "sample"]
+    invocation_id: Id | None = None
+
+
+class PromptCandidate(ConfigModel):
+    key: str
+    value: JsonValue
+    empty_reason: Literal["empty_string", "zero"] | None = None
+    source: PromptValueSource
+
+
+class PromptResolutionRecord(ConfigModel):
+    field: str
+    start: int = Field(ge=0)
+    end: int = Field(ge=0)
+    expression: str
+    fallback: bool
+    candidates: list[PromptCandidate]
+    selected_key: str | None = None
+    value: str
+    outcome: Literal["selected", "all_empty"]
+
+
+class PromptResolution(ConfigModel):
+    state: Literal["recorded", "policy_disabled"]
+    rendered_at: AwareDatetime
+    node_key: str
+    records: list[PromptResolutionRecord] = Field(default_factory=list)
+
+
 class FlowVisitStarted(Record):
     kind: Literal["flow_visit_started"]
     visit_id: Id
@@ -86,6 +117,7 @@ class FlowVisitStarted(Record):
     node_key: str = Field(min_length=1, max_length=120)
     started_ns: TimestampNs
     triggered_by_tool_id: Id | None = None
+    prompt_resolution: PromptResolution | None = None
 
 
 class FlowVisitEnded(Record):

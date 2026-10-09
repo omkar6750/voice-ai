@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import Field, HttpUrl, model_validator
 
 from .base import ConfigModel, Identifier
+from .referrals import REFERRAL_DESCRIPTION, referral_parameters
 
 
 class ToolBinding(ConfigModel):
@@ -68,6 +69,9 @@ class ToolConfig(ConfigModel):
 
     @model_validator(mode="after")
     def implementation_required(self):
+        if self.handler == "save_referral":
+            object.__setattr__(self, "description", REFERRAL_DESCRIPTION)
+            object.__setattr__(self, "parameters", referral_parameters())
         if self.kind == "http" and (self.http is None or self.handler is not None):
             raise ValueError("HTTP tools require http settings and no registered handler")
         if self.kind == "registered" and (not self.handler or self.http is not None):

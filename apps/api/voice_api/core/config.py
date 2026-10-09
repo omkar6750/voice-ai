@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     )
     organization_creation_enabled: bool = True
     public_base_url: str | None = None
+    dashboard_base_url: str | None = None
+    mcp_local_base_url: str = "http://127.0.0.1:8000"
+    mcp_public_base_url: str | None = None
     gemini_api_key: str | None = None
     google_calendar_client_id: str | None = None
     google_calendar_client_secret: str | None = None

@@ -1,0 +1,1322 @@
+{
+  "GET /health": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/v1/orgs/{org_id}/mcp-tokens": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/v1/orgs/{org_id}/mcp-tokens": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/v1/orgs/{org_id}/mcp-tokens/connection": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "DELETE /api/v1/orgs/{org_id}/mcp-tokens/{token_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/v1/runs/{run_id}/debug": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative",
+    "description": "Read the ENTIRE run transcript and execution timing map, all recorded API attempts, concise errors and capture coverage in one call. No request/response bodies or LLM contexts. Start debugging here."
+  },
+  "POST /api/v1/runs/{run_id}/debug/operations": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative",
+    "description": "Batch operation, API-attempt, tool or diagnostic IDs for selected input/output/error/metrics. Full context requires sections=[context]. IDs come from inspect_run."
+  },
+  "GET /api/v1/runs/{run_id}/debug/config": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative",
+    "description": "Fetch the historical resolved configuration or one named section. This is not the current draft configuration."
+  },
+  "GET /api/v1/runs/{run_id}/debug/logs": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative",
+    "description": "Read filtered, bounded run diagnostics and retained log excerpts. Inspect errors before requesting broad logs."
+  },
+  "POST /api/v1/auth/clerk/webhook": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/v1/auth/context": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/v1/auth/legacy-access": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/v1/auth/organization-access": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/v1/orgs": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/v1/orgs": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/v1/orgs/{org_id}/provision": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/v1/orgs/{org_id}/credentials": {
+    "access": "include",
+    "reason": "Safe credential metadata/model discovery; never credential values"
+  },
+  "POST /api/v1/orgs/{org_id}/credentials": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/v1/orgs/{org_id}/credentials/{credential_id}": {
+    "access": "include",
+    "reason": "Safe credential metadata/model discovery; never credential values"
+  },
+  "PUT /api/v1/orgs/{org_id}/credentials/{credential_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "DELETE /api/v1/orgs/{org_id}/credentials/{credential_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "PATCH /api/v1/orgs/{org_id}/credentials/{credential_id}/name": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/v1/orgs/{org_id}/openrouter/{credential_id}/account": {
+    "access": "include",
+    "reason": "Safe credential metadata/model discovery; never credential values"
+  },
+  "GET /api/v1/orgs/{org_id}/openrouter/{credential_id}/models": {
+    "access": "include",
+    "reason": "Safe credential metadata/model discovery; never credential values"
+  },
+  "GET /api/v1/orgs/{org_id}/openrouter/{credential_id}/models/{author}/{slug}/endpoints": {
+    "access": "include",
+    "reason": "Safe credential metadata/model discovery; never credential values"
+  },
+  "GET /api/v1/platform/orgs": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/v1/platform/orgs/{org_id}/support-session": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "DELETE /api/v1/platform/support-session": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/v1/providers": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/config-schema": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/workspace": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "PATCH /api/v1/workspace": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/agents": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/agents": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/agents/{agent_id}/versions": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "PATCH /api/v1/agent-versions/{version_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/agent-versions/{version_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/agent-versions/{version_id}/publish": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/agent-versions/{version_id}/clone": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/agents/{agent_id}/activate": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "PUT /api/v1/agent-versions/{version_id}/tools": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/agents/{agent_id}/impact": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "DELETE /api/v1/agents/{agent_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/tools": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/tools": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/tools/handlers": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/tools/validation": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/tools/validation/cleanup": {
+    "access": "exclude",
+    "reason": "Development-only structural cleanup"
+  },
+  "GET /api/v1/tools/{tool_id}/versions": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/tool-versions/{version_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "PATCH /api/v1/tool-versions/{version_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/tools/{tool_id}/usage": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/tool-versions/{version_id}/validate": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/tool-versions/{version_id}/publish": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/tool-versions/{version_id}/clone": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/tools/{tool_id}/impact": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "DELETE /api/v1/tools/{tool_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/contacts": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/contacts": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/contacts/variables": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/contacts/{contact_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "PATCH /api/v1/contacts/{contact_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "DELETE /api/v1/contacts/{contact_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/referrals": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/referrals/tool": {
+    "access": "exclude",
+    "reason": "Runtime-only business tool"
+  },
+  "GET /api/v1/referrals/{referral_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "PATCH /api/v1/referrals/{referral_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/referrals/{referral_id}/promote": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/calls": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/calls": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/calls/{call_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/calls/{call_id}/dispatch": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/dial-options": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/runs": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/runs": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/runs/{run_id}": {
+    "access": "exclude",
+    "reason": "Use compact inspect_run or explicit get_run_config"
+  },
+  "GET /api/v1/runs/{run_id}/timeline": {
+    "access": "exclude",
+    "reason": "Use compact inspect_run or explicit get_run_config"
+  },
+  "GET /api/v1/runtime-endpoints": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/runtime-endpoints": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/runtime-endpoints/{endpoint_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/runtime-endpoints/{endpoint_id}/status": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/runtime-endpoints/{endpoint_id}/probe": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/runs/{run_id}/claim": {
+    "access": "exclude",
+    "reason": "Runtime ingestion, secret management or client handshake"
+  },
+  "POST /api/v1/runs/{run_id}/progress": {
+    "access": "exclude",
+    "reason": "Runtime ingestion, secret management or client handshake"
+  },
+  "POST /api/v1/runtime-endpoints/{endpoint_id}/recover": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/runs/{run_id}/evidence": {
+    "access": "exclude",
+    "reason": "Runtime ingestion, secret management or client handshake"
+  },
+  "POST /api/v1/runs/{run_id}/flow-visits": {
+    "access": "exclude",
+    "reason": "Runtime ingestion, secret management or client handshake"
+  },
+  "PUT /api/v1/runs/{run_id}/flow-visits/{visit_id}/end": {
+    "access": "exclude",
+    "reason": "Runtime ingestion, secret management or client handshake"
+  },
+  "POST /api/v1/runs/{run_id}/tools/{invocation_id}/results": {
+    "access": "exclude",
+    "reason": "Runtime ingestion, secret management or client handshake"
+  },
+  "PUT /api/v1/runs/{run_id}/tool-results/{result_id}/consumption": {
+    "access": "exclude",
+    "reason": "Runtime ingestion, secret management or client handshake"
+  },
+  "POST /api/v1/runs/{run_id}/analysis": {
+    "access": "exclude",
+    "reason": "Runtime-only evidence ingestion"
+  },
+  "GET /api/v1/runs/{run_id}/analysis": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/runs/{run_id}/artifacts": {
+    "access": "exclude",
+    "reason": "Runtime-only evidence ingestion"
+  },
+  "GET /api/v1/runs/{run_id}/artifacts": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/artifacts/{artifact_id}/file": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/v1/artifacts/expire": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/v1/recordings": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/recording-deletions/preview": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/recording-deletions/{operation_id}/execute": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/recording-deletions/{operation_id}/continue": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/recording-deletions": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/recording-deletions/{operation_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/callbacks": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/callbacks": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/callbacks/{callback_id}/launch": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/runs/{run_id}/reconcile": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/knowledge-bases": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/knowledge-bases": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "PATCH /api/v1/knowledge-bases/{base_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/knowledge-bases/{base_id}/sources": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/knowledge-bases/{base_id}/sources": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/knowledge-bases/{base_id}/chunks": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "DELETE /api/v1/knowledge-bases/{base_id}/sources/{source_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/knowledge-bases/{base_id}/search": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/knowledge-bases/{base_id}/sources/{source_id}/rebuild": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/knowledge-bases/{base_id}/uploads": {
+    "access": "include",
+    "reason": "Reviewed bounded base64-to-multipart upload adapter"
+  },
+  "GET /api/v1/knowledge-bases/{base_id}/sources/{source_id}/file": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/integrations": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/integrations": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/integrations/{connection_id}/disconnect": {
+    "access": "exclude",
+    "reason": "Runtime ingestion, secret management or client handshake"
+  },
+  "DELETE /api/v1/integrations/{connection_id}": {
+    "access": "exclude",
+    "reason": "Deletion clears credentials"
+  },
+  "GET /api/v1/integrations/{connection_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "PATCH /api/v1/integrations/{connection_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "PUT /api/v1/integrations/{connection_id}/secrets/{name}": {
+    "access": "exclude",
+    "reason": "Runtime ingestion, secret management or client handshake"
+  },
+  "POST /api/v1/integrations/{connection_id}/test": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/integrations/{connection_id}/refresh-numbers": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/integrations/{connection_id}/rotate-secrets": {
+    "access": "exclude",
+    "reason": "Runtime ingestion, secret management or client handshake"
+  },
+  "GET /api/v1/integrations/{connection_id}/media": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/integrations/{connection_id}/media/import": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/integrations/{connection_id}/media/upload": {
+    "access": "include",
+    "reason": "Reviewed bounded base64-to-multipart upload adapter"
+  },
+  "GET /api/v1/integrations/{connection_id}/media/{media_id}/preview": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "DELETE /api/v1/integrations/{connection_id}/media/{media_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "PATCH /api/v1/integrations/{connection_id}/media/{media_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/integrations/{connection_id}/media/{media_id}/verify": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/integrations/{connection_id}/templates": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/integrations/{connection_id}/generate-template-tool": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/integrations/whatsapp/{connection_id}/webhook": {
+    "access": "exclude",
+    "reason": "Runtime ingestion, secret management or client handshake"
+  },
+  "POST /api/v1/integrations/whatsapp/{connection_id}/webhook": {
+    "access": "exclude",
+    "reason": "Runtime ingestion, secret management or client handshake"
+  },
+  "GET /api/v1/calendar-integrations": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/calendar-integrations/google/connect": {
+    "access": "exclude",
+    "reason": "OAuth credential provisioning"
+  },
+  "GET /api/v1/calendar-integrations/google/callback": {
+    "access": "exclude",
+    "reason": "OAuth credential provisioning"
+  },
+  "POST /api/v1/calendar-integrations/{integration_id}/reconnect": {
+    "access": "exclude",
+    "reason": "Runtime ingestion, secret management or client handshake"
+  },
+  "PATCH /api/v1/calendar-integrations/{integration_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "DELETE /api/v1/calendar-integrations/{integration_id}": {
+    "access": "exclude",
+    "reason": "Deletion clears credentials"
+  },
+  "POST /api/v1/calendar-integrations/{integration_id}/test/availability": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/calendar-integrations/{integration_id}/test/book": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/callback-scheduling/availability": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/v1/callback-scheduling/book": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/v1/telephony/twilio/call-status/{correlation_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/v1/telephony/twilio/stream-status/{correlation_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/v1/browser-sessions": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/browser-sessions/{session_id}/ticket": {
+    "access": "exclude",
+    "reason": "Runtime ingestion, secret management or client handshake"
+  },
+  "DELETE /api/v1/browser-sessions/{session_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/chat-conversations": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/chat-conversations/turn": {
+    "access": "include",
+    "description": "Run one low-token text-chat test turn against the exact saved draft revision. Start with agent_version_id; optionally pass contact_id and caller_background. Continue by passing conversation_id plus caller_message. Optionally send the first caller_message with agent_version_id to get the greeting and reply together. Returns only this turn’s transcript, node changes, tools, and errors. This executes saved live tool bindings (for example callbacks, referrals, or messaging); use test-safe caller data and do not ask it to perform external actions unless intended."
+  },
+  "POST /api/chat-conversations/turn": {
+    "access": "exclude",
+    "reason": "Legacy alias; MCP uses the versioned API route"
+  },
+  "GET /api/v1/chat-conversations": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/chat-conversations/{conversation_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/chat-conversations/{conversation_id}/ticket": {
+    "access": "exclude",
+    "reason": "Runtime ingestion, secret management or client handshake"
+  },
+  "POST /api/v1/chat-conversations/{conversation_id}/end": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "GET /api/v1/chat-conversations/{conversation_id}/messages/{message_id}": {
+    "access": "include",
+    "reason": "Dashboard product operation; existing authorization remains authoritative"
+  },
+  "POST /api/v1/runtime/sync": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/v1/runtime/tools": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/v1/runtime/artifacts/grant": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "PUT /api/v1/runtime/artifacts/{run_id}/{artifact_id}/upload": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/v1/runtime/artifacts/complete": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/orgs/{org_id}/mcp-tokens": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/orgs/{org_id}/mcp-tokens": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/orgs/{org_id}/mcp-tokens/connection": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "DELETE /api/orgs/{org_id}/mcp-tokens/{token_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/runs/{run_id}/debug": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/runs/{run_id}/debug/operations": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/runs/{run_id}/debug/config": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/runs/{run_id}/debug/logs": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/auth/clerk/webhook": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/auth/context": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/auth/legacy-access": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/auth/organization-access": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/orgs": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/orgs": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/orgs/{org_id}/provision": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/orgs/{org_id}/credentials": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/orgs/{org_id}/credentials": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/orgs/{org_id}/credentials/{credential_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "PUT /api/orgs/{org_id}/credentials/{credential_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "DELETE /api/orgs/{org_id}/credentials/{credential_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "PATCH /api/orgs/{org_id}/credentials/{credential_id}/name": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/orgs/{org_id}/openrouter/{credential_id}/account": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/orgs/{org_id}/openrouter/{credential_id}/models": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/orgs/{org_id}/openrouter/{credential_id}/models/{author}/{slug}/endpoints": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/platform/orgs": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/platform/orgs/{org_id}/support-session": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "DELETE /api/platform/support-session": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/providers": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/config-schema": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/workspace": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "PATCH /api/workspace": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/agents": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/agents": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/agents/{agent_id}/versions": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "PATCH /api/agent-versions/{version_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/agent-versions/{version_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/agent-versions/{version_id}/publish": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/agent-versions/{version_id}/clone": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/agents/{agent_id}/activate": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "PUT /api/agent-versions/{version_id}/tools": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/agents/{agent_id}/impact": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "DELETE /api/agents/{agent_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/tools": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/tools": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/tools/handlers": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/tools/validation": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/tools/validation/cleanup": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/tools/{tool_id}/versions": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/tool-versions/{version_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "PATCH /api/tool-versions/{version_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/tools/{tool_id}/usage": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/tool-versions/{version_id}/validate": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/tool-versions/{version_id}/publish": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/tool-versions/{version_id}/clone": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/tools/{tool_id}/impact": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "DELETE /api/tools/{tool_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/contacts": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/contacts": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/contacts/variables": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/contacts/{contact_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "PATCH /api/contacts/{contact_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "DELETE /api/contacts/{contact_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/referrals": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/referrals/tool": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/referrals/{referral_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "PATCH /api/referrals/{referral_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/referrals/{referral_id}/promote": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/calls": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/calls": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/calls/{call_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/calls/{call_id}/dispatch": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/dial-options": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/runs": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/runs": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/runs/{run_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/runs/{run_id}/timeline": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/runtime-endpoints": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/runtime-endpoints": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/runtime-endpoints/{endpoint_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/runtime-endpoints/{endpoint_id}/status": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/runtime-endpoints/{endpoint_id}/probe": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/runs/{run_id}/claim": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/runs/{run_id}/progress": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/runtime-endpoints/{endpoint_id}/recover": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/runs/{run_id}/evidence": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/runs/{run_id}/flow-visits": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "PUT /api/runs/{run_id}/flow-visits/{visit_id}/end": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/runs/{run_id}/tools/{invocation_id}/results": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "PUT /api/runs/{run_id}/tool-results/{result_id}/consumption": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/runs/{run_id}/analysis": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/runs/{run_id}/analysis": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/runs/{run_id}/artifacts": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/runs/{run_id}/artifacts": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/artifacts/{artifact_id}/file": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/artifacts/expire": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/recordings": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/recording-deletions/preview": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/recording-deletions/{operation_id}/execute": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/recording-deletions/{operation_id}/continue": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/recording-deletions": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/recording-deletions/{operation_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/callbacks": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/callbacks": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/callbacks/{callback_id}/launch": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/runs/{run_id}/reconcile": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/knowledge-bases": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/knowledge-bases": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "PATCH /api/knowledge-bases/{base_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/knowledge-bases/{base_id}/sources": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/knowledge-bases/{base_id}/sources": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/knowledge-bases/{base_id}/chunks": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "DELETE /api/knowledge-bases/{base_id}/sources/{source_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/knowledge-bases/{base_id}/search": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/knowledge-bases/{base_id}/sources/{source_id}/rebuild": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/knowledge-bases/{base_id}/uploads": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/knowledge-bases/{base_id}/sources/{source_id}/file": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/integrations": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/integrations": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/integrations/{connection_id}/disconnect": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "DELETE /api/integrations/{connection_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/integrations/{connection_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "PATCH /api/integrations/{connection_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "PUT /api/integrations/{connection_id}/secrets/{name}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/integrations/{connection_id}/test": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/integrations/{connection_id}/refresh-numbers": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/integrations/{connection_id}/rotate-secrets": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/integrations/{connection_id}/media": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/integrations/{connection_id}/media/import": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/integrations/{connection_id}/media/upload": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/integrations/{connection_id}/media/{media_id}/preview": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "DELETE /api/integrations/{connection_id}/media/{media_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "PATCH /api/integrations/{connection_id}/media/{media_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/integrations/{connection_id}/media/{media_id}/verify": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/integrations/{connection_id}/templates": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/integrations/{connection_id}/generate-template-tool": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/integrations/whatsapp/{connection_id}/webhook": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/integrations/whatsapp/{connection_id}/webhook": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/calendar-integrations": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/calendar-integrations/google/connect": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/calendar-integrations/google/callback": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/calendar-integrations/{integration_id}/reconnect": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "PATCH /api/calendar-integrations/{integration_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "DELETE /api/calendar-integrations/{integration_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/calendar-integrations/{integration_id}/test/availability": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/calendar-integrations/{integration_id}/test/book": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/callback-scheduling/availability": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/callback-scheduling/book": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/telephony/twilio/call-status/{correlation_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/telephony/twilio/stream-status/{correlation_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/browser-sessions": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/browser-sessions/{session_id}/ticket": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "DELETE /api/browser-sessions/{session_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/chat-conversations": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/chat-conversations": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/chat-conversations/{conversation_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/chat-conversations/{conversation_id}/ticket": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/chat-conversations/{conversation_id}/end": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "GET /api/chat-conversations/{conversation_id}/messages/{message_id}": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/runtime/sync": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/runtime/tools": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/runtime/artifacts/grant": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "PUT /api/runtime/artifacts/{run_id}/{artifact_id}/upload": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  },
+  "POST /api/runtime/artifacts/complete": {
+    "access": "exclude",
+    "reason": "Non-product, legacy alias, authentication, platform or runtime boundary"
+  }
+}

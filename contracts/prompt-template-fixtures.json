@@ -1,0 +1,125 @@
+[
+  {
+    "text": "[ {{a}} | {{b}} ]",
+    "tokens": [
+      {
+        "start": 0,
+        "end": 17,
+        "expression": "[ {{a}} | {{b}} ]",
+        "keys": [
+          "a",
+          "b"
+        ],
+        "fallback": true,
+        "escaped": false
+      }
+    ]
+  },
+  {
+    "text": "[ {{a}} | {{b}} | {{c}} ]",
+    "tokens": [
+      {
+        "start": 0,
+        "end": 25,
+        "expression": "[ {{a}} | {{b}} | {{c}} ]",
+        "keys": [
+          "a",
+          "b",
+          "c"
+        ],
+        "fallback": true,
+        "escaped": false
+      }
+    ]
+  },
+  {
+    "text": "{{a}}",
+    "tokens": [
+      {
+        "start": 0,
+        "end": 5,
+        "expression": "{{a}}",
+        "keys": [
+          "a"
+        ],
+        "fallback": false,
+        "escaped": false
+      }
+    ]
+  },
+  {
+    "text": "\\[ {{a}} | {{b}} ]",
+    "tokens": [
+      {
+        "start": 0,
+        "end": 18,
+        "expression": "\\[ {{a}} | {{b}} ]",
+        "keys": [
+          "a",
+          "b"
+        ],
+        "fallback": true,
+        "escaped": true
+      }
+    ]
+  },
+  {
+    "text": "\\{{a}}",
+    "tokens": [
+      {
+        "start": 0,
+        "end": 6,
+        "expression": "\\{{a}}",
+        "keys": [
+          "a"
+        ],
+        "fallback": false,
+        "escaped": true
+      }
+    ]
+  },
+  {
+    "text": "[ordinary] x | y",
+    "tokens": []
+  },
+  {
+    "text": "[ {{a}} ]",
+    "error": true
+  },
+  {
+    "text": "[ {{a}} | literal ]",
+    "error": true
+  },
+  {
+    "text": "[ literal | {{a}} ]",
+    "error": true
+  },
+  {
+    "text": "[ {{a}} | {{b}}",
+    "error": true
+  },
+  {
+    "text": "[ [ {{a}} | {{b}} ] ]",
+    "error": true
+  },
+  {
+    "text": "{{a",
+    "error": true
+  },
+  {
+    "text": "🙂 [ {{a}} | {{b}} ]",
+    "tokens": [
+      {
+        "start": 2,
+        "end": 19,
+        "expression": "[ {{a}} | {{b}} ]",
+        "keys": [
+          "a",
+          "b"
+        ],
+        "fallback": true,
+        "escaped": false
+      }
+    ]
+  }
+]

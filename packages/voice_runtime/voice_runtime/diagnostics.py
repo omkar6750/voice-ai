@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from serial.tools import list_ports
+from voice_shared.dev_visibility import is_development, redact_api_keys
 
 from voice_runtime.contracts.diagnostics import diagnostic_dict
 from voice_runtime.safe_logs import error_category
@@ -80,7 +81,7 @@ def provider_error_diagnostic(
         or body_map.get("error_description")
         or (body if type(body) is str else None)
     )
-    # Content informs classification only. It never becomes persisted detail.
+    # Development retains the complete body; classification uses a bounded view.
     lower = provider_message[:2000].lower() if type(provider_message) is str else ""
     if status_code in {401, 403} or (
         status_code is None
@@ -149,12 +150,23 @@ def provider_error_diagnostic(
         source="provider",
         code=code,
         message=message,
-        detail=None,
+        detail=redact_api_keys(provider_message)[:2000]
+        if is_development() and type(provider_message) is str
+        else None,
         retryable=retryable,
-        provider_request_id=None,
+        provider_request_id=redact_api_keys(request_id)[:255]
+        if is_development() and isinstance(request_id, str)
+        else None,
         http_status=status_code,
         retry_after_seconds=_retry_after(retry_after_seconds),
-        metadata={"provider": provider},
+        metadata={
+            "provider": provider,
+            **(
+                {"provider_error": redact_api_keys(body)}
+                if is_development() and body is not None
+                else {}
+            ),
+        },
     )
 
 
@@ -189,10 +201,13 @@ def exception_diagnostic(
         source=_source(source),  # type: ignore[arg-type]
         code=code,
         message=message,
-        detail=None,
+        detail=redact_api_keys(str(exc))[:2000] if is_development() else None,
         retryable=retryable is True,
         uncertain=uncertain is True,
-        metadata={"error_category": error_category(exc)},
+        metadata={
+            "error_category": error_category(exc),
+            **({"raw_error": redact_api_keys(str(exc))} if is_development() else {}),
+        },
     )
 
 
@@ -217,7 +232,11 @@ def provider_exception_diagnostic(exc: BaseException, *, provider: str, operatio
         try:
             body = response.json()
         except Exception:
-            body = None
+            body = getattr(response, "text", None) if is_development() else None
+    if is_development() and body is None:
+        body = getattr(cause, "body", None)
+        if not isinstance(body, (dict, str)):
+            body = {"message": str(cause)}
     try:
         retry_after = (getattr(response, "headers", {}) or {}).get("retry-after")
     except Exception:
@@ -235,9 +254,8 @@ def provider_exception_diagnostic(exc: BaseException, *, provider: str, operatio
             message=f"{_provider(provider)} connection failed",
             retryable=True,
         )
-    # Request IDs are retained only for the new adapters; prior providers keep
-    # their established evidence policy. Never retain raw error bodies.
-    if provider in {"gnani", "isoquant"}:
+    # Development retains provider request IDs for support and correlation.
+    if is_development() or provider in {"gnani", "isoquant"}:
         headers = getattr(response, "headers", {}) or {}
         request_id = headers.get("x-request-id") or headers.get("request-id")
         if (
@@ -264,6 +282,7 @@ def _retry_after(value: Any) -> float | None:
 
 def text_error_diagnostic(error: object, *, fallback_source: str = "runtime") -> dict:
     """Classify provider-shaped pipeline text when an SDK hides HTTP fields."""
+    detail = redact_api_keys(error)[:2000] if is_development() and type(error) is str else None
     lower = error[:2000].lower() if type(error) is str else ""
     fallback_source = _source(fallback_source)
     provider = next(
@@ -284,6 +303,9 @@ def text_error_diagnostic(error: object, *, fallback_source: str = "runtime") ->
         ),
         None,
     )
+    metadata = {"provider": provider} if provider else {}
+    if is_development():
+        metadata["raw_error"] = redact_api_keys(error)
     if any(term in lower for term in ("tpm", "rate limit", "rate_limit", "throttl")):
         return diagnostic_dict(
             severity="error",
@@ -291,9 +313,9 @@ def text_error_diagnostic(error: object, *, fallback_source: str = "runtime") ->
             source="provider" if provider else fallback_source,  # type: ignore[arg-type]
             code="provider_throttled",
             message=f"{provider or 'Provider'} throttled the request",
-            detail=None,
+            detail=detail,
             retryable=True,
-            metadata={"provider": provider} if provider else {},
+            metadata=metadata,
         )
     if any(
         term in lower for term in ("quota", "credits", "credit exhausted", "usage limit", "billing")
@@ -304,9 +326,9 @@ def text_error_diagnostic(error: object, *, fallback_source: str = "runtime") ->
             source="provider" if provider else fallback_source,  # type: ignore[arg-type]
             code="provider_quota_exhausted",
             message=f"{provider or 'Provider'} usage limit or quota was reached",
-            detail=None,
+            detail=detail,
             retryable=False,
-            metadata={"provider": provider} if provider else {},
+            metadata=metadata,
         )
     if any(term in lower for term in ("api key", "unauthorized", "invalid key", "authentication")):
         return diagnostic_dict(
@@ -315,9 +337,9 @@ def text_error_diagnostic(error: object, *, fallback_source: str = "runtime") ->
             source="provider" if provider else fallback_source,  # type: ignore[arg-type]
             code="provider_authentication_failed",
             message=f"{provider or 'Provider'} rejected the configured credentials",
-            detail=None,
+            detail=detail,
             retryable=False,
-            metadata={"provider": provider} if provider else {},
+            metadata=metadata,
         )
     return diagnostic_dict(
         severity="error",
@@ -325,7 +347,8 @@ def text_error_diagnostic(error: object, *, fallback_source: str = "runtime") ->
         source=fallback_source,  # type: ignore[arg-type]
         code="pipeline_error",
         message="Pipecat pipeline failed",
-        detail=None,
+        detail=detail,
+        metadata=metadata,
     )
 
 

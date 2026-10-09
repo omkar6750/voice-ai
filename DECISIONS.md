@@ -60,3 +60,18 @@ current separate runtime and editor. No membership authorization cache, Storyboo
 main merge or deployment. See ADR-0049 and docs/deployment/WORKTREE-INTEGRATION.md.
 Migration 0047_dashboard_read_index follows 0046_text_tests. Live provider/modem
 acceptance remains operator-run.
+
+## 2026-10-08 — User-bound MCP capabilities and progressive evidence
+
+[ADR-0053](docs/adr/ADR-0053-mcp-user-access-and-run-debugging.md): serve MCP at
+the API boundary with live user membership and reviewed OpenAPI operations;
+exclude credential mutation and use an overview-first, explicitly selected,
+nonduplicating run evidence contract. Deployment: [MCP access](docs/deployment/MCP-ACCESS.md).
+
+
+## 2026-10-09 — Conversation fact defaults and prompt fallback chains
+
+[ADR-0058](docs/adr/ADR-0058-conversation-fact-defaults-and-fallbacks.md): initialize
+facts per run, resolve rightmost nonempty nonboolean alternatives on node entry,
+and retain selection/provenance on the node span. Read-only editor previews use
+the same resolver. No agent publication or provider-setting changes.

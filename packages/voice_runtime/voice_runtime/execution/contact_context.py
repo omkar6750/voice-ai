@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-BLOCKED_CONTACT_FIELDS = {"id", "phone_number", "created_at", "metadata_json"}
+BLOCKED_CONTACT_FIELDS = {"id", "name", "phone_number", "created_at", "metadata_json"}
 
 
 def sanitize_contact_variables(
@@ -15,15 +15,25 @@ def sanitize_contact_variables(
     if not contact_snapshot or not allowed_variables:
         return {}
 
-    allowed_set = set(allowed_variables)
+    contact_snapshot = dict(contact_snapshot)
+    # Old immutable snapshots may only contain a full display name.
+    parts = str(contact_snapshot.get("name") or "").split()
+    if not contact_snapshot.get("first_name") and parts:
+        contact_snapshot["first_name"] = parts[0]
+        contact_snapshot["last_name"] = " ".join(parts[1:]) or None
+    allowed_set = {"first_name" if var == "name" else var for var in allowed_variables}
     sanitized: dict[str, Any] = {}
     metadata = contact_snapshot.get("metadata_json") or {}
 
     for var in allowed_set:
+        if var in BLOCKED_CONTACT_FIELDS or var.startswith("contact."):
+            continue
+        sanitized[var] = ""
         # 1. Any non-sensitive contact table field (e.g. name, business, source, language, timezone, etc.)
         if var in contact_snapshot and var not in BLOCKED_CONTACT_FIELDS:
-            if contact_snapshot[var] is not None:
-                sanitized[var] = contact_snapshot[var]
+            value = contact_snapshot[var]
+            if value is not None:
+                sanitized[var] = value
         # 2. Nested ad metadata (e.g. "campaign", "ad_headline", "utm_source")
         elif var in metadata and metadata[var] is not None:
             sanitized[var] = metadata[var]

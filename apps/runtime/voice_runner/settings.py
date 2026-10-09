@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,6 +27,9 @@ class RuntimeSettings(BaseSettings):
     recordings_dir: str = "data/runtime-recordings"
     runtime_spool_dir: str = "data/runtime-evidence"
     max_concurrent_calls: int = Field(default=4, ge=1, le=32)
+    sim7600_connect_timeout_seconds: float = Field(default=90, ge=1, le=300)
+    sim7600_release_timeout_seconds: float = Field(default=30, ge=1, le=120)
+    sim7600_release_stable_seconds: float = Field(default=15, ge=1, le=60)
     call_max_duration_seconds: int = Field(default=600, ge=1, le=600)
     runtime_cpu_budget: float = Field(default=1, gt=0)
     runtime_shutdown_seconds: int = Field(default=285, ge=1, le=285)
@@ -41,6 +44,12 @@ class RuntimeSettings(BaseSettings):
         ),
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def validate_release_deadline(self):
+        if self.sim7600_release_stable_seconds >= self.sim7600_release_timeout_seconds:
+            raise ValueError("SIM7600 release deadline must exceed the stable idle period")
+        return self
 
     @property
     def local(self):

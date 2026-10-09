@@ -351,6 +351,12 @@ async def tool(body: ToolRequest, session=Session):
     adapter.run_id = run.id
     adapter._snapshot = run.resolved_config
     adapter.settings = settings
+    from voice_shared.request_evidence import operation as request_operation
+    from voice_shared.request_evidence import sink as request_sink
+
+    request_events = []
+    sink_token = request_sink.set(request_events.append)
+    operation_token = request_operation.set(None)
     try:
         async with asyncio.timeout(14):
             result = await adapter._handler(body.name)(
@@ -362,6 +368,46 @@ async def tool(body: ToolRequest, session=Session):
             "status": "uncertain",
             "message": "Business operation unconfirmed; do not retry automatically.",
         }
+    finally:
+        request_sink.reset(sink_token)
+        request_operation.reset(operation_token)
+    # Metadata from backend HTTP adapters is durable run evidence too. External
+    # actions are never repeated if this persistence step fails.
+    from voice_api.api.v1.endpoints.evidence import store_record
+    from voice_api.models import ToolInvocation
+    from voice_runtime.contracts.evidence import OperationEnded, OperationStarted
+
+    invocation = await session.get(ToolInvocation, invocation_id)
+    for event in request_events:
+        fields = {
+            "id": event["operation_id"],
+            "run_id": run.id,
+            "timestamp_ns": event["started_ns"],
+            "operation_id": event["operation_id"],
+            "name": "Backend API request",
+            "category": "http_request",
+            "provider": event["service"],
+            "started_ns": event["started_ns"],
+            "exchange_id": invocation.exchange_id if invocation else None,
+            "attributes": {
+                key: event[key]
+                for key in ("method", "endpoint", "http_status", "error_type", "timing_scope")
+                if event.get(key) is not None
+            },
+        }
+        fields["attributes"]["tool_invocation_id"] = invocation_id
+        if event["phase"] == "started":
+            record = OperationStarted(kind="operation_started", **fields)
+        else:
+            record = OperationEnded(
+                kind="span",
+                **fields,
+                ended_ns=event["ended_ns"],
+                status=event["status"],
+                duration_ms=event["duration_ms"],
+                output_state="not_recorded",
+            )
+        await store_record(session, run.id, record)
     attempt.result = safe_evidence(result)
     attempt.state = "finished"
     await session.commit()

@@ -18,6 +18,8 @@ from voice_shared.logging import HttpLoggingMiddleware, body_preview
 @pytest.fixture
 def settings(tmp_path):
     return RuntimeSettings(
+        _env_file=None,
+        env="dev",
         runtime_control_token="control-secret",
         runtime_service_token="service-secret",
         runtime_spool_dir=str(tmp_path / "spool"),
@@ -438,6 +440,26 @@ def test_runtime_browser_single_use_ticket_and_binary_round_trip(settings, monke
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect(url, headers={"origin": "http://localhost:5173"}):
                 pass
+
+
+def test_paused_text_session_requests_checkpoint_resume():
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+    from voice_runner.main import ticket
+    from voice_shared.contracts import SessionIdentity
+
+    identity = SessionIdentity(run_id=uuid4(), generation=uuid4(), boot_id=uuid4())
+    session = SimpleNamespace(
+        generation=str(identity.generation),
+        request=SimpleNamespace(channel="text_test"),
+        text=SimpleNamespace(paused=True),
+    )
+    manager = SimpleNamespace(get=lambda *_args: session)
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(manager=manager)))
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(ticket(identity, request))
+    assert error.value.status_code == 404
 
 
 async def test_uncertain_modem_cleanup_retains_ports_after_secret_snapshot_release(settings):

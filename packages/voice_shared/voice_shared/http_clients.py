@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import httpx
 
+from voice_shared import request_evidence
 from voice_shared.logging import (
     SafePreview,
     body_preview,
@@ -51,7 +52,9 @@ def route_label(path):
         "upload",
         "sign",
     }
-    return SafePreview("/".join(part if part in known else ":id" for part in path.split("/")))
+    return SafePreview(
+        "/".join(part if part in known or not part else ":id" for part in path.split("/"))
+    )
 
 
 def request_preview(request, metadata_only=False):
@@ -115,10 +118,30 @@ def install(service):
     async def async_send(self, request, *args, **kwargs):
         state = begin(request)
         try:
+            payload = request_evidence.json_payload(request.content)
+        except httpx.RequestNotRead:
+            payload = None
+        attempt = request_evidence.begin(
+            request.method, request.url.path, service, input_payload=payload, host=request.url.host
+        )
+        try:
             response = await original_async(self, request, *args, **kwargs)
-        except Exception as exc:
+        except BaseException as exc:
+            request_evidence.finish(attempt, error=exc)
             exception_event(service, exc, forward="/runtime/sync" not in request.url.path)
             raise
+        if kwargs.get("stream") and not response.is_stream_consumed:
+            response.stream = request_evidence.AsyncResponseStream(
+                response.stream, attempt, response.status_code
+            )
+        else:
+            request_evidence.finish(
+                attempt,
+                status=response.status_code,
+                output_payload=request_evidence.json_payload(response.content)
+                if response.is_stream_consumed
+                else None,
+            )
         report(request, response, state)
         return response
 
@@ -126,10 +149,30 @@ def install(service):
     def sync_send(self, request, *args, **kwargs):
         state = begin(request)
         try:
+            payload = request_evidence.json_payload(request.content)
+        except httpx.RequestNotRead:
+            payload = None
+        attempt = request_evidence.begin(
+            request.method, request.url.path, service, input_payload=payload, host=request.url.host
+        )
+        try:
             response = original_sync(self, request, *args, **kwargs)
-        except Exception as exc:
+        except BaseException as exc:
+            request_evidence.finish(attempt, error=exc)
             exception_event(service, exc, forward="/runtime/sync" not in request.url.path)
             raise
+        if kwargs.get("stream") and not response.is_stream_consumed:
+            response.stream = request_evidence.SyncResponseStream(
+                response.stream, attempt, response.status_code
+            )
+        else:
+            request_evidence.finish(
+                attempt,
+                status=response.status_code,
+                output_payload=request_evidence.json_payload(response.content)
+                if response.is_stream_consumed
+                else None,
+            )
         report(request, response, state)
         return response
 
@@ -144,14 +187,33 @@ def install(service):
     @wraps(original_requests)
     def requests_send(self, request, *args, **kwargs):
         started = time.monotonic()
+        from urllib.parse import urlsplit
+
+        body = request.body.encode() if isinstance(request.body, str) else request.body
+        attempt = request_evidence.begin(
+            request.method,
+            urlsplit(request.url).path,
+            service,
+            host=urlsplit(request.url).hostname,
+            input_payload=request_evidence.json_payload(body),
+        )
         trace = trace_id.get() or uuid4().hex
         span = uuid4().hex[:16]
         request.headers["traceparent"] = f"00-{trace}-{span}-01"
         try:
             response = original_requests(self, request, *args, **kwargs)
         except Exception as exc:
+            request_evidence.finish(attempt, error=exc)
             exception_event(service, exc)
             raise
+        request_evidence.finish(
+            attempt,
+            status=response.status_code,
+            timing_scope="headers" if kwargs.get("stream") else "complete",
+            output_payload=request_evidence.json_payload(response.content)
+            if not kwargs.get("stream")
+            else None,
+        )
         if enabled("ENABLE_OUTBOUND_API_LOGS"):
             event = {
                 "event": "http_request",
@@ -197,6 +259,15 @@ def install(service):
         from urllib.parse import urlsplit
 
         started = time.monotonic()
+        attempt = request_evidence.begin(
+            method,
+            urlsplit(uri).path,
+            service,
+            host=urlsplit(uri).hostname,
+            input_payload=request_evidence.json_payload(
+                body.encode() if isinstance(body, str) else body
+            ),
+        )
         trace = trace_id.get() or uuid4().hex
         span = uuid4().hex[:16]
         headers = dict(headers or {})
@@ -206,8 +277,12 @@ def install(service):
                 self, uri, method=method, body=body, headers=headers, **kwargs
             )
         except Exception as exc:
+            request_evidence.finish(attempt, error=exc)
             exception_event(service, exc)
             raise
+        request_evidence.finish(
+            attempt, status=int(response.status), output_payload=request_evidence.json_payload(data)
+        )
         if enabled("ENABLE_OUTBOUND_API_LOGS"):
             event = {
                 "event": "http_request",
@@ -236,3 +311,49 @@ def install(service):
         return response, data
 
     httplib2.Http.request = google_request
+
+    # aiohttp speech adapters expose a streaming response. Record headers latency
+    # without reading PCM, SSE, or an application-owned response body.
+    import aiohttp
+
+    original_aiohttp = aiohttp.ClientSession._request
+
+    @wraps(original_aiohttp)
+    async def aiohttp_request(self, method, url, **kwargs):
+        from urllib.parse import urlsplit
+
+        parsed = urlsplit(str(url))
+        attempt = request_evidence.begin(method, parsed.path, service, host=parsed.hostname)
+        try:
+            response = await original_aiohttp(self, method, url, **kwargs)
+        except BaseException as exc:
+            request_evidence.finish(attempt, error=exc, timing_scope="headers")
+            raise
+        request_evidence.finish(attempt, status=response.status, timing_scope="headers")
+        return response
+
+    aiohttp.ClientSession._request = aiohttp_request
+
+    # Modern websockets clients (including speech SDKs) perform connection setup
+    # here. This measures transport establishment, not a full speech session.
+    from websockets.asyncio.client import connect
+
+    original_connection = connect.create_connection
+
+    @wraps(original_connection)
+    async def websocket_connection(self):
+        from urllib.parse import urlsplit
+
+        parsed = urlsplit(self.uri)
+        attempt = request_evidence.begin(
+            "CONNECT", parsed.path, service, host=parsed.hostname, category="provider_connection"
+        )
+        try:
+            connection = await original_connection(self)
+        except BaseException as exc:
+            request_evidence.finish(attempt, error=exc, timing_scope="connection_setup")
+            raise
+        request_evidence.finish(attempt, timing_scope="connection_setup")
+        return connection
+
+    connect.create_connection = websocket_connection

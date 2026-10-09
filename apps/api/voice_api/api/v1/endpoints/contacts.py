@@ -74,6 +74,8 @@ def contact_summary(contact: Contact) -> dict:
     return {
         "id": contact.id,
         "name": contact.name,
+        "first_name": contact.first_name,
+        "last_name": contact.last_name,
         "phone_number": contact.phone_number,
         "timezone": contact.timezone,
         "business": contact.business,
@@ -100,12 +102,14 @@ async def get_contact_variables(
     columns: list[VariableDescriptor] = []
     for col in Contact.__table__.columns:
         if col.name not in BLOCKED_CONTACT_FIELDS:
+            label = col.name.replace("_", " ").title()
+            description = f"Contact {col.name.replace('_', ' ')} from database"
             columns.append(
                 VariableDescriptor(
                     key=col.name,
-                    label=col.name.replace("_", " ").title(),
+                    label=label,
                     source="column",
-                    description=f"Contact {col.name.replace('_', ' ')} from database",
+                    description=description,
                 )
             )
 
@@ -125,6 +129,8 @@ async def get_contact_variables(
         )
         for row in result.fetchall():
             key = str(row[0])
+            if key in BLOCKED_CONTACT_FIELDS or key.startswith("contact."):
+                continue
             metadata_keys.append(
                 VariableDescriptor(
                     key=key,
@@ -230,8 +236,17 @@ async def update_contact(
             raise HTTPException(409, "Phone number already registered to another contact")
         contact.phone_number = body.phone_number
 
-    if body.name is not None:
-        contact.name = body.name.strip()
+    if body.first_name is not None or "last_name" in body.model_fields_set:
+        if body.first_name is not None:
+            contact.first_name = body.first_name.strip()
+        if "last_name" in body.model_fields_set:
+            contact.last_name = body.last_name.strip() if body.last_name else None
+        contact.name = " ".join(part for part in (contact.first_name, contact.last_name) if part)
+    elif body.name is not None:
+        parts = body.name.split()
+        contact.name = " ".join(parts)
+        contact.first_name = parts[0] if parts else None
+        contact.last_name = " ".join(parts[1:]) or None
     if body.timezone is not None:
         contact.timezone = body.timezone
     if body.business is not None:

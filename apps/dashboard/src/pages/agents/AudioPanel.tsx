@@ -19,7 +19,7 @@ export function AudioPanel({
   disabled: boolean;
 }) {
   const sarvamRealtime =
-    config.stt.provider === "sarvam" && config.stt.model === "saaras:v4";
+    config.stt.provider === "sarvam";
 
   return (
     <section className="grid max-w-5xl gap-8 lg:grid-cols-2">

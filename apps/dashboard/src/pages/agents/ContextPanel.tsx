@@ -28,22 +28,30 @@ export function ContextPanel({
   disabled: boolean;
 }) {
   const summarizer = config.context.summarizer ?? {};
-  const summaryModel: NonNullable<typeof summarizer.model> =
-    summarizer.model ?? {
-      provider: "groq" as const,
-      model: "qwen/qwen3.8-27b",
-      temperature: 0.4,
-      max_tokens: 512,
-      top_p: null,
-      reasoning_effort: "none" as const,
-      prompt:
-        "Summarize the supplied history faithfully; preserve decisions and facts.",
-      output_fields: {},
-      max_output_tokens: 512,
-    };
   const llmProviders =
     catalog?.providers.filter((provider) => provider.slots.includes("llm")) ??
     [];
+  const defaultSummaryProvider = "gemini";
+  const defaultProviderEntry = llmProviders.find(
+    (provider) => provider.provider === defaultSummaryProvider,
+  );
+  const defaultSummaryModel =
+    defaultProviderEntry?.models_by_slot?.llm?.[0] ??
+    defaultProviderEntry?.models?.[0] ??
+    "gemini-2.5-flash";
+  const summaryModel: NonNullable<typeof summarizer.model> =
+    summarizer.model ?? {
+      provider: defaultSummaryProvider as "gemini" | "groq",
+      model: defaultSummaryModel,
+      temperature: 0.1,
+      max_tokens: 256,
+      top_p: null,
+      reasoning_effort: "none" as const,
+      prompt:
+        "Write compact field/value notes for the next agent turn. Keep caller-confirmed business, current process and pain, desired outcome, constraints, objections, and commitments or completed tool outcomes. Preserve exact names, numbers, and dates. Omit unknown fields.",
+      output_fields: {},
+      max_output_tokens: 512,
+    };
   const selectedProvider = llmProviders.find(
     (provider) => provider.provider === summaryModel.provider,
   );
@@ -82,7 +90,7 @@ export function ContextPanel({
         <div>
           <h2 className="text-base font-semibold">Context window</h2>
           <p className="text-xs text-muted-foreground">
-            Live calls use Pipecat's native context summarizer when enabled.
+            Summaries run asynchronously after a complete exchange; the caller response never waits for them.
           </p>
         </div>
 
@@ -90,46 +98,46 @@ export function ContextPanel({
           <div className="grid grid-cols-2 gap-4">
             <NumberField
               id="context-window"
-              label="Context window (tokens)"
-              value={summarizer.context_window_tokens ?? 8192}
-              min={1024}
+              label="Context trigger (tokens)"
+              value={summarizer.context_window_tokens ?? 3072}
+              min={512}
               max={128000}
-              step={1024}
+              step={256}
               disabled={disabled}
               onChange={(val) =>
                 updateSummarizer({ context_window_tokens: val })
               }
-              hint="Total model context window"
+              hint="Provider input usage when reported; otherwise Pipecat's estimate"
             />
             <NumberField
               id="unsummarized-msgs"
-              label="Every N exchanges"
-              value={summarizer.every_n_exchanges ?? 10}
+              label="Every N completed exchanges"
+              value={summarizer.every_n_exchanges ?? 4}
               min={1}
               max={50}
               disabled={disabled}
               onChange={(val) => updateSummarizer({ every_n_exchanges: val })}
-              hint="Completed caller/agent exchanges before compaction"
+              hint="Whichever comes first: this count or the context trigger"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <NumberField
               id="preserve-recent"
-              label="Preserve recent msgs"
-              value={summarizer.preserve_recent_messages ?? 6}
-              min={0}
-              max={50}
+              label="Preserve recent exchanges"
+              value={summarizer.preserve_recent_exchanges ?? 2}
+              min={1}
+              max={20}
               disabled={disabled}
               onChange={(val) =>
-                updateSummarizer({ preserve_recent_messages: val })
+                updateSummarizer({ preserve_recent_exchanges: val })
               }
-              hint="Recent messages kept uncompacted"
+              hint="Whole exchanges, including associated tool messages"
             />
             <NumberField
               id="summary-output"
               label="Summary output tokens"
-              value={summarizer.output_budget_tokens ?? 512}
+              value={summarizer.output_budget_tokens ?? 256}
               min={64}
               max={2048}
               disabled={disabled}
@@ -264,26 +272,21 @@ export function ContextPanel({
               />
             </Field>
           )}
-          <div className="grid grid-cols-2 gap-4">
-            <NumberField
+          <Field>
+            <FieldLabel htmlFor="summary-temperature">Temperature</FieldLabel>
+            <Input
               id="summary-temperature"
-              label="Temperature"
-              value={summaryModel.temperature ?? 0.4}
+              type="number"
               min={0}
               max={2}
               step={0.1}
+              value={summaryModel.temperature ?? 0.1}
               disabled={disabled}
-              onChange={(temperature) => updateSummaryModel({ temperature })}
+              onChange={(event) =>
+                updateSummaryModel({ temperature: Number(event.target.value) })
+              }
             />
-            <NumberField
-              id="summary-max-tokens"
-              label="Maximum output tokens"
-              value={summaryModel.max_tokens ?? 512}
-              min={1}
-              disabled={disabled}
-              onChange={(max_tokens) => updateSummaryModel({ max_tokens })}
-            />
-          </div>
+          </Field>
           <Field>
             <FieldLabel htmlFor="summary-top-p">Top-p (optional)</FieldLabel>
             <Input
@@ -320,7 +323,7 @@ export function ContextPanel({
               value={summarizer.prompt ?? ""}
               disabled={disabled}
               onChange={(e) => updateSummarizer({ prompt: e.target.value })}
-              placeholder="Summarize the supplied history faithfully; preserve decisions and facts."
+              placeholder="Write compact factual field/value notes for the next agent turn."
             />
             <FieldDescription>
               Instructions guiding model summary generation
@@ -333,9 +336,11 @@ export function ContextPanel({
             Summary Evidence Retention
           </p>
           <p className="mt-1">
-            Summaries are applied asynchronously by Pipecat and preserve the
-            configured recent messages. A slow or failed summary leaves the
-            current context unchanged.
+            A summary starts after a completed exchange when either threshold is
+            reached. It preserves the latest complete exchanges and current node
+            instructions. If the source context changes while it runs, the late
+            summary is discarded. Missing credentials and provider errors appear
+            in run evidence; the conversation continues with its existing context.
           </p>
         </div>
       </div>

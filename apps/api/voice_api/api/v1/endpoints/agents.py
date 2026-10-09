@@ -27,11 +27,14 @@ from voice_api.schemas.agent import (
     BindToolBody,
     CreateBody,
     ExpectedRevision,
+    PromptPreviewBody,
+    PromptPreviewResponse,
     RevisionBody,
     UpdatedAgentVersionResponse,
 )
 from voice_api.services.publication_service import clone_version, sync_bindings
 from voice_runtime.contracts import AgentConfig, validate_node_actions
+from voice_shared.contact_variables import normalize_contact_config
 
 router = APIRouter(tags=["agents"])
 Session = Depends(get_session)
@@ -397,6 +400,21 @@ async def get_agent_version(
         "version": row.version,
         "revision": row.revision,
         "status": row.status,
-        "config": row.config,
+        "config": normalize_contact_config(row.config),
         "note": row.note,
     }
+
+
+@router.post("/agent-versions/{version_id}/prompt-preview", response_model=PromptPreviewResponse)
+@allow_organization_member
+async def prompt_preview(
+    version_id: str, body: PromptPreviewBody, session: AsyncSession = Session, _: None = Operator
+) -> dict:
+    if await session.get(AgentVersion, version_id) is None:
+        raise HTTPException(404, "Agent version not found")
+    from voice_api.services.prompt_preview import preview_prompt
+
+    try:
+        return preview_prompt(body.config, body.node_id, body.contact_values, body.fact_values)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc

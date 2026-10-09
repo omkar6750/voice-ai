@@ -52,6 +52,7 @@ class ExchangeTracker:
         self._active_tools: dict[str, dict[str, Any]] = {}
         self._ended_tools: set[str] = set()
         self._active_operations: dict[str, dict[str, Any]] = {}
+        self._request_attempts: dict[str, dict[str, Any]] = {}
         self._classifier_result_metadata: dict[str, dict[str, Any]] = {}
         self._pending_classifier_results: list[str] = []
         # Finalized caller/agent speech, independent of the compacted LLM context.
@@ -122,7 +123,12 @@ class ExchangeTracker:
         self.emit("exchange_ended", exchange_id=self.current, status=status)
         self._closed_exchanges.add(self.current)
 
-    def start_visit(self, node_key: str, triggered_by_tool_id: str | None = None) -> str:
+    def start_visit(
+        self,
+        node_key: str,
+        triggered_by_tool_id: str | None = None,
+        prompt_resolution: dict | None = None,
+    ) -> str:
         self.end_visit("completed")
         self._visit_sequence += 1
         visit = {
@@ -141,6 +147,7 @@ class ExchangeTracker:
             node_key=node_key,
             started_ns=visit["started_ns"],
             triggered_by_tool_id=triggered_by_tool_id,
+            prompt_resolution=prompt_resolution,
         )
         return visit["visit_id"]
 
@@ -169,6 +176,8 @@ class ExchangeTracker:
         self._tool_result_sequences[invocation_id] = 0
         self._tool_invocation_metadata[invocation_id] = {
             "function_call_id": function_call_id,
+            "binding_key": binding_key,
+            "arguments": redact(arguments, secrets=self._secrets),
         }
         self._active_tools[invocation_id] = {"function_call_id": function_call_id}
         self.emit(
@@ -199,9 +208,18 @@ class ExchangeTracker:
         self._tool_result_metadata[result_id] = {
             "invocation_id": invocation_id,
             "is_final": is_final,
+            "payload": redact(payload, secrets=self._secrets),
             **self._tool_invocation_metadata.get(invocation_id, {}),
         }
         return result_id
+
+    def booking_results(self) -> list[dict[str, Any]]:
+        """Structured final booking evidence, including failed/uncertain outcomes."""
+        return [
+            {"arguments": item.get("arguments", {}), "payload": item["payload"]}
+            for item in self._tool_result_metadata.values()
+            if item.get("is_final") and item.get("binding_key") == "book_callback"
+        ]
 
     def context_updated(
         self,
@@ -455,7 +473,7 @@ class ExchangeTracker:
             self._user_turns[timestamp] = exchange
         self._finalized.add(key)
         self._message_sequences[exchange] += 1
-        self.emit(
+        message_id = self.emit(
             "message",
             exchange_id=exchange,
             role="user",
@@ -464,7 +482,7 @@ class ExchangeTracker:
             source_timestamp=timestamp,
             finalized=True,
         )
-        self.dialogue.append({"role": "user", "text": content})
+        self.dialogue.append({"role": "user", "text": content, "message_id": message_id})
         return exchange
 
     def assistant_started(self) -> str:
@@ -479,7 +497,7 @@ class ExchangeTracker:
             return
         self._finalized.add(key)
         self._message_sequences[exchange] += 1
-        self.emit(
+        message_id = self.emit(
             "message",
             exchange_id=exchange,
             role="assistant",
@@ -489,9 +507,11 @@ class ExchangeTracker:
             finalized=True,
             interrupted=interrupted,
         )
-        self.dialogue.append({"role": "assistant", "text": content})
+        self.dialogue.append({"role": "assistant", "text": content, "message_id": message_id})
 
     def start_operation(self, name: str, category: str, **attributes: Any) -> dict[str, Any]:
+        if self._visit:
+            attributes.setdefault("node_visit_id", self._visit["visit_id"])
         provider = attributes.pop("provider", None)
         model = attributes.pop("model", None)
         input_payload = attributes.pop("input_payload", None)
@@ -515,6 +535,9 @@ class ExchangeTracker:
         self._operation_clocks[operation["operation_id"]] = time.monotonic_ns()
         self._active_operations[operation["operation_id"]] = operation
         self.emit("operation_started", **operation)
+        from voice_shared.request_evidence import operation as current_request_operation
+
+        current_request_operation.set(operation["operation_id"])
         return operation
 
     def finish_operation(self, operation: Mapping[str, Any], status: str, **attributes: Any):
@@ -523,6 +546,10 @@ class ExchangeTracker:
             return
         clock = self._operation_clocks.pop(operation["operation_id"], None)
         self._active_operations.pop(operation_id, None)
+        from voice_shared.request_evidence import operation as current_request_operation
+
+        if current_request_operation.get() == operation_id:
+            current_request_operation.set(operation.get("parent_id"))
         duration_ms = None if clock is None else (time.monotonic_ns() - clock) / 1000000
         measured = {
             key: attributes.pop(key, None)
@@ -571,6 +598,44 @@ class ExchangeTracker:
                 **measured,
             },
         )
+
+    def request_attempt(self, event):
+        """HTTP metadata uses the same durable spool as logical operations."""
+        attributes = {
+            key: event.get(key)
+            for key in ("method", "endpoint", "http_status", "error_type", "timing_scope")
+            if event.get(key) is not None
+        }
+        data = {
+            "operation_id": event["operation_id"],
+            "parent_id": event.get("parent_id"),
+            "exchange_id": self.current,
+            "name": "API request",
+            "category": event.get("category", "http_request"),
+            "started_ns": event["started_ns"],
+            "provider": event["service"],
+            "attributes": attributes,
+            "input_payload": event.get("input_payload"),
+        }
+        if event["phase"] == "started":
+            # Freeze exchange identity at admission, not when a stream finishes.
+            self._request_attempts[event["operation_id"]] = data
+            self.emit("operation_started", **data)
+        else:
+            frozen = self._request_attempts.pop(event["operation_id"], None)
+            if frozen:
+                data.update(exchange_id=frozen["exchange_id"], parent_id=frozen["parent_id"])
+            self.emit(
+                "span",
+                **data,
+                ended_ns=event["ended_ns"],
+                status=event["status"],
+                duration_ms=event["duration_ms"],
+                output_payload=event.get("output_payload"),
+                output_state="recorded"
+                if event.get("output_payload") is not None
+                else "not_recorded",
+            )
 
 
 def bind_transcripts(aggregators, tracker: ExchangeTracker) -> None:

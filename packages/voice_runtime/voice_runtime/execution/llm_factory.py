@@ -10,7 +10,7 @@ from typing import Any
 
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
-from openai import APIConnectionError, APIStatusError, APITimeoutError
+from openai import APIConnectionError, APITimeoutError
 from openai.types.chat.chat_completion_chunk import (
     ChatCompletionChunk,
     Choice,
@@ -56,16 +56,14 @@ def _has_generated_content(chunk) -> bool:
 
 def _fallback_worthy(error: Exception) -> bool:
     status_code = getattr(error, "status_code", None) or getattr(error, "code", None)
-    return isinstance(
-        error,
-        (
-            ConnectionError,
-            APIConnectionError,
-            APIStatusError,
-            APITimeoutError,
-            genai_errors.APIError,
-        ),
-    ) or (isinstance(status_code, int) and status_code != 200)
+    if isinstance(status_code, int):
+        # Fail over for transient provider/service failures only. Invalid
+        # requests (including unsupported message roles) will fail identically
+        # on the fallback and must not trigger a retry cycle.
+        return status_code in {408, 409, 425, 429} or status_code >= 500
+    return isinstance(error, (ConnectionError, APIConnectionError, APITimeoutError)) or (
+        isinstance(error, genai_errors.APIError) and status_code is None
+    )
 
 
 def _google_has_generated_content(response) -> bool:
@@ -457,6 +455,9 @@ def build_llm_service(
             _FallbackGroqLLMService if stage == "llm" and config.get("fallback") else GroqLLMService
         )
         service = service_type(api_key=api_key, settings=service_type.Settings(**values))
+        # Some Groq-compatible deployments reject `developer` messages. Ask
+        # Pipecat's OpenAI adapter to convert them at the provider boundary.
+        service.supports_developer_role = False
         return (
             _attach_fallback(settings, service, config, system_instruction)
             if config.get("fallback")

@@ -544,8 +544,8 @@ export function ModelsPanel({
                     label:
                       model === "saaras:v4"
                         ? "saaras:v4 (Realtime, server VAD)"
-                        : model === "saaras:v3"
-                          ? "saaras:v3 (Legacy WebSocket)"
+                        : model === "saaras:v3-realtime"
+                          ? "saaras:v3-realtime (Realtime, server VAD)"
                           : model,
                   })),
                 ]}
@@ -566,8 +566,7 @@ export function ModelsPanel({
                 Catalog status: {selectedStt?.status ?? "unavailable"}.
               </FieldDescription>
             </Field>
-            {config.stt.provider === "sarvam" &&
-              config.stt.model === "saaras:v4" && (
+            {config.stt.provider === "sarvam" && (
                 <>
                   <Field>
                     <FieldLabel htmlFor="stt-realtime-language">

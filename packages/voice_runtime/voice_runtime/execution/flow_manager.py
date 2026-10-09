@@ -5,16 +5,19 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 
 from pipecat.flows import FlowManager, NodeConfig
 from pipecat.frames.frames import FunctionCallResultProperties
 from pipecat.processors.aggregators.llm_context import LLMContext
+from voice_shared.prompt_templates import render_node, variable_types
 
 from voice_runtime.diagnostics import exception_diagnostic
 from voice_runtime.execution.classifier import model_visible_result, normalize_classifier_result
 from voice_runtime.execution.exchange import ExchangeTracker
 from voice_runtime.execution.observer import EvidenceObserver
+from voice_runtime.execution.termination import CallTermination
 from voice_runtime.execution.whatsapp_state import begin_send, finish_send
 
 
@@ -29,6 +32,7 @@ class TracedFlowManager(FlowManager):
         context: LLMContext,
         classifier_runner: Callable[[str, str], Awaitable[tuple[str, dict[str, str]] | None]],
         end_call_runner: Callable[[], Awaitable[None]] | None = None,
+        termination: CallTermination | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -39,7 +43,12 @@ class TracedFlowManager(FlowManager):
         self._context_for_evidence = context
         self._classifier_runner = classifier_runner
         self._end_call_runner = end_call_runner
+        self.termination = termination
         self._transition_tool_id: str | None = None
+        self.context_generation = 0
+        self.fact_sources = {s["key"]: {"kind": "default"} for s in snapshot.get("fact_slots", [])}
+        self._prompt_resolution = None
+        self._current_node_task_messages: list[dict] = []
         self._active_tool_invocation: ContextVar[str | None] = ContextVar(
             f"active_tool_invocation_{id(self)}", default=None
         )
@@ -64,19 +73,52 @@ class TracedFlowManager(FlowManager):
         if classifier is not None:
             _, message = classifier
             classifier_messages.append(message)
+        self._prompt_resolution = None
+        rendered = self._render_node(node_id, node_config)
         if classifier_messages:
-            node_config = dict(node_config)
-            node_config["task_messages"] = [
-                *node_config.get("task_messages", []),
-                *classifier_messages,
-            ]
-        self.tracker.start_visit(node_id, self._transition_tool_id)
+            rendered["task_messages"] = [*rendered.get("task_messages", []), *classifier_messages]
+        self._current_node_task_messages = list(rendered.get("task_messages", []))
+        self.tracker.start_visit(node_id, self._transition_tool_id, self._prompt_resolution)
         self._transition_tool_id = None
         try:
-            await super()._set_node(node_id, node_config)
+            self._node_rendered = True
+            try:
+                await super()._set_node(node_id, rendered)
+            finally:
+                self._node_rendered = False
+            self.context_generation += 1
+            if next(
+                (
+                    node.get("terminal", False)
+                    for node in self._snapshot["flow"]["nodes"]
+                    if node["id"] == node_id
+                ),
+                False,
+            ):
+                if self.termination is not None:
+                    self.termination.summary.terminal_node = node_id
         except BaseException:
             self.tracker.end_visit("failed")
             raise
+
+    def _render_node(self, node_id: str, node_config: NodeConfig) -> NodeConfig:
+        # Parent _set_node calls this hook. A node already rendered for this
+        # entry must not be parsed again (replacement values can contain braces).
+        if getattr(self, "_node_rendered", False):
+            return node_config
+        snapshot = getattr(self, "_snapshot", {})
+        sources = {k: {"kind": "contact"} for k in snapshot.get("contact_variables", [])}
+        sources.update(getattr(self, "fact_sources", {}))
+        rendered, records = render_node(
+            node_config, dict(getattr(self, "_state", {})), variable_types(snapshot), sources
+        )
+        self._prompt_resolution = {
+            "state": "recorded",
+            "rendered_at": datetime.now(UTC).isoformat(),
+            "node_key": node_id,
+            "records": records,
+        }
+        return rendered
 
     async def _create_transition_func(self, name, handler):
         execute = await super()._create_transition_func(name, handler)

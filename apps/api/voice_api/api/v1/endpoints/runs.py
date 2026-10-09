@@ -26,6 +26,7 @@ from voice_api.services.evidence_service import related_evidence
 from voice_api.services.read_pagination import decode_cursor, encode_cursor
 from voice_api.services.resolution_service import resolve
 from voice_api.services.runtime_recovery import recover_expired_assignments
+from voice_shared.request_evidence import is_internal_span
 
 router = APIRouter(tags=["runs"])
 Session = Depends(get_session)
@@ -64,6 +65,8 @@ async def request_browser_run(
         else {
             "id": contact.id,
             "name": contact.name,
+            "first_name": contact.first_name,
+            "last_name": contact.last_name,
             "timezone": contact.timezone,
         },
     )
@@ -231,6 +234,7 @@ async def timeline(
             select(TraceSpan).where(TraceSpan.run_id == run_id).order_by(TraceSpan.started_at)
         )
     ).all()
+    spans = [span for span in spans if not is_internal_span(span)]
     tools = (
         await session.scalars(
             select(ToolInvocation)

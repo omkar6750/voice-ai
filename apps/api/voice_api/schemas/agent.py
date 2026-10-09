@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, field_validator
 from voice_runtime.contracts import AgentConfig
+from voice_runtime.contracts.evidence import PromptResolutionRecord
 
 
 class RevisionBody(BaseModel):
@@ -63,3 +64,17 @@ class AgentVersionSummaryResponse(BaseModel):
 
 class AgentVersionSummariesResponse(BaseModel):
     versions: list[AgentVersionSummaryResponse]
+
+
+class PromptPreviewBody(BaseModel):
+    config: AgentConfig
+    node_id: str
+    contact_values: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+    fact_values: dict[str, str | int | float | bool] = Field(default_factory=dict)
+
+
+class PromptPreviewResponse(BaseModel):
+    node_id: str
+    rendered: dict
+    resolution: list[PromptResolutionRecord]
+    refresh: str

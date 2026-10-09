@@ -3,18 +3,48 @@
 import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from voice_runtime.contracts.base import ConfigModel
 
 
 class ContactBody(ConfigModel):
-    name: str = Field(min_length=1, max_length=120)
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    first_name: str | None = Field(default=None, min_length=1, max_length=120)
+    last_name: str | None = Field(default=None, max_length=120)
     phone_number: str
     timezone: str | None = None
     business: str | None = None
     source: str | None = None
     language: str | None = None
     metadata_json: dict | None = None
+
+    @model_validator(mode="after")
+    def require_name(self):
+        if not self.name or not self.first_name:
+            raise ValueError("Provide a first name and optionally a last name")
+        return self
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_name_parts(cls, values):
+        if not isinstance(values, dict):
+            return values
+        values = dict(values)
+        name = values.get("name")
+        first = values.get("first_name")
+        last = values.get("last_name")
+        if first is not None:
+            first = first.strip()
+            last = last.strip() if last is not None else ""
+            values["first_name"] = first
+            values["last_name"] = last or None
+            values["name"] = " ".join(part for part in (first, last) if part)
+        elif name:
+            parts = name.split()
+            values["name"] = " ".join(parts)
+            values["first_name"] = parts[0] if parts else None
+            values["last_name"] = " ".join(parts[1:]) or None
+        return values
 
     @field_validator("phone_number")
     @classmethod
@@ -37,12 +67,31 @@ class ContactBody(ConfigModel):
 
 class ContactPatchBody(ConfigModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
+    first_name: str | None = Field(default=None, min_length=1, max_length=120)
+    last_name: str | None = Field(default=None, max_length=120)
     phone_number: str | None = None
     timezone: str | None = None
     business: str | None = None
     source: str | None = None
     language: str | None = None
     metadata_json: dict | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_name(cls, values):
+        if not isinstance(values, dict):
+            return values
+        values = dict(values)
+        if values.get("name") is not None and "first_name" not in values:
+            parts = values["name"].split()
+            values["name"] = " ".join(parts)
+            values["first_name"] = parts[0] if parts else None
+            values["last_name"] = " ".join(parts[1:]) or None
+        elif values.get("first_name") is not None:
+            values["first_name"] = values["first_name"].strip()
+            last = values.get("last_name")
+            values["last_name"] = last.strip() if last and last.strip() else None
+        return values
 
     @field_validator("phone_number")
     @classmethod

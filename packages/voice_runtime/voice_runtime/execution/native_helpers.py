@@ -207,7 +207,7 @@ def build_user_aggregator_params(snapshot: dict, vad) -> LLMUserAggregatorParams
     """Use provider endpointing when available, otherwise local Smart Turn."""
     limits = snapshot["call_limits"]
     stt = snapshot.get("stt", {})
-    if stt.get("provider") == "sarvam" and stt.get("model") == "saaras:v4":
+    if stt.get("provider") == "sarvam":
         # Sarvam Realtime sends proposed turn boundaries. Explicitly use its
         # external strategy so Pipecat does not instantiate local Smart Turn.
         strategies = ExternalUserTurnStrategies(

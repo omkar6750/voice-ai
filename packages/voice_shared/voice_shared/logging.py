@@ -51,6 +51,8 @@ SAFE_STRINGS = {
     "request_method",
     "validation_scope",
     "validation_detail_state",
+    "at_command",
+    "at_response_line",
 }
 logger = logging.getLogger("voice.http")
 logger.propagate = False
@@ -74,6 +76,10 @@ class SafePreview(str):
 
 
 def redact(value, key=""):
+    from voice_shared.dev_visibility import is_development, redact_api_keys
+
+    if is_development():
+        return redact_api_keys(value, key)
     if isinstance(value, SafePreview):
         return value
     if PRIVATE.search(key):
@@ -88,6 +94,24 @@ def redact(value, key=""):
     if isinstance(value, list):
         return [redact(v, key) for v in value]
     if isinstance(value, str):
+        if key == "at_command" and re.fullmatch(
+            r"AT(?:\+?(?:CPIN\?|CSQ|CEREG\?|CREG\?|CGATT\?|COPS\?|CPSI\?|CGACT\?|CLCC|CPCMREG\?|CPCMFRM\?|CEER|CGMR)|I|A|ATH|\+CHUP|\+CPCMREG=[01]|\+CPCMFRM=[01])|ATD<number>;",
+            value,
+        ):
+            return value
+        if (
+            key == "at_response_line"
+            and len(value) <= 240
+            and (
+                value in {"OK", "ERROR", "NO CARRIER", "BUSY", "NO ANSWER", "SIM7600"}
+                or re.fullmatch(
+                    r"\+(?:CPIN|CSQ|CEREG|CREG|CGATT|COPS|CPSI|CGACT|CLCC|CPCMREG|CPCMFRM|CEER): [A-Za-z0-9 _,.\-+<>\"']{1,210}",
+                    value,
+                )
+                or re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){1,3}", value)
+            )
+        ):
+            return value
         if key in SAFE_STRINGS and re.fullmatch(r"[A-Za-z0-9_.:-]{1,150}", value):
             return value
         return "[redacted]"
@@ -135,7 +159,7 @@ class ConsoleFormatter(logging.Formatter):
             return record.getMessage()
         event = json.loads(record.getMessage())
         severity = event.get("level", record.levelname)
-        status = event.get("http_status", 0)
+        status = event.get("http_status") or 0
         tone = (
             "31"
             if severity in {"ERROR", "CRITICAL"} or status >= 500
@@ -201,12 +225,17 @@ def configure(service, directory=None, *, env_files=()):
     from dotenv import dotenv_values
 
     for env_file in env_files or ():
+        from voice_shared.dev_visibility import register_api_keys
+
+        values = dotenv_values(env_file)
+        register_api_keys(v for k, v in values.items() if "API_KEY" in k or "INTEGRATION_KEYS" in k)
         _environment.update(
             {
                 k: v
-                for k, v in dotenv_values(env_file).items()
+                for k, v in values.items()
                 if k
                 in {
+                    "VOICE_ENV",
                     "VOICE_ENABLE_INBOUND_API_LOGS",
                     "VOICE_ENABLE_OUTBOUND_API_LOGS",
                     "VOICE_INBOUND_API_LOGS_NO_TRUNCATE",
@@ -220,6 +249,9 @@ def configure(service, directory=None, *, env_files=()):
                 and v is not None
             }
         )
+    from voice_shared.dev_visibility import configure as configure_visibility
+
+    configure_visibility(os.getenv("VOICE_ENV", _environment.get("VOICE_ENV", "dev")))
     logger.propagate = False
     if _listener is not None:
         logger.handlers = [_bounded_handler]
@@ -272,6 +304,8 @@ def emit(event, *, forward=True):
 
 
 def exception_event(service, exc, *, forward=True):
+    from voice_shared.dev_visibility import is_development, redact_api_keys
+
     diagnostic_id = uuid4().hex
     # Do not read exception messages, locals, or credential-bearing filenames.
     emit(
@@ -282,6 +316,14 @@ def exception_event(service, exc, *, forward=True):
             "diagnostic_id": diagnostic_id,
             "trace_id": trace_id.get(),
             "error_type": type(exc).__name__,
+            **(
+                {
+                    "message": redact_api_keys(str(exc)),
+                    "traceback": redact_api_keys("".join(traceback.format_exception(exc))),
+                }
+                if is_development()
+                else {}
+            ),
             "frames": [
                 {"line": f.lineno, "module": Path(f.filename).name, "function": f.name}
                 for f in traceback.extract_tb(exc.__traceback__)
@@ -293,6 +335,8 @@ def exception_event(service, exc, *, forward=True):
 
 
 def body_preview(body, direction, metadata_only=False):
+    from voice_shared.dev_visibility import is_development
+
     if metadata_only:
         return {"bytes": len(body), "body": "[metadata-only]"}
     try:
@@ -309,7 +353,11 @@ def body_preview(body, direction, metadata_only=False):
             )
         ),
     )
-    if not enabled(direction.upper() + "_API_LOGS_NO_TRUNCATE") and len(rendered) > maximum:
+    if (
+        not is_development()
+        and not enabled(direction.upper() + "_API_LOGS_NO_TRUNCATE")
+        and len(rendered) > maximum
+    ):
         return {
             "truncated": True,
             "total_chars": len(rendered),

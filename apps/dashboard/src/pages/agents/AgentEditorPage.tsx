@@ -431,6 +431,7 @@ export function AgentEditorPage() {
             )}
             {section === "Flow" && (
               <FlowPanel
+                versionId={versionId}
                 config={draft}
                 change={setDraft}
                 registeredTools={registeredTools}

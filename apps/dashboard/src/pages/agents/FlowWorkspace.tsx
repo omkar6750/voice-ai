@@ -70,7 +70,7 @@ export function ConfigGroup({
           </span>
         </Button>
       </CollapsibleTrigger>
-      <CollapsibleContent className="border-t border-border/40">
+      <CollapsibleContent>
         <div className="flex flex-col gap-4 p-3">{children}</div>
       </CollapsibleContent>
     </Collapsible>

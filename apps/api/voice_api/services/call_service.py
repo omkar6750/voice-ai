@@ -117,6 +117,8 @@ async def queue_call(
         contact_snapshot={
             "id": contact.id,
             "name": contact.name,
+            "first_name": contact.first_name,
+            "last_name": contact.last_name,
             "timezone": contact.timezone,
             "phone_number": contact.phone_number,
             "business": contact.business,

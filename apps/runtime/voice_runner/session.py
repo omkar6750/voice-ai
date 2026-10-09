@@ -404,6 +404,13 @@ class Session:
         from voice_shared.logging import run_id
 
         scope_token = run_id.set(self.run_id)
+        from voice_shared.request_evidence import capture_payloads
+        from voice_shared.request_evidence import sink as request_sink
+
+        request_token = request_sink.set(self.tracker.request_attempt)
+        payload_token = capture_payloads.set(
+            bool(self.request.snapshot.get("_resolved", {}).get("pipeline_logs_enabled"))
+        )
         self.task = asyncio.current_task()
         self.connected = True
         self.state = "running"
@@ -418,7 +425,12 @@ class Session:
                 if self.request.channel == "sim7600":
                     from voice_runtime.telephony.driver import Sim7600CallDriver
 
-                    self.driver = Sim7600CallDriver(host)
+                    self.driver = Sim7600CallDriver(
+                        host,
+                        connect_timeout=self.manager.settings.sim7600_connect_timeout_seconds,
+                        release_timeout=self.manager.settings.sim7600_release_timeout_seconds,
+                        release_stable_secs=self.manager.settings.sim7600_release_stable_seconds,
+                    )
                     self.driver.trace = self.trace
                     await self.driver.prepare(self.request.snapshot, self.tracker)
                     outcome = await self.driver.call(self.request.destination)
@@ -435,9 +447,30 @@ class Session:
         except Exception as exc:
             self.termination.request("pipeline_failure")
             exception_event("voice-runtime", exc)
+            from voice_runtime.diagnostics import exception_diagnostic
+            from voice_runtime.telephony.session import Sim7600ConnectionTimeout
+
+            if isinstance(exc, Sim7600ConnectionTimeout):
+                self.tracker.diagnostic(
+                    severity="error",
+                    category="call_connection",
+                    source="modem",
+                    code="sim7600_connect_timeout",
+                    message="Modem did not confirm the outgoing call became active before the deadline",
+                    metadata={
+                        "timeout_seconds": exc.timeout_seconds,
+                        "last_call_state": exc.last_state.value,
+                    },
+                )
+            else:
+                self.tracker.diagnostic(
+                    **exception_diagnostic(exc, source="runtime", code="call_execution_failed")
+                )
         finally:
             await asyncio.shield(self.finish(outcome))
             run_id.reset(scope_token)
+            request_sink.reset(request_token)
+            capture_payloads.reset(payload_token)
 
     async def finish(self, outcome):
         async with self.finalize_lock:
@@ -450,6 +483,15 @@ class Session:
                         cleanup = await self.driver.close()
                         if not cleanup.get("release_confirmed"):
                             outcome["dispatch_uncertain"] = True
+                            self.tracker.diagnostic(
+                                severity="error",
+                                category="call_cleanup",
+                                source="modem",
+                                code="sim7600_cleanup_unconfirmed",
+                                uncertain=True,
+                                message="Modem call release could not be verified; endpoint remains unavailable",
+                                metadata=cleanup,
+                            )
                     elif self.host:
                         await self.host.close()
                     if self.media:

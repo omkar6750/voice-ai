@@ -1,6 +1,9 @@
 """SIM7600 call driver: pipeline host owns Pipecat, this adapter owns COM control."""
 
 import asyncio
+import math
+from asyncio import sleep
+from time import monotonic
 from typing import Protocol
 
 from voice_runtime.diagnostics import modem_status_metadata
@@ -23,7 +26,28 @@ class PipelineHost(Protocol):
 
 
 class Sim7600CallDriver:
-    def __init__(self, host: PipelineHost, modem_factory=Sim7600Modem):
+    def __init__(
+        self,
+        host: PipelineHost,
+        modem_factory=Sim7600Modem,
+        *,
+        connect_timeout=90.0,
+        release_timeout=30.0,
+        release_stable_secs=15.0,
+    ):
+        if (
+            not all(
+                math.isfinite(v) and v > 0
+                for v in (connect_timeout, release_timeout, release_stable_secs)
+            )
+            or release_stable_secs > release_timeout
+        ):
+            raise ValueError(
+                "SIM7600 timeouts must be finite and positive; release stability must fit within its deadline"
+            )
+        self.connect_timeout = connect_timeout
+        self.release_timeout = release_timeout
+        self.release_stable_secs = release_stable_secs
         self.host = host
         self.modem_factory = modem_factory
         self.modem = None
@@ -55,13 +79,47 @@ class Sim7600CallDriver:
             )
             raise RuntimeError("Modem is not ready for voice calling")
         await self.modem.ensure_pcm_format(snapshot["audio"]["sample_rate"])
-        self.session = TelephonySession(self.modem)
+        self.session = TelephonySession(self.modem, connect_timeout=self.connect_timeout)
         await self.host.prepare(snapshot, tracker)
 
     async def call(self, destination: str) -> dict:
         self.dial_attempted = True
         await self.session.start_call(destination)
         return await self.host.converse(self.modem)
+
+    async def _verify_release(self):
+        """Keep ownership until idle stays stable; cancel calls that appear late."""
+        from voice_runtime.safe_logs import error_category as classify
+
+        deadline = monotonic() + self.release_timeout
+        idle_since = None
+        final_state = None
+        error = None
+        last_hangup = monotonic()
+        was_idle = True
+        while monotonic() < deadline:
+            try:
+                async with asyncio.timeout(max(0.001, deadline - monotonic())):
+                    final_state = await self.modem.state()
+                    if final_state in (CallState.IDLE, CallState.DISCONNECTED):
+                        if idle_since is None:
+                            idle_since = monotonic()
+                        if monotonic() - idle_since >= self.release_stable_secs:
+                            return True, final_state, error
+                        was_idle = True
+                    else:
+                        idle_since = None
+                        if self.dial_attempted and (was_idle or monotonic() - last_hangup >= 2):
+                            await self.modem.hangup()
+                            last_hangup = monotonic()
+                        was_idle = False
+            except Exception as exc:
+                idle_since = None
+                error = classify(exc)
+            remaining = deadline - monotonic()
+            if remaining > 0:
+                await sleep(min(1.0, self.release_stable_secs / 2, remaining))
+        return False, final_state, error or "timeout"
 
     async def close(self) -> dict:
         confirmed = False
@@ -72,20 +130,15 @@ class Sim7600CallDriver:
         try:
             if self.modem:
                 try:
-                    final_state = await self.modem.state()
                     if self.session and self.dial_attempted:
-                        await self.session.end_call()
-                    final_state = await self.modem.state()
-                    confirmed = final_state in (CallState.IDLE, CallState.DISCONNECTED)
+                        # A briefly empty call list must not skip cancellation of an outgoing dial.
+                        await self.session.end_call(force=True)
                 except Exception as exc:
                     from voice_runtime.safe_logs import error_category as classify
 
                     error_category = classify(exc)
-                    try:
-                        final_state = await self.modem.state()
-                        confirmed = final_state in (CallState.IDLE, CallState.DISCONNECTED)
-                    except Exception:
-                        pass
+                confirmed, final_state, verification_error = await self._verify_release()
+                error_category = error_category or verification_error
         finally:
             try:
                 await asyncio.wait_for(self.host.close(), timeout=10)

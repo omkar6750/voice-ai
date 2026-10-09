@@ -12,6 +12,7 @@ def _host() -> NativePipelineHost:
     host._snapshot = {
         "flow": {
             "initial_node": "opening",
+            "prompt_composition": "global_plus_node",
             "nodes": [
                 {
                     "id": "opening",
@@ -123,6 +124,45 @@ def test_node_role_message_uses_provider_system_channel_and_keeps_context_messag
     assert node["task_messages"] == [
         {"role": "assistant", "content": "Previous assistant context."}
     ]
+
+
+@pytest.mark.parametrize(
+    ("composition", "includes_global"),
+    [("node_only", False), ("global_plus_node", True)],
+)
+def test_prompt_composition_controls_global_prompt_in_node_role_message(
+    composition, includes_global
+):
+    from voice_runtime.execution.pipecat_flow import compile_pipecat_flow
+
+    host = _host()
+    host._snapshot["flow"]["prompt_composition"] = composition
+    node = compile_pipecat_flow(host._snapshot).node("opening")
+
+    assert ("Follow the system prompt." in node["role_message"]) is includes_global
+
+
+@pytest.mark.parametrize(
+    ("composition", "includes_global"),
+    [("node_only", False), ("global_plus_node", True)],
+)
+def test_shared_flow_compiler_respects_prompt_composition(composition, includes_global):
+    from voice_shared.compiler import compile_flow_json
+
+    snapshot = {
+        "system_prompt": "Shared global guidance.",
+        "prompt_composition": composition,
+        "flow": {
+            "initial_node": "opening",
+            "prompt_composition": composition,
+            "nodes": [{"id": "opening", "role_message": "Node-specific guidance."}],
+        },
+    }
+
+    role_message = compile_flow_json(snapshot)["nodes"]["opening"]["role_message"]
+
+    assert ("Shared global guidance." in role_message) is includes_global
+    assert "Node-specific guidance." in role_message
 
 
 def test_native_edge_functions_follow_the_node_transition_graph():

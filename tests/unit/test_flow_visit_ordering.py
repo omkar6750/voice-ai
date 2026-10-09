@@ -1,6 +1,6 @@
 """Node response operations must have their visit before Pipecat dispatches them."""
 
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import ANY, AsyncMock, Mock
 
 import pytest
 from pipecat.flows import FlowManager
@@ -13,6 +13,9 @@ async def test_visit_exists_before_response_dispatch_and_failed_setup_is_recorde
 ):
     flow = object.__new__(TracedFlowManager)
     flow._current_node = "prior"
+    flow.context_generation = 0
+    flow.termination = None
+    flow._snapshot = {"flow": {"nodes": []}}
     flow._classifier_runner = AsyncMock(return_value=None)
     flow._action_runner = AsyncMock(return_value=None)
     flow.tracker = Mock()
@@ -34,7 +37,7 @@ async def test_visit_exists_before_response_dispatch_and_failed_setup_is_recorde
         await flow._set_node("closing", {"task_messages": []})
         flow.tracker.end_visit.assert_not_called()
     assert events == ["visit", "dispatch"]
-    flow.tracker.start_visit.assert_called_once_with("closing", "tool-1")
+    flow.tracker.start_visit.assert_called_once_with("closing", "tool-1", ANY)
     assert flow._transition_tool_id is None
     assert [call.args for call in flow._classifier_runner.await_args_list] == [
         ("exit", "prior"),
@@ -47,6 +50,8 @@ async def test_classifier_order_does_not_run_legacy_custom_node_actions(
 ):
     flow = object.__new__(TracedFlowManager)
     flow._current_node = "prior"
+    flow.context_generation = 0
+    flow.termination = None
     flow._classifier_runner = AsyncMock(return_value=None)
     flow._action_runner = AsyncMock(return_value=None)
     flow._snapshot = {

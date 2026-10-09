@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { closeHistory } from "@tiptap/pm/history";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { Placeholder, UndoRedo } from "@tiptap/extensions";
+import { parsePrompt, promptErrors } from "./prompt-templates";
+import { FallbackPicker } from "./FallbackPicker";
 import { promptDocument, promptExtensions } from "./prompt-document";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Maximize2 } from "lucide-react";
@@ -15,7 +17,6 @@ import {
 import { Button } from "@/components/ui/button";
 
 const toolPattern = /#([a-z][a-z0-9_]*)\b/g;
-const variablePattern = /\{\{\s*([a-zA-Z0-9_\.]+)\s*\}\}/g;
 
 export function PromptEditor({
   id,
@@ -25,6 +26,7 @@ export function PromptEditor({
   availableTools,
   registeredTools,
   availableVariables = [],
+  booleanVariables = [],
   placeholder,
   disabled = false,
 }: {
@@ -35,6 +37,7 @@ export function PromptEditor({
   availableTools: string[];
   registeredTools: string[];
   availableVariables?: string[];
+  booleanVariables?: string[];
   placeholder?: string;
   disabled?: boolean;
 }) {
@@ -42,8 +45,13 @@ export function PromptEditor({
   const catalog = useRef({
     tools: availableTools,
     variables: availableVariables,
+    booleans: booleanVariables,
   });
-  catalog.current = { tools: availableTools, variables: availableVariables };
+  catalog.current = {
+    tools: availableTools,
+    variables: availableVariables,
+    booleans: booleanVariables,
+  };
   const extensions = useMemo(
     () => [
       ...promptExtensions(() => catalog.current),
@@ -99,7 +107,11 @@ export function PromptEditor({
   useEffect(() => {
     if (editor && !editor.isDestroyed) editor.setEditable(!disabled, false);
   }, [editor, disabled]);
-  const catalogKey = JSON.stringify([availableTools, availableVariables]);
+  const catalogKey = JSON.stringify([
+    availableTools,
+    availableVariables,
+    booleanVariables,
+  ]);
   useEffect(() => {
     if (editor && !editor.isDestroyed)
       editor.view.dispatch(editor.state.tr.setMeta("prompt-catalog", true));
@@ -115,15 +127,20 @@ export function PromptEditor({
   ];
 
   // Variable references
-  const variableReferences = [...value.matchAll(variablePattern)].map(
-    (match) => match[1],
-  );
+  let variableReferences: string[] = [];
+  try {
+    variableReferences = parsePrompt(value)
+      .filter((t) => !t.escaped)
+      .flatMap((t) => t.keys);
+  } catch {
+    /* validation below */
+  }
   const usedVariables = [...new Set(variableReferences)];
-  const unresolvedVariables = [
-    ...new Set(
-      variableReferences.filter((name) => !availableVariables.includes(name)),
-    ),
-  ];
+  const unresolvedVariables = promptErrors(
+    value,
+    availableVariables,
+    booleanVariables,
+  );
 
   function insertReference(token: string) {
     if (disabled || !editor || editor.isDestroyed) return;
@@ -142,6 +159,13 @@ export function PromptEditor({
   return (
     <Field data-invalid={hasErrors || undefined}>
       <div className="flex items-center justify-between gap-2">
+        <FallbackPicker
+          variables={availableVariables.filter(
+            (v) => !booleanVariables.includes(v),
+          )}
+          disabled={disabled}
+          insert={insertReference}
+        />
         <FieldLabel id={`${id}-label`} htmlFor={id}>
           {label}
         </FieldLabel>
@@ -218,10 +242,9 @@ export function PromptEditor({
 
       {unresolvedVariables.length > 0 && (
         <p className="text-xs text-destructive">
-          Unbound variable references:{" "}
-          {unresolvedVariables.map((name) => `{{ ${name} }}`).join(", ")}.{" "}
-          Use an available time variable, configured contact field or conversation
-          fact key.
+          Prompt expression errors: {unresolvedVariables.join("; ")}. Use an
+          available time variable, configured contact field or conversation fact
+          key.
         </p>
       )}
 
@@ -296,6 +319,10 @@ export function promptToolReferences(value: string) {
 
 export function promptVariableReferences(value: string) {
   return [
-    ...new Set([...value.matchAll(variablePattern)].map((match) => match[1])),
+    ...new Set(
+      parsePrompt(value)
+        .filter((t) => !t.escaped)
+        .flatMap((t) => t.keys),
+    ),
   ];
 }

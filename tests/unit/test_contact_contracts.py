@@ -12,6 +12,18 @@ def test_contact_normalization_and_unknown_timezone():
     )
 
 
+def test_contact_name_parts_compose_full_name_and_legacy_names_are_split():
+    parts = ContactBody(first_name="  Omkar ", last_name=" Pawar ", phone_number="+15555550100")
+    legacy = ContactBody(name="Omkar   Pawar", phone_number="+15555550100")
+
+    assert (parts.name, parts.first_name, parts.last_name) == ("Omkar Pawar", "Omkar", "Pawar")
+    assert (legacy.name, legacy.first_name, legacy.last_name) == (
+        "Omkar Pawar",
+        "Omkar",
+        "Pawar",
+    )
+
+
 @pytest.mark.parametrize(
     "change",
     [{"phone_number": "5555550100"}, {"timezone": "Moon/Base"}, {"phone_number": "+123;ATH"}],

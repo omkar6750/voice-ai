@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import math
+import os
+import struct
+import time
 from time import perf_counter
 
 import serial
@@ -30,6 +34,17 @@ class _SerialPcmOwner:
         self.trace = trace
         self._serial: serial.Serial | None = None
         self._open_lock = asyncio.Lock()
+        self._io_summary: dict[str, dict[str, int | float]] = {}
+        self._turn_diag_enabled = (
+            os.getenv("VOICE_MODEM_TURN_DIAGNOSTICS", "").strip().lower()
+            in {"1", "true", "yes", "on"}
+            and trace is not None
+        )
+        self._turn_window_samples = 0
+        self._turn_window_sum_squares = 0
+        self._turn_window_peak = 0
+        self._turn_window_clipped = 0
+        self._turn_window_started: float | None = None
 
     async def open(self) -> None:
         async with self._open_lock:
@@ -45,6 +60,8 @@ class _SerialPcmOwner:
 
     async def close(self) -> None:
         async with self._open_lock:
+            self._flush_turn_pcm()
+            self._flush_io_summaries()
             if self._serial is not None:
                 await asyncio.to_thread(self._serial.close)
                 self._serial = None
@@ -54,6 +71,8 @@ class _SerialPcmOwner:
             raise RuntimeError("SIM7600 USB audio port is not open")
         started = perf_counter() if is_enabled() else 0
         payload = await asyncio.to_thread(self._serial.read, size)
+        if payload:
+            self._record_io("input", payload, self.params.audio_in_sample_rate)
         if started and payload:
             elapsed_ms = (perf_counter() - started) * 1000
             if elapsed_ms >= 30:
@@ -71,6 +90,7 @@ class _SerialPcmOwner:
                 timing("sim_tx", "write", elapsed_ms)
         if written != len(payload):
             raise OSError(f"Short PCM write: {written}/{len(payload)} bytes")
+        self._record_io("output", payload, self.params.audio_out_sample_rate)
         started = perf_counter() if is_enabled() else 0
         await asyncio.to_thread(self._serial.flush)
         if started:
@@ -79,6 +99,109 @@ class _SerialPcmOwner:
                 timing("sim_tx", "flush", elapsed_ms)
         if self.capture:
             self.capture.pcm("output", payload)
+
+    def _record_io(self, direction: str, payload: bytes, sample_rate: int) -> None:
+        now = time.monotonic()
+        stats = self._io_summary.setdefault(
+            direction, {"started": now, "bytes": 0, "samples": 0, "count": 0}
+        )
+        stats["bytes"] = int(stats["bytes"]) + len(payload)
+        stats["samples"] = int(stats["samples"]) + len(payload) // 2
+        stats["count"] = int(stats["count"]) + 1
+        if now - float(stats["started"]) < 5:
+            return
+        self._emit_io_summary(direction, stats, sample_rate, now)
+
+    def record_turn_pcm(self, payload: bytes) -> None:
+        """Record opt-in PCM level windows for local modem turn debugging; never audio."""
+        if not self._turn_diag_enabled:
+            return
+        if len(payload) % 2:
+            return
+        now = time.monotonic()
+        if self._turn_window_started is None:
+            self._turn_window_started = now
+        for (sample,) in struct.iter_unpack("<h", payload):
+            magnitude = abs(sample)
+            self._turn_window_sum_squares += sample * sample
+            self._turn_window_peak = max(self._turn_window_peak, magnitude)
+            self._turn_window_clipped += magnitude >= 32760
+            self._turn_window_samples += 1
+        if self._turn_window_samples < self.params.audio_in_sample_rate // 4:
+            return
+
+        elapsed_ms = max(1.0, (now - self._turn_window_started) * 1000)
+        rms = math.sqrt(self._turn_window_sum_squares / self._turn_window_samples)
+
+        def dbfs(level: float) -> float:
+            return max(-120.0, 20 * math.log10(max(1, level) / 32768))
+
+        self.trace.record(
+            "turn_diag_pcm_window",
+            component="sim_rx",
+            duration_ms=elapsed_ms,
+            rms_dbfs=round(dbfs(rms), 1),
+            peak_dbfs=round(dbfs(self._turn_window_peak), 1),
+            clipped_samples=self._turn_window_clipped,
+            samples=self._turn_window_samples,
+        )
+        self._turn_window_samples = 0
+        self._turn_window_sum_squares = 0
+        self._turn_window_peak = 0
+        self._turn_window_clipped = 0
+        self._turn_window_started = now
+
+    def _flush_turn_pcm(self) -> None:
+        if not self._turn_diag_enabled or self._turn_window_samples == 0:
+            return
+        elapsed_ms = max(1.0, (time.monotonic() - self._turn_window_started) * 1000)
+        rms = math.sqrt(self._turn_window_sum_squares / self._turn_window_samples)
+
+        def dbfs(level: float) -> float:
+            return max(-120.0, 20 * math.log10(max(1, level) / 32768))
+
+        self.trace.record(
+            "turn_diag_pcm_window",
+            component="sim_rx",
+            duration_ms=elapsed_ms,
+            rms_dbfs=round(dbfs(rms), 1),
+            peak_dbfs=round(dbfs(self._turn_window_peak), 1),
+            clipped_samples=self._turn_window_clipped,
+            samples=self._turn_window_samples,
+        )
+        self._turn_window_samples = 0
+        self._turn_window_sum_squares = 0
+        self._turn_window_peak = 0
+        self._turn_window_clipped = 0
+        self._turn_window_started = None
+
+    def _flush_io_summaries(self) -> None:
+        now = time.monotonic()
+        for direction, stats in self._io_summary.items():
+            if int(stats["count"]) == 0:
+                continue
+            rate = (
+                self.params.audio_in_sample_rate
+                if direction == "input"
+                else self.params.audio_out_sample_rate
+            )
+            self._emit_io_summary(direction, stats, rate, now)
+
+    def _emit_io_summary(
+        self, direction: str, stats: dict[str, int | float], sample_rate: int, now: float
+    ) -> None:
+        component = "sim_rx" if direction == "input" else "sim_tx"
+        operational_event(
+            RuntimeEvent.PCM_IO_SUMMARY,
+            component=component,
+            direction=direction,
+            phase="read" if direction == "input" else "write",
+            bytes=int(stats["bytes"]),
+            samples=int(stats["samples"]),
+            count=int(stats["count"]),
+            sample_rate=sample_rate,
+        )
+        stats.update(started=now, bytes=0, samples=0, count=0)
 
 
 class _Sim7600AudioInput(BaseInputTransport):
@@ -128,6 +251,7 @@ class _Sim7600AudioInput(BaseInputTransport):
                     num_channels=1,
                 )
                 buffer = buffer[self._frame_bytes :]
+                self._owner.record_turn_pcm(frame.audio)
                 if is_enabled():
                     now = perf_counter()
                     if self._last_frame_at is not None:
@@ -150,7 +274,10 @@ class _Sim7600AudioInput(BaseInputTransport):
                     event_source="pipeline",
                 )
             operational_event(
-                RuntimeEvent.PCM_READ_FAILED, level="ERROR", error_category=error_category(exc)
+                RuntimeEvent.PCM_READ_FAILED,
+                level="ERROR",
+                error_category=error_category(exc),
+                component="sim_rx",
             )
             await self.push_error("PCM read failed", fatal=True)
 
@@ -208,7 +335,12 @@ class _Sim7600AudioOutput(BaseOutputTransport):
                         event_source="pipeline",
                     )
                 operational_event(
-                    RuntimeEvent.PCM_WRITE_FAILED, level="ERROR", error_category=error_category(exc)
+                    RuntimeEvent.PCM_WRITE_FAILED,
+                    level="ERROR",
+                    error_category=error_category(exc),
+                    component="sim_tx",
+                    bytes=len(chunk),
+                    samples=len(chunk) // 2,
                 )
                 await self.push_error("PCM write failed", fatal=True)
                 return False

@@ -63,7 +63,16 @@ async def create(session, body):
     contact_data = (
         {
             k: getattr(contact, k, None)
-            for k in ("id", "name", "timezone", "phone_number", "business", "source", "language")
+            for k in (
+                "id",
+                "first_name",
+                "last_name",
+                "timezone",
+                "phone_number",
+                "business",
+                "source",
+                "language",
+            )
         }
         if contact
         else {}
@@ -90,7 +99,7 @@ async def create(session, body):
     return row
 
 
-async def ticket(session, row):
+async def ticket(session, row, *, text_control=False):
     row = await get_conversation(session, row.id, lock=True)
     if row.status == "ended":
         raise HTTPException(409, "Conversation ended; start a new conversation")
@@ -102,7 +111,8 @@ async def ticket(session, row):
             and assignment.lease_expires_at > now()
         ):
             try:
-                result = await control("/v1/sessions/text-ticket", identity(assignment))
+                path = "/v1/sessions/text-start" if text_control else "/v1/sessions/text-ticket"
+                result = await control(path, identity(assignment))
                 return {**result, "run_id": row.active_run_id, "conversation_id": row.id}
             except HTTPException as exc:
                 if exc.status_code != 404:
@@ -163,7 +173,8 @@ async def ticket(session, row):
         assignment = await dispatch(
             session, run, conversation_id=row.id, checkpoint=resume_checkpoint
         )
-        result = await control("/v1/sessions/text-ticket", identity(assignment))
+        path = "/v1/sessions/text-start" if text_control else "/v1/sessions/text-ticket"
+        result = await control(path, identity(assignment))
     except Exception as exc:
         # A database failure leaves the transaction unusable until rollback.
         await session.rollback()

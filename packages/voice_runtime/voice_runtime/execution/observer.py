@@ -37,6 +37,7 @@ from pipecat.metrics.metrics import (
 )
 from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
 from pipecat.processors.frame_processor import FrameDirection
+from voice_shared.dev_visibility import is_development
 
 from voice_runtime.diagnostics import (
     provider_error_diagnostic,
@@ -85,6 +86,7 @@ class EvidenceObserver(BaseObserver):
         self._seen_interruption_frames: set[int] = set()
         self._vad_stop_clock_ns: int | None = None
         self.context_event_consumer = None
+        self.context_summary_idle = None
         self._log = log_path.open("a", encoding="utf-8") if log_path else None
 
     def _mark(self, event: str, **details) -> None:
@@ -181,44 +183,32 @@ class EvidenceObserver(BaseObserver):
                     exception, provider=provider, operation=operation_name
                 )
             else:
-                sarvam_error = None
-                if (
-                    operation_name == "stt"
-                    and provider == "sarvam"
-                    and isinstance(frame.error, str)
-                    and frame.error.startswith("SARVAM_STT_PROVIDER_ERROR:")
-                ):
-                    try:
-                        sarvam_error = json.loads(frame.error.split(":", 1)[1])
-                    except (TypeError, ValueError):
-                        sarvam_error = None
-                if isinstance(sarvam_error, dict):
-                    diagnostic = provider_error_diagnostic(
-                        provider=provider,
-                        status_code=sarvam_error.get("status_code"),
-                    )
-                    provider_code = sarvam_error.get("code")
-                    if isinstance(provider_code, str) and len(provider_code) <= 80:
-                        diagnostic["metadata"]["provider_error_code"] = provider_code
-                else:
-                    diagnostic = provider_error_diagnostic(provider=provider, body=frame.error)
+                diagnostic = provider_error_diagnostic(
+                    provider=provider,
+                    body=frame.error,
+                    request_id=getattr(processor, "_request_id", None),
+                )
                 diagnostic["metadata"]["operation"] = operation_name
             diagnostic["metadata"]["pipecat_error_category"] = (
                 frame.category.value if frame.category is not None else "unknown"
             )
             if processor is not None and hasattr(processor, "is_usable"):
                 diagnostic["metadata"]["processor_is_usable"] = bool(processor.is_usable)
-            self.tracker.diagnostic(**diagnostic)
             active = (
                 getattr(self, f"{operation_name}_operation", None)
                 if operation_name in self.providers
                 else None
             )
             if active is not None:
+                diagnostic.setdefault("metadata", {})["operation_id"] = active["operation_id"]
+            self.tracker.diagnostic(**diagnostic)
+            if active is not None:
                 self.tracker.finish_operation(
                     active,
                     "failed",
-                    output_payload={"error": diagnostic["message"]},
+                    output_payload={
+                        "error": diagnostic if is_development() else diagnostic["message"]
+                    },
                     output_state="failed",
                     **self.metrics[operation_name],
                 )
@@ -231,7 +221,10 @@ class EvidenceObserver(BaseObserver):
                 http_status=diagnostic.get("http_status"),
                 provider_request_id=diagnostic.get("provider_request_id"),
                 failed_generation=diagnostic.get("metadata", {}).get("failed_generation"),
+                **({"diagnostic": diagnostic} if is_development() else {}),
             )
+            if operation_name == "llm" and self.context_summary_idle is not None:
+                await self.context_summary_idle()
         if source is self.llm:
             if (
                 data.direction == FrameDirection.DOWNSTREAM
@@ -254,6 +247,8 @@ class EvidenceObserver(BaseObserver):
                     )
             elif isinstance(frame, LLMFullResponseEndFrame):
                 self._finish_llm("completed")
+                if self.context_summary_idle is not None:
+                    await self.context_summary_idle()
         if source is self.stt and isinstance(frame, TranscriptionFrame) and frame.finalized:
             if self.stt_operation is not None:
                 if self._vad_stop_clock_ns is not None:

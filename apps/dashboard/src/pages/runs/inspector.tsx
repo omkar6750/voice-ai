@@ -46,6 +46,56 @@ export function Json({ label, value }: { label: string; value: unknown }) {
   );
 }
 
+function PromptResolutionEvidence({
+  input,
+  timeline,
+}: {
+  input: unknown;
+  timeline: Timeline;
+}) {
+  const resolution =
+    input && typeof input === "object" && "prompt_resolution" in input
+      ? (input as { prompt_resolution: unknown }).prompt_resolution
+      : undefined;
+  const state =
+    resolution && typeof resolution === "object" && "state" in resolution
+      ? String(resolution.state)
+      : "historical";
+  const latest = Object.fromEntries(
+    timeline.tools
+      .filter(
+        (t) =>
+          t.binding_key.startsWith("record_") &&
+          t.status === "completed" &&
+          t.result !== null &&
+          typeof t.result === "object" &&
+          "status" in t.result &&
+          t.result.status === "ok",
+      )
+      .sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at))
+      .map((t) => [t.binding_key.slice(7), t.result]),
+  );
+  return (
+    <section className="flex flex-col gap-2">
+      <h4 className="text-sm font-medium">Prompt resolution</h4>
+      <p className="text-xs text-muted-foreground">
+        {state === "historical"
+          ? "Historical run: resolution evidence was not recorded."
+          : state === "policy_disabled"
+            ? "Resolution details were disabled by policy."
+            : "These values were used on node entry. Later fact recordings do not rewrite this node’s instructions."}
+      </p>
+      {resolution !== undefined && (
+        <Json label="Values used on node entry" value={resolution} />
+      )}
+      <Json
+        label="Latest recorded facts (may differ from node entry)"
+        value={latest}
+      />
+    </section>
+  );
+}
+
 function Evidence({
   selection,
   timeline,
@@ -336,6 +386,17 @@ function Evidence({
     const composerDiagnostics = span.category === "composer"
       ? diagnostics.filter((item) => item.metadata?.operation_id === span.id)
       : [];
+    const summaryDiagnostics = span.category === "summarizer"
+      ? diagnostics.filter(
+          (item) => item.metadata?.summary_operation_id === span.id,
+        )
+      : [];
+    const summaryApplied = summaryDiagnostics.find((item) => item.code === "applied");
+    const summaryConsumed = summaryDiagnostics.find((item) => item.code === "consumed");
+    const summaryConsumerId = summaryConsumed?.metadata?.consuming_llm_operation_id;
+    const summaryConsumer = typeof summaryConsumerId === "string"
+      ? timeline.spans.find((item) => item.id === summaryConsumerId)
+      : null;
     return (
       <>
         <CardHeader>
@@ -346,6 +407,18 @@ function Evidence({
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <dl>
+            {typeof span.attributes.node_visit_id === "string" && (
+              <Value label="Prompt node">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="link"
+                  onClick={() => onSelect({ kind: "visit", id: String(span.attributes.node_visit_id) })}
+                >
+                  View node-entry resolution
+                </Button>
+              </Value>
+            )}
             <Value label="Provider">{span.provider ?? "Runtime"}</Value>
             <Value label="Model">{span.model ?? "Not recorded"}</Value>
             <Value label="Output state">
@@ -372,11 +445,11 @@ function Evidence({
               <Value label="First audio">{duration(span.ttfa_ms)}</Value>
             )}
             {span.prompt_tokens != null && (
-              <Value label="Input tokens">{span.prompt_tokens}</Value>
+              <Value label={span.category === "summarizer" ? "Estimated input tokens" : "Input tokens"}>{span.prompt_tokens}</Value>
             )}
             {span.category === "composer" && span.prompt_tokens == null && <Value label="Input tokens">Not reported by this adapter</Value>}
             {span.completion_tokens != null && (
-              <Value label="Output tokens">{span.completion_tokens}</Value>
+              <Value label={span.category === "summarizer" ? "Estimated output tokens" : "Output tokens"}>{span.completion_tokens}</Value>
             )}
             {span.category === "composer" && span.completion_tokens == null && <Value label="Output tokens">Not reported by this adapter</Value>}
             {span.total_tokens != null && (
@@ -402,6 +475,27 @@ function Evidence({
               <Value label="OTel span">{span.otel_span_id}</Value>
             )}
           </dl>
+          {span.category === "summarizer" && (
+            <div className="rounded-md border p-3 text-xs">
+              <p className="font-medium">Summary lifecycle</p>
+              <p className="mt-1 text-muted-foreground">
+                {summaryApplied
+                  ? `Applied ${stamp(summaryApplied.occurred_at)}`
+                  : summaryDiagnostics.some((item) => item.code === "discarded")
+                    ? "Generated but discarded as stale"
+                    : summaryDiagnostics.some((item) => item.code === "failed")
+                      ? "Failed before application"
+                      : "Generated; application not recorded"}
+                {summaryConsumed
+                  ? ` · consumed ${stamp(summaryConsumed.occurred_at)}`
+                  : " · not yet recorded as consumed"}
+                {summaryConsumer ? ` by ${summaryConsumer.name}` : ""}
+              </p>
+              {summaryDiagnostics.filter((item) => item.code === "failed" || item.code === "discarded").map((item) => (
+                <p key={item.diagnostic_id} className="mt-1 text-destructive">{item.message}</p>
+              ))}
+            </div>
+          )}
           {span.category === "composer" ? (
             <>
               <Json label="Composer system prompt" value={composerInput?.system_prompt} />
@@ -652,6 +746,7 @@ function Evidence({
   }
   const visit = timeline.flow_visits.find((item) => item.id === selection.id);
   if (!visit) return null;
+  const visitSpan = timeline.spans.find((s) => s.id === visit.span_id);
   return (
     <>
       <CardHeader>
@@ -670,6 +765,7 @@ function Evidence({
         >
           Timing span
         </Button>
+        <PromptResolutionEvidence input={visitSpan?.input} timeline={timeline} />
         {visit.triggered_by_tool_id && (
           <Button
             variant="outline"

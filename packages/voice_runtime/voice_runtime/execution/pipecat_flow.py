@@ -31,7 +31,11 @@ def compile_pipecat_flow(
         role_parts = [
             part.strip()
             for part in (
-                snapshot.get("system_prompt"),
+                (
+                    snapshot.get("system_prompt")
+                    if app_flow.get("prompt_composition", "node_only") == "global_plus_node"
+                    else None
+                ),
                 node.get("role_message") or node.get("role_prompt"),
             )
             if isinstance(part, str) and part.strip()

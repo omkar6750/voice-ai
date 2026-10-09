@@ -257,9 +257,12 @@ export function ToolEditor({
     try {
       const nextConfig = {
         ...config,
-        parameters: schemaEdited
-          ? parseSchema(schemaText)
-          : parametersSchema(rows, config.parameters),
+        parameters:
+          config.handler === "save_referral"
+            ? (selectedHandler?.parameters ?? config.parameters)
+            : schemaEdited
+              ? parseSchema(schemaText)
+              : parametersSchema(rows, config.parameters),
         ...(config.whatsapp
           ? {
               whatsapp: {
@@ -423,6 +426,7 @@ export function ToolEditor({
                 </FieldLabel>
                 <Textarea
                   id={`tool-description-${version.id}`}
+                  readOnly={config.handler === "save_referral"}
                   value={config.description}
                   onChange={(event) =>
                     setField("description", event.target.value)
@@ -463,6 +467,20 @@ export function ToolEditor({
                       onChange={(event) => {
                         const handler = event.target.value || null;
                         setField("handler", handler);
+                        if (handler === "save_referral") {
+                          const spec = handlers.find(
+                            (item) => item.name === handler,
+                          );
+                          if (spec) {
+                            setField("description", spec.description);
+                            setField("parameters", spec.parameters ?? {});
+                            setRows(parameterRows(spec.parameters ?? {}));
+                            setSchemaText(
+                              JSON.stringify(spec.parameters, null, 2),
+                            );
+                            setSchemaEdited(true);
+                          }
+                        }
                         if (handler !== "send_whatsapp_template")
                           setField("whatsapp", null);
                         if (
@@ -658,7 +676,28 @@ export function ToolEditor({
               )}
             </>
           )}
-          {section === "parameters" && (
+          {section === "parameters" && config.handler === "save_referral" && (
+            <Field>
+              <FieldLabel>Referral arguments</FieldLabel>
+              <FieldDescription>
+                The backend fixes this schema so every referral is captured
+                consistently. Only the first name is required; other details are
+                optional. Phone and email need caller readback confirmation
+                before saving.
+              </FieldDescription>
+              <Textarea
+                readOnly
+                rows={18}
+                className="font-mono"
+                value={JSON.stringify(
+                  selectedHandler?.parameters ?? config.parameters,
+                  null,
+                  2,
+                )}
+              />
+            </Field>
+          )}
+          {section === "parameters" && config.handler !== "save_referral" && (
             <div>
               <div className="mb-2 flex items-center justify-between">
                 <div>
@@ -794,6 +833,7 @@ export function ToolEditor({
               <FieldLabel htmlFor="tool-schema">Input JSON schema</FieldLabel>
               <Textarea
                 id="tool-schema"
+                readOnly={config.handler === "save_referral"}
                 className="font-mono"
                 rows={18}
                 value={schemaText}

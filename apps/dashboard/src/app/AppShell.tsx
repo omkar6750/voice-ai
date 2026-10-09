@@ -136,6 +136,7 @@ const navigation = [
   { title: "Runs", path: "/runs", icon: Activity },
   { title: "Recordings", path: "/recordings", icon: AudioLines },
   { title: "Contacts", path: "/contacts", icon: Users },
+  { title: "Referrals", path: "/referrals", icon: Users },
   { title: "Knowledge", path: "/knowledge", icon: Database },
   { title: "Tools", path: "/tools", icon: ListTodo },
   { title: "Integrations", path: "/integrations", icon: Link2 },
@@ -292,11 +293,13 @@ export function AppShell({
   const { orgId } = useAuth();
   const appContext = useAppContext(Boolean(orgId));
   const capabilities = appContext.data?.capabilities ?? [];
-  const canCall = Boolean(supportOrganization) || capabilities.includes("browser_test");
+  const canCall =
+    Boolean(supportOrganization) || capabilities.includes("browser_test");
   const role: OrganizationAccess["role"] = supportOrganization
     ? "org:admin"
-    : appContext.data?.active_org_role ?? null;
-  const canManage = Boolean(supportOrganization) || capabilities.includes("configure");
+    : (appContext.data?.active_org_role ?? null);
+  const canManage =
+    Boolean(supportOrganization) || capabilities.includes("configure");
   const canDial = !supportOrganization && canManage;
   const access = {
     role,

@@ -12,6 +12,10 @@ _SECRET_FIELD = re.compile(
 
 
 def redact(value, secrets: Iterable[str] = ()):
+    from voice_shared.dev_visibility import is_development, redact_api_keys
+
+    if is_development():
+        return redact_api_keys(value, api_keys=tuple(secrets))
     known = tuple(
         sorted({s for s in secrets if isinstance(s, str) and len(s) >= 6}, key=len, reverse=True)
     )

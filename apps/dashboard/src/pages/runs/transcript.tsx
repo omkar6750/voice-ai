@@ -32,7 +32,12 @@ import {
   whatsappReceiptHistory,
   whatsappDeliveryStatus,
 } from "./model";
-import type { Selection, Timeline, Tool } from "./types";
+import type { Diagnostic, Selection, Timeline, Tool } from "./types";
+
+function summaryOperationId(diagnostic: Diagnostic): string | null {
+  const value = diagnostic.metadata?.summary_operation_id;
+  return typeof value === "string" && value ? value : null;
+}
 
 function ToolActivity({
   tool,
@@ -48,7 +53,9 @@ function ToolActivity({
     (event) => event.tool_invocation_id === tool.id,
   );
   const composerSpans = timeline.spans.filter(
-    (span) => span.category === "composer" && span.attributes?.tool_invocation_id === tool.id,
+    (span) =>
+      span.category === "composer" &&
+      span.attributes?.tool_invocation_id === tool.id,
   );
   return (
     <Message align="start">
@@ -71,9 +78,14 @@ function ToolActivity({
         )}
         {asyncEvents.map((event) => (
           <p key={event.id} className="text-left text-xs text-muted-foreground">
-            {event.source.replaceAll("_", " ")} · {event.status.replaceAll("_", " ")}
-            {event.delivered_at ? " · added to context" : " · not added to context"}
-            {event.consumed_at ? " · consumed by LLM" : " · not consumed by LLM"}
+            {event.source.replaceAll("_", " ")} ·{" "}
+            {event.status.replaceAll("_", " ")}
+            {event.delivered_at
+              ? " · added to context"
+              : " · not added to context"}
+            {event.consumed_at
+              ? " · consumed by LLM"
+              : " · not consumed by LLM"}
             {event.source === "whatsapp_receipt" && event.provider_message_id
               ? ` · ${event.provider_message_id}`
               : ""}
@@ -88,7 +100,8 @@ function ToolActivity({
             className="h-auto max-w-full justify-start px-2 text-left text-xs text-primary hover:bg-primary/5 hover:text-primary"
             onClick={() => onSelect({ kind: "span", id: span.id })}
           >
-            WhatsApp composer · {span.status.replaceAll("_", " ")} · {duration(span.duration_ms)}
+            WhatsApp composer · {span.status.replaceAll("_", " ")} ·{" "}
+            {duration(span.duration_ms)}
           </Button>
         ))}
         <Bubble align="start" variant="secondary">
@@ -179,8 +192,32 @@ export function Transcript({
                 const tools = timeline.tools.filter(
                   (item) => item.exchange_id === exchange.id,
                 );
-                const assistant = messages.some((item) =>
-                  ["assistant", "agent"].includes(item.role),
+                const summaryEvents = timeline.diagnostics.filter(
+                  (item) =>
+                    item.category === "context_summary" &&
+                    item.code !== "consumed" &&
+                    item.metadata?.exchange_id === exchange.id,
+                );
+                const events = [
+                  ...messages.map((message) => ({
+                    kind: "message" as const,
+                    value: message,
+                    at: message.source_at ?? message.created_at,
+                  })),
+                  ...tools.map((tool) => ({
+                    kind: "tool" as const,
+                    value: tool,
+                    at: tool.started_at,
+                  })),
+                  ...summaryEvents.map((diagnostic) => ({
+                    kind: "summary" as const,
+                    value: diagnostic,
+                    at: diagnostic.occurred_at,
+                  })),
+                ].sort(
+                  (a, b) =>
+                    Date.parse(a.at) - Date.parse(b.at) ||
+                    (a.kind === b.kind ? 0 : a.kind === "tool" ? -1 : 1),
                 );
                 return (
                   <MessageScrollerItem
@@ -201,7 +238,42 @@ export function Transcript({
                           No finalized dialogue or tool call stored.
                         </p>
                       )}
-                      {messages.map((message) => {
+                      {events.map((event) => {
+                        if (event.kind === "tool") {
+                          return (
+                            <ToolActivity
+                              key={event.value.id}
+                              tool={event.value}
+                              timeline={timeline}
+                              onSelect={onSelect}
+                            />
+                          );
+                        }
+                        if (event.kind === "summary") {
+                          const diagnostic = event.value;
+                          const operationId = summaryOperationId(diagnostic);
+                          const span = timeline.spans.find(
+                            (item) => item.id === operationId,
+                          );
+                          return (
+                            <Marker key={diagnostic.diagnostic_id} variant="separator">
+                              <MarkerContent>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  disabled={!span}
+                                  aria-label="View context summary details"
+                                  onClick={() => span && onSelect({ kind: "span", id: span.id })}
+                                >
+                                  Context summary · {diagnostic.code} · {clock(diagnostic.occurred_at)}
+                                  {span ? ` · ${duration(span.duration_ms)}` : ""}
+                                </Button>
+                              </MarkerContent>
+                            </Marker>
+                          );
+                        }
+                        const message = event.value;
                         const agent = ["assistant", "agent"].includes(
                           message.role,
                         );
@@ -254,20 +326,6 @@ export function Transcript({
                           </Message>
                         );
                       })}
-                      {tools.length > 0 && assistant && (
-                        <p className="text-left text-xs text-muted-foreground">
-                          Tool activity in this exchange. Exact message link not
-                          recorded.
-                        </p>
-                      )}
-                      {tools.map((tool) => (
-                        <ToolActivity
-                          key={tool.id}
-                          tool={tool}
-                          timeline={timeline}
-                          onSelect={onSelect}
-                        />
-                      ))}
                     </div>
                   </MessageScrollerItem>
                 );

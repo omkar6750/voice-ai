@@ -56,4 +56,24 @@ def test_removed_cadence_controls_are_ignored_for_legacy_drafts():
 def test_null_exchange_cadence_uses_current_default_for_persisted_versions():
     config = SummarizerConfig.model_validate({"every_n_exchanges": None})
 
-    assert config.every_n_exchanges == 10
+    assert config.every_n_exchanges == 4
+
+
+def test_summarizer_defaults_to_separate_gemini_model_and_compact_memory():
+    config = SummarizerConfig()
+
+    assert config.model.provider == "gemini"
+    assert config.model.max_tokens == 256
+    assert config.model.temperature == 0.1
+    assert config.every_n_exchanges == 4
+    assert config.context_window_tokens == 3072
+    assert config.output_budget_tokens == 256
+    assert config.preserve_recent_exchanges == 2
+    assert "field/value notes" in config.prompt
+
+
+@pytest.mark.parametrize(("messages", "expected"), [(4, 2), (5, 3), (6, 3)])
+def test_legacy_message_retention_is_converted_to_complete_exchanges(messages, expected):
+    config = SummarizerConfig.model_validate({"preserve_recent_messages": messages})
+
+    assert config.preserve_recent_exchanges == expected

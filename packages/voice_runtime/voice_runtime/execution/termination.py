@@ -44,9 +44,8 @@ class TerminationSummary(ConfigModel):
     @property
     def execution_status(self) -> Literal["completed", "failed"]:
         completed = (
-            self.cause in {"terminal_completed", "agent_hangup"}
-            and self.pipeline_finished_at_ns is not None
-        )
+            self.terminal_node is not None or self.cause in {"terminal_completed", "agent_hangup"}
+        ) and self.pipeline_finished_at_ns is not None
         return "completed" if completed else "failed"
 
     @property

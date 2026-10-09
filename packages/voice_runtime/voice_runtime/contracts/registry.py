@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import Field
 
 from .base import ConfigModel, Identifier
+from .referrals import REFERRAL_DESCRIPTION, referral_parameters
 
 
 class RegisteredHandlerSpec(ConfigModel):
@@ -19,6 +20,12 @@ class RegisteredHandlerSpec(ConfigModel):
 
 
 _HANDLER_SPECS: tuple[RegisteredHandlerSpec, ...] = (
+    RegisteredHandlerSpec(
+        name="save_referral",
+        description=REFERRAL_DESCRIPTION,
+        parameters=referral_parameters(),
+        category="contacts",
+    ),
     RegisteredHandlerSpec(
         name="change_node",
         description="Transfer conversation flow to another connected node in the agent flow graph.",

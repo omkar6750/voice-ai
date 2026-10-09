@@ -84,6 +84,8 @@ async def list_callbacks(
             "due_at": cb.due_at.isoformat() if cb.due_at else None,
             "timezone": cb.timezone,
             "original_phrase": cb.original_phrase,
+            "callback_mode": cb.callback_mode,
+            "scheduled_start": cb.scheduled_start.isoformat() if cb.scheduled_start else None,
             "status": cb.status,
             "automatic_attempts": cb.automatic_attempts,
             "call_id": cb.call_id,

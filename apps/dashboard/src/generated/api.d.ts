@@ -21,6 +21,126 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/orgs/{org_id}/mcp-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Tokens */
+        get: operations["list_tokens_api_v1_orgs__org_id__mcp_tokens_get"];
+        put?: never;
+        /** Create Token */
+        post: operations["create_token_api_v1_orgs__org_id__mcp_tokens_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{org_id}/mcp-tokens/connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Connection */
+        get: operations["connection_api_v1_orgs__org_id__mcp_tokens_connection_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{org_id}/mcp-tokens/{token_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke Token */
+        delete: operations["revoke_token_api_v1_orgs__org_id__mcp_tokens__token_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/debug": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Inspect Run */
+        get: operations["inspect_run_api_v1_runs__run_id__debug_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/debug/operations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Inspect Operations */
+        post: operations["inspect_operations_api_v1_runs__run_id__debug_operations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/debug/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run Config */
+        get: operations["get_run_config_api_v1_runs__run_id__debug_config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/debug/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Run Logs */
+        get: operations["read_run_logs_api_v1_runs__run_id__debug_logs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/clerk/webhook": {
         parameters: {
             query?: never;
@@ -509,6 +629,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agent-versions/{version_id}/prompt-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prompt Preview */
+        post: operations["prompt_preview_api_v1_agent_versions__version_id__prompt_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tools": {
         parameters: {
             query?: never;
@@ -773,6 +910,75 @@ export interface paths {
         head?: never;
         /** Update Contact */
         patch: operations["update_contact_api_v1_contacts__contact_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/referrals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Referrals */
+        get: operations["list_referrals_api_v1_referrals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/referrals/tool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Install Tool */
+        post: operations["install_tool_api_v1_referrals_tool_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/referrals/{referral_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Referral */
+        get: operations["referral_api_v1_referrals__referral_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Review */
+        patch: operations["review_api_v1_referrals__referral_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/referrals/{referral_id}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Promote */
+        post: operations["promote_api_v1_referrals__referral_id__promote_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/calls": {
@@ -2017,6 +2223,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/chat-conversations/turn": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mcp Turn
+         * @description Create or continue a saved-config test and return only the current turn.
+         */
+        post: operations["mcp_turn_api_v1_chat_conversations_turn_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/chat-conversations/{conversation_id}": {
         parameters: {
             query?: never;
@@ -2164,6 +2390,126 @@ export interface paths {
         put?: never;
         /** Complete */
         post: operations["complete_api_v1_runtime_artifacts_complete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{org_id}/mcp-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Tokens */
+        get: operations["list_tokens_api_orgs__org_id__mcp_tokens_get"];
+        put?: never;
+        /** Create Token */
+        post: operations["create_token_api_orgs__org_id__mcp_tokens_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{org_id}/mcp-tokens/connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Connection */
+        get: operations["connection_api_orgs__org_id__mcp_tokens_connection_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{org_id}/mcp-tokens/{token_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke Token */
+        delete: operations["revoke_token_api_orgs__org_id__mcp_tokens__token_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{run_id}/debug": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Inspect Run */
+        get: operations["inspect_run_api_runs__run_id__debug_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{run_id}/debug/operations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Inspect Operations */
+        post: operations["inspect_operations_api_runs__run_id__debug_operations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{run_id}/debug/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run Config */
+        get: operations["get_run_config_api_runs__run_id__debug_config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{run_id}/debug/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Run Logs */
+        get: operations["read_run_logs_api_runs__run_id__debug_logs_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2658,6 +3004,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agent-versions/{version_id}/prompt-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prompt Preview */
+        post: operations["prompt_preview_api_agent_versions__version_id__prompt_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tools": {
         parameters: {
             query?: never;
@@ -2922,6 +3285,75 @@ export interface paths {
         head?: never;
         /** Update Contact */
         patch: operations["update_contact_api_contacts__contact_id__patch"];
+        trace?: never;
+    };
+    "/api/referrals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Referrals */
+        get: operations["list_referrals_api_referrals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/referrals/tool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Install Tool */
+        post: operations["install_tool_api_referrals_tool_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/referrals/{referral_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Referral */
+        get: operations["referral_api_referrals__referral_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Review */
+        patch: operations["review_api_referrals__referral_id__patch"];
+        trace?: never;
+    };
+    "/api/referrals/{referral_id}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Promote */
+        post: operations["promote_api_referrals__referral_id__promote_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/calls": {
@@ -4166,6 +4598,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/chat-conversations/turn": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mcp Turn
+         * @description Create or continue a saved-config test and return only the current turn.
+         */
+        post: operations["mcp_turn_api_chat_conversations_turn_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/chat-conversations/{conversation_id}": {
         parameters: {
             query?: never;
@@ -4875,6 +5327,33 @@ export interface components {
                 [key: string]: unknown;
             } | null;
         };
+        /**
+         * ChatTestTurn
+         * @description One compact MCP interaction with a saved text-test conversation.
+         */
+        ChatTestTurn: {
+            /** Agent Version Id */
+            agent_version_id?: string | null;
+            /** Conversation Id */
+            conversation_id?: string | null;
+            /** Contact Id */
+            contact_id?: string | null;
+            /** Caller Message */
+            caller_message?: string | null;
+            /**
+             * Caller Background
+             * @default
+             */
+            caller_background: string;
+            /** Starting Node */
+            starting_node?: string | null;
+            /**
+             * Scenario
+             * @default manual
+             * @enum {string}
+             */
+            scenario: "manual" | "interested" | "hesitant" | "busy" | "mismatch" | "multilingual" | "opt_out";
+        };
         /** ChatTicket */
         ChatTicket: {
             /** Ws Url */
@@ -5205,6 +5684,17 @@ export interface components {
             /** Credential Id */
             credential_id?: string | null;
         };
+        /** ConnectionView */
+        ConnectionView: {
+            /** Url */
+            url: string;
+            /** Environment */
+            environment: string;
+            /** Env Var */
+            env_var: string;
+            /** Command */
+            command: string;
+        };
         /** ConsumptionBody */
         ConsumptionBody: {
             /** Exchange Id */
@@ -5220,7 +5710,11 @@ export interface components {
         /** ContactBody */
         ContactBody: {
             /** Name */
-            name: string;
+            name?: string | null;
+            /** First Name */
+            first_name?: string | null;
+            /** Last Name */
+            last_name?: string | null;
             /** Phone Number */
             phone_number: string;
             /** Timezone */
@@ -5240,6 +5734,10 @@ export interface components {
         ContactPatchBody: {
             /** Name */
             name?: string | null;
+            /** First Name */
+            first_name?: string | null;
+            /** Last Name */
+            last_name?: string | null;
             /** Phone Number */
             phone_number?: string | null;
             /** Timezone */
@@ -5612,6 +6110,27 @@ export interface components {
             id: string;
             status: components["schemas"]["EndpointStatus"];
         };
+        /** EndpointRecoveryResponse */
+        EndpointRecoveryResponse: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "recovered" | "available" | "blocked";
+            /** Run Id */
+            run_id?: string | null;
+            /** Reason */
+            reason: string;
+            /** Message */
+            message: string;
+            endpoint_status?: components["schemas"]["EndpointStatus"] | null;
+            /**
+             * Redialed
+             * @default false
+             * @constant
+             */
+            redialed: false;
+        };
         /** EndpointStatus */
         EndpointStatus: {
             /** Checked At */
@@ -5672,6 +6191,26 @@ export interface components {
             schema_version: 1;
             /** Records */
             records: (components["schemas"]["ExchangeRecord"] | components["schemas"]["ExchangeEnded"] | components["schemas"]["MessageRecord"] | components["schemas"]["OperationStarted"] | components["schemas"]["OperationEnded"] | components["schemas"]["FlowVisitStarted"] | components["schemas"]["FlowVisitEnded"] | components["schemas"]["ToolStarted"] | components["schemas"]["ToolEnded"] | components["schemas"]["ToolResultRecorded"] | components["schemas"]["ToolResultContextUpdated"] | components["schemas"]["ToolResultConsumed"] | components["schemas"]["ClassifierResultRecorded"] | components["schemas"]["ClassifierContextUpdated"] | components["schemas"]["ClassifierResultConsumed"] | components["schemas"]["InterruptionRecord"] | components["schemas"]["DiagnosticRecord"])[];
+        };
+        /** EvidenceSelection */
+        EvidenceSelection: {
+            /** Ids */
+            ids: string[];
+            /**
+             * Materialize Context
+             * @default false
+             */
+            materialize_context: boolean;
+            /**
+             * Sections
+             * @default [
+             *       "input",
+             *       "output",
+             *       "error",
+             *       "metrics"
+             *     ]
+             */
+            sections: ("input" | "output" | "error" | "metrics" | "context" | "related_events")[];
         };
         /** ExchangeEnded */
         ExchangeEnded: {
@@ -5759,6 +6298,11 @@ export interface components {
              * @enum {string}
              */
             value_type: "string" | "integer" | "number" | "boolean";
+            /**
+             * Default Value
+             * @default
+             */
+            default_value: string | number | boolean;
             /** Enum */
             enum?: (string | number | boolean)[] | null;
             /** Minimum */
@@ -5924,6 +6468,7 @@ export interface components {
             started_ns: number;
             /** Triggered By Tool Id */
             triggered_by_tool_id?: string | null;
+            prompt_resolution?: components["schemas"]["PromptResolution"] | null;
         };
         /** GenerateTemplateToolBody */
         GenerateTemplateToolBody: {
@@ -6797,6 +7342,93 @@ export interface components {
             /** Diagnostics */
             diagnostics?: components["schemas"]["DiagnosticInput"][];
         };
+        /** PromptCandidate */
+        PromptCandidate: {
+            /** Key */
+            key: string;
+            value: components["schemas"]["JsonValue"];
+            /** Empty Reason */
+            empty_reason?: ("empty_string" | "zero") | null;
+            source: components["schemas"]["PromptValueSource"];
+        };
+        /** PromptPreviewBody */
+        PromptPreviewBody: {
+            config: components["schemas"]["AgentConfig"];
+            /** Node Id */
+            node_id: string;
+            /** Contact Values */
+            contact_values?: {
+                [key: string]: string | number | boolean | null;
+            };
+            /** Fact Values */
+            fact_values?: {
+                [key: string]: string | number | boolean;
+            };
+        };
+        /** PromptPreviewResponse */
+        PromptPreviewResponse: {
+            /** Node Id */
+            node_id: string;
+            /** Rendered */
+            rendered: {
+                [key: string]: unknown;
+            };
+            /** Resolution */
+            resolution: components["schemas"]["PromptResolutionRecord"][];
+            /** Refresh */
+            refresh: string;
+        };
+        /** PromptResolution */
+        PromptResolution: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "recorded" | "policy_disabled";
+            /**
+             * Rendered At
+             * Format: date-time
+             */
+            rendered_at: string;
+            /** Node Key */
+            node_key: string;
+            /** Records */
+            records?: components["schemas"]["PromptResolutionRecord"][];
+        };
+        /** PromptResolutionRecord */
+        PromptResolutionRecord: {
+            /** Field */
+            field: string;
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Expression */
+            expression: string;
+            /** Fallback */
+            fallback: boolean;
+            /** Candidates */
+            candidates: components["schemas"]["PromptCandidate"][];
+            /** Selected Key */
+            selected_key?: string | null;
+            /** Value */
+            value: string;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "selected" | "all_empty";
+        };
+        /** PromptValueSource */
+        PromptValueSource: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "state" | "contact" | "default" | "record_tool" | "sample";
+            /** Invocation Id */
+            invocation_id?: string | null;
+        };
         /** ProviderCatalogResponse */
         ProviderCatalogResponse: {
             /** Providers */
@@ -6990,6 +7622,182 @@ export interface components {
             storage_error: string | null;
             /** Deletion Error */
             deletion_error: string | null;
+        };
+        /** ReferralPage */
+        ReferralPage: {
+            /** Referrals */
+            referrals: components["schemas"]["ReferralResponse"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /** ReferralPromotionResponse */
+        ReferralPromotionResponse: {
+            /**
+             * Status
+             * @default converted
+             * @constant
+             */
+            status: "converted";
+            /** Contact Id */
+            contact_id: string;
+            /** Existing Contact */
+            existing_contact: boolean;
+        };
+        /** ReferralResponse */
+        ReferralResponse: {
+            /**
+             * First Name
+             * @description Referred person's first name as given; do not use the caller's name.
+             */
+            first_name: string;
+            /**
+             * Last Name
+             * @description Surname only if supplied; otherwise omit.
+             */
+            last_name?: string | null;
+            /**
+             * Phone Number
+             * @description Caller-supplied referral phone as confirmed in readback. Do not invent a country code; omit if unknown.
+             */
+            phone_number?: string | null;
+            /**
+             * Email
+             * @description Caller-supplied referral email confirmed in readback, or omit.
+             */
+            email?: string | null;
+            /**
+             * Organization
+             * @description Organization explicitly established in this conversation, or omit.
+             */
+            organization?: string | null;
+            /**
+             * Role
+             * @description Referred person's stated role, or omit.
+             */
+            role?: string | null;
+            /**
+             * Context
+             * @description Brief factual referral reason and relevant context from the caller; no guesses.
+             */
+            context?: string | null;
+            /**
+             * Contact Details Confirmed
+             * @description True only after the caller confirms the phone/email read back once. This confirms transcription, not ownership or permission to contact.
+             * @default false
+             */
+            contact_details_confirmed: boolean;
+            /** Id */
+            id: string;
+            /** Referrer Contact Id */
+            referrer_contact_id: string | null;
+            /** Source Run Id */
+            source_run_id: string | null;
+            /** Promoted Contact Id */
+            promoted_contact_id: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending_review" | "reviewed" | "dismissed" | "converted";
+            /**
+             * Phone Verification Status
+             * @enum {string}
+             */
+            phone_verification_status: "unverified" | "verified";
+            /**
+             * Email Verification Status
+             * @enum {string}
+             */
+            email_verification_status: "unverified" | "verified";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** ReferralReview */
+        ReferralReview: {
+            /**
+             * First Name
+             * @description Referred person's first name as given; do not use the caller's name.
+             */
+            first_name: string;
+            /**
+             * Last Name
+             * @description Surname only if supplied; otherwise omit.
+             */
+            last_name?: string | null;
+            /**
+             * Phone Number
+             * @description Caller-supplied referral phone as confirmed in readback. Do not invent a country code; omit if unknown.
+             */
+            phone_number?: string | null;
+            /**
+             * Email
+             * @description Caller-supplied referral email confirmed in readback, or omit.
+             */
+            email?: string | null;
+            /**
+             * Organization
+             * @description Organization explicitly established in this conversation, or omit.
+             */
+            organization?: string | null;
+            /**
+             * Role
+             * @description Referred person's stated role, or omit.
+             */
+            role?: string | null;
+            /**
+             * Context
+             * @description Brief factual referral reason and relevant context from the caller; no guesses.
+             */
+            context?: string | null;
+            /**
+             * Contact Details Confirmed
+             * @description True only after the caller confirms the phone/email read back once. This confirms transcription, not ownership or permission to contact.
+             * @default false
+             */
+            contact_details_confirmed: boolean;
+            /**
+             * Status
+             * @default pending_review
+             * @enum {string}
+             */
+            status: "pending_review" | "reviewed" | "dismissed";
+            /**
+             * Phone Verification Status
+             * @default unverified
+             * @enum {string}
+             */
+            phone_verification_status: "unverified" | "verified";
+            /**
+             * Email Verification Status
+             * @default unverified
+             * @enum {string}
+             */
+            email_verification_status: "unverified" | "verified";
+            /**
+             * Expected Updated At
+             * Format: date-time
+             */
+            expected_updated_at: string;
+        };
+        /** ReferralToolResponse */
+        ReferralToolResponse: {
+            /** Tool Id */
+            tool_id: string;
+            /** Tool Version Id */
+            tool_version_id: string;
+            /**
+             * Name
+             * @default save_referral
+             */
+            name: string;
         };
         /**
          * RegisteredHandlerSpec
@@ -7277,10 +8085,10 @@ export interface components {
             provider: "sarvam" | "gnani";
             /**
              * Model
-             * @default saaras:v3
+             * @default saaras:v3-realtime
              * @enum {string}
              */
-            model: "saaras:v3" | "saaras:v4" | "gnani-prisma-v2.5";
+            model: "saaras:v3-realtime" | "saaras:v4" | "saaras:v3" | "gnani-prisma-v2.5";
             /**
              * Language
              * @default en-IN
@@ -7400,30 +8208,30 @@ export interface components {
             node_exits?: string[];
             /**
              * Every N Exchanges
-             * @default 10
+             * @default 4
              */
             every_n_exchanges: number;
             model?: components["schemas"]["LLMConfig"];
             /**
              * Prompt
-             * @default Summarize the supplied history faithfully; preserve decisions and facts.
+             * @default Write compact field/value notes for the next agent turn. Keep caller-confirmed business, current process and pain, desired outcome, constraints, objections, and commitments or completed tool outcomes. Preserve exact names, numbers, and dates. Omit unknown fields.
              */
             prompt: string;
             /**
              * Context Window Tokens
-             * @default 8192
+             * @default 3072
              */
             context_window_tokens: number;
             /**
              * Output Budget Tokens
-             * @default 512
+             * @default 256
              */
             output_budget_tokens: number;
             /**
-             * Preserve Recent Messages
-             * @default 6
+             * Preserve Recent Exchanges
+             * @default 2
              */
-            preserve_recent_messages: number;
+            preserve_recent_exchanges: number;
         };
         /** SummaryBody */
         SummaryBody: {
@@ -7740,6 +8548,49 @@ export interface components {
             consumed_at: string | null;
             /** Consumed Exchange Id */
             consumed_exchange_id: string | null;
+        };
+        /** TokenCreate */
+        TokenCreate: {
+            /** Name */
+            name: string;
+            /**
+             * Days
+             * @default 30
+             * @enum {integer}
+             */
+            days: 7 | 30 | 90;
+        };
+        /** TokenIssued */
+        TokenIssued: {
+            /** Token */
+            token: string;
+            metadata: components["schemas"]["TokenView"];
+            connection: components["schemas"]["ConnectionView"];
+        };
+        /** TokenView */
+        TokenView: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** User Id */
+            user_id: string;
+            /** Environment */
+            environment: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Revoked At */
+            revoked_at: string | null;
+            /** Last Used At */
+            last_used_at: string | null;
         };
         /** ToolBinding */
         ToolBinding: {
@@ -8462,6 +9313,288 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    list_tokens_api_v1_orgs__org_id__mcp_tokens_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenView"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_token_api_v1_orgs__org_id__mcp_tokens_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TokenCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenIssued"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    connection_api_v1_orgs__org_id__mcp_tokens_connection_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_token_api_v1_orgs__org_id__mcp_tokens__token_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token_id: string;
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inspect_run_api_v1_runs__run_id__debug_get: {
+        parameters: {
+            query?: {
+                after?: number;
+                max_chars?: number;
+                expected_hash?: string | null;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: components["schemas"]["JsonValue"];
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inspect_operations_api_v1_runs__run_id__debug_operations_post: {
+        parameters: {
+            query?: {
+                after?: number;
+                max_chars?: number;
+                expected_hash?: string | null;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvidenceSelection"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: components["schemas"]["JsonValue"];
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_config_api_v1_runs__run_id__debug_config_get: {
+        parameters: {
+            query?: {
+                section?: string | null;
+                after?: number;
+                max_chars?: number;
+                expected_hash?: string | null;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: components["schemas"]["JsonValue"];
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_run_logs_api_v1_runs__run_id__debug_logs_get: {
+        parameters: {
+            query?: {
+                severity?: "all" | "warning" | "error";
+                after?: number;
+                limit?: number;
+                operation_id?: string | null;
+                artifact_id?: string | null;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: components["schemas"]["JsonValue"];
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -9503,6 +10636,41 @@ export interface operations {
             };
         };
     };
+    prompt_preview_api_v1_agent_versions__version_id__prompt_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromptPreviewBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptPreviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     tools_api_v1_tools_get: {
         parameters: {
             query?: {
@@ -10119,6 +11287,158 @@ export interface operations {
             };
         };
     };
+    list_referrals_api_v1_referrals_get: {
+        parameters: {
+            query?: {
+                status?: ("pending_review" | "reviewed" | "dismissed" | "converted") | null;
+                referrer_contact_id?: string | null;
+                source_run_id?: string | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferralPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    install_tool_api_v1_referrals_tool_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferralToolResponse"];
+                };
+            };
+        };
+    };
+    referral_api_v1_referrals__referral_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                referral_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferralResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_api_v1_referrals__referral_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                referral_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferralReview"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferralResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    promote_api_v1_referrals__referral_id__promote_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                referral_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferralPromotionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_calls_api_v1_calls_get: {
         parameters: {
             query?: never;
@@ -10654,9 +11974,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["EndpointRecoveryResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13002,6 +14320,39 @@ export interface operations {
             };
         };
     };
+    mcp_turn_api_v1_chat_conversations_turn_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatTestTurn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     detail_api_v1_chat_conversations__conversation_id__get: {
         parameters: {
             query?: never;
@@ -13278,6 +14629,288 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_tokens_api_orgs__org_id__mcp_tokens_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenView"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_token_api_orgs__org_id__mcp_tokens_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TokenCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenIssued"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    connection_api_orgs__org_id__mcp_tokens_connection_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_token_api_orgs__org_id__mcp_tokens__token_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token_id: string;
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inspect_run_api_runs__run_id__debug_get: {
+        parameters: {
+            query?: {
+                after?: number;
+                max_chars?: number;
+                expected_hash?: string | null;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: components["schemas"]["JsonValue"];
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inspect_operations_api_runs__run_id__debug_operations_post: {
+        parameters: {
+            query?: {
+                after?: number;
+                max_chars?: number;
+                expected_hash?: string | null;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvidenceSelection"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: components["schemas"]["JsonValue"];
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_config_api_runs__run_id__debug_config_get: {
+        parameters: {
+            query?: {
+                section?: string | null;
+                after?: number;
+                max_chars?: number;
+                expected_hash?: string | null;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: components["schemas"]["JsonValue"];
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_run_logs_api_runs__run_id__debug_logs_get: {
+        parameters: {
+            query?: {
+                severity?: "all" | "warning" | "error";
+                after?: number;
+                limit?: number;
+                operation_id?: string | null;
+                artifact_id?: string | null;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: components["schemas"]["JsonValue"];
+                    };
                 };
             };
             /** @description Validation Error */
@@ -14328,6 +15961,41 @@ export interface operations {
             };
         };
     };
+    prompt_preview_api_agent_versions__version_id__prompt_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromptPreviewBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptPreviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     tools_api_tools_get: {
         parameters: {
             query?: {
@@ -14944,6 +16612,158 @@ export interface operations {
             };
         };
     };
+    list_referrals_api_referrals_get: {
+        parameters: {
+            query?: {
+                status?: ("pending_review" | "reviewed" | "dismissed" | "converted") | null;
+                referrer_contact_id?: string | null;
+                source_run_id?: string | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferralPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    install_tool_api_referrals_tool_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferralToolResponse"];
+                };
+            };
+        };
+    };
+    referral_api_referrals__referral_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                referral_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferralResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_api_referrals__referral_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                referral_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferralReview"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferralResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    promote_api_referrals__referral_id__promote_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                referral_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferralPromotionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_calls_api_calls_get: {
         parameters: {
             query?: never;
@@ -15479,9 +17299,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["EndpointRecoveryResponse"];
                 };
             };
             /** @description Validation Error */
@@ -17814,6 +19632,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChatSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mcp_turn_api_chat_conversations_turn_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatTestTurn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
