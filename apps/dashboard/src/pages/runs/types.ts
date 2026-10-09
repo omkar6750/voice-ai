@@ -18,6 +18,7 @@ export type RunSummary = {
   contact_name?: string | null;
   contact_phone?: string | null;
   status: string;
+  call_outcome?: string | null;
   created_at: string;
   started_at: string | null;
   ended_at: string | null;
@@ -29,6 +30,7 @@ export type RunDetail = RunSummary & {
   contact_snapshot: Record<string, unknown> | null;
   call_id: string | null;
   error: string | null;
+  termination?: Record<string, unknown> | null;
 };
 
 export type Exchange = {

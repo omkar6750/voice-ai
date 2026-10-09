@@ -75,3 +75,5 @@ nonduplicating run evidence contract. Deployment: [MCP access](docs/deployment/M
 facts per run, resolve rightmost nonempty nonboolean alternatives on node entry,
 and retain selection/provenance on the node span. Read-only editor previews use
 the same resolver. No agent publication or provider-setting changes.
+
+- [ADR-0059](docs/adr/ADR-0059-call-outcomes-and-voicemail.md): retained modem URCs, conservative release causes, busy/no-answer labels and bounded Pipecat voicemail detection.

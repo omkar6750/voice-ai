@@ -25,6 +25,9 @@ class ModemStatus:
     usb_audio_supported: bool = False
     usb_audio_active: bool = False
     available_transports: tuple[str, ...] = field(default_factory=tuple)
+    voice_registration_known: bool = False
+    data_registration_known: bool = False
+    sim_status_known: bool = False
     last_error: str | None = None
     checked_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -130,6 +133,13 @@ class ModemStatusReader:
             serial_connected=serial_connected,
             sim_ready=sim_ready,
             voice_registered=voice.registered,
+            voice_registration_known=any(
+                line.startswith("+CREG:") for line in results.get("AT+CREG?", [])
+            ),
+            data_registration_known=any(
+                line.startswith("+CEREG:") for line in results.get("AT+CEREG?", [])
+            ),
+            sim_status_known=any(line.startswith("+CPIN:") for line in results.get("AT+CPIN?", [])),
             data_registered=data.registered,
             packet_attached=packet_attached,
             can_make_call=can_make_call,

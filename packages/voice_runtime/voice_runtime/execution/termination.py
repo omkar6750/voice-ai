@@ -14,6 +14,15 @@ from pydantic import Field
 from voice_runtime.contracts.base import ConfigModel
 
 TerminationCause = Literal[
+    "dial_failed",
+    "connection_timeout",
+    "busy",
+    "no_answer",
+    "call_rejected",
+    "voicemail",
+    "modem_failure",
+    "remote_hangup_likely",
+    "local_hangup",
     "terminal_completed",
     "agent_hangup",
     "caller_hangup",
@@ -39,6 +48,8 @@ class TerminationSummary(ConfigModel):
     terminal_node: str | None = None
     playback_status: Literal["unknown", "speaking", "drained", "interrupted"] = "unknown"
     playback_source: str | None = None
+    transport_evidence: dict = Field(default_factory=dict)
+    answer_detection: dict = Field(default_factory=dict)
     cleanup_status: Literal["unknown", "confirmed", "uncertain"] = "unknown"
 
     @property
@@ -52,7 +63,12 @@ class TerminationSummary(ConfigModel):
     def evidence_status(self) -> Literal["completed", "interrupted", "failed"]:
         if self.execution_status == "completed":
             return "completed"
-        if self.cause in {"caller_hangup", "disconnect_unknown", "cancelled"}:
+        if self.cause in {
+            "caller_hangup",
+            "disconnect_unknown",
+            "remote_hangup_likely",
+            "cancelled",
+        }:
             return "interrupted"
         return "failed"
 

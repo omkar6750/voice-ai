@@ -225,7 +225,7 @@ export function RunsPage() {
                     {stamp(run.started_at ?? run.created_at)}
                   </TableCell>
                   <TableCell>
-                    <StatusBadge status={run.status} />
+                    <StatusBadge status={run.status} outcome={run.call_outcome} />
                     {isActive(run.status) && (
                       <span className="sr-only">Active</span>
                     )}

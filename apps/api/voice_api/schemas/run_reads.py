@@ -15,6 +15,7 @@ class RunSummaryResponse(BaseModel):
     contact_name: str | None
     endpoint_id: str | None
     status: str
+    call_outcome: str | None = None
     created_at: datetime
     started_at: datetime | None
     ended_at: datetime | None

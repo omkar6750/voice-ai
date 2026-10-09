@@ -1,6 +1,12 @@
 import { Badge } from "@/components/ui/badge";
 
-export function StatusBadge({ status }: { status: string }) {
+export function StatusBadge({
+  status,
+  outcome,
+}: {
+  status: string;
+  outcome?: string | null;
+}) {
   const variant =
     status === "failed" || status === "uncertain"
       ? "destructive"
@@ -9,7 +15,13 @@ export function StatusBadge({ status }: { status: string }) {
         : "secondary";
   return (
     <Badge variant={variant} className="capitalize">
-      {status.replaceAll("_", " ")}
+      {(status === "failed" &&
+      ["busy", "no_answer", "call_rejected", "voicemail"].includes(
+        outcome ?? "",
+      )
+        ? outcome!
+        : status
+      ).replaceAll("_", " ")}
     </Badge>
   );
 }

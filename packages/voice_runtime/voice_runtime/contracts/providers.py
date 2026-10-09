@@ -306,6 +306,8 @@ def runtime_provider_capability(provider: str) -> dict:
 
 
 class CallLimits(ConfigModel):
+    voicemail_detection_enabled: bool = True
+    voicemail_detection_timeout_secs: float = Field(default=5.0, gt=0, le=30, allow_inf_nan=False)
     max_duration_secs: int = Field(default=600, gt=0)
     idle_timeout_secs: int = Field(default=60, gt=0)
     interruptions_enabled: bool = True

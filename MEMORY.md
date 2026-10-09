@@ -149,3 +149,7 @@ fallback insertion and span-linked resolution/provenance evidence. Historical
 configurations are not rewritten; no database migration or saved-agent edits.
 See ADR-0058 and docs/deployment/PROMPT-FALLBACKS.md. Real provider/modem
 acceptance remains operator-run.
+
+## 2026-10-09 — Call release evidence
+
+Isolated call-outcome layer retains observed/redacted modem URCs in diagnostic evidence, freezes CEER before remote-disconnect cleanup, keeps missing registration readings unknown, and exposes busy/no-answer/rejection/voicemail outcomes. Phone-only Pipecat voicemail detection uses the existing main credential with a bounded five-second fail-open; browser/text skip it. No agent rows, real calls or messages changed. See ADR-0059. Hardware/carrier acceptance remains operator-run.

@@ -120,6 +120,7 @@ class NativePipelineHost(
         self._flow_nodes_enriched = False
         self._compiled_global_functions: list[FlowsFunctionSchema] = []
         self._snapshot: dict = {}
+        self.answer_detection = None
         self._exchange_count = 0
         self._classifier_cadence_running = False
         self._background_tool_tasks: set[asyncio.Task] = set()
@@ -783,6 +784,28 @@ class NativePipelineHost(
             async def on_summary_applied(_assistant, _summarizer, _event):
                 self._summary_exchanges_since_apply = 0
 
+        if (
+            text_output is None
+            and not enable_rtvi
+            and snapshot.get("call_limits", {}).get("voicemail_detection_enabled", True)
+        ):
+            from voice_runtime.execution.voicemail import AnswerDetection
+
+            detection_llm = build_llm_service(
+                self.settings,
+                {**llm_config, "temperature": 0, "max_tokens": 16, "fallback": None},
+                stage="llm",
+            )
+            self.answer_detection = AnswerDetection(
+                self,
+                detection_llm,
+                timeout_seconds=snapshot.get("call_limits", {}).get(
+                    "voicemail_detection_timeout_secs", 5
+                ),
+                provider=llm_config["provider"],
+                model=llm_config["model"],
+            )
+        detection = self.answer_detection
         pipeline = Pipeline(
             [
                 aggregators.user(),
@@ -796,10 +819,12 @@ class NativePipelineHost(
             else [
                 transport.input(),
                 stt,
+                *([detection.detector.detector()] if detection else []),
                 aggregators.user(),
                 _CallerTurnContextEventProcessor(self._deliver_pending_context_events, context),
                 llm,
                 tts,
+                *([detection.detector.gate()] if detection else []),
                 transport.output(),
                 aggregators.assistant(),
             ]
@@ -829,9 +854,12 @@ class NativePipelineHost(
                 await summary_coordinator.context_consumed(messages, exchange_id, operation_id)
 
             self.observer.context_event_consumer = context_event_consumer
+        from voice_runtime.execution.voicemail import AnswerDetectionObserver
+
         self.worker = PipelineWorker(
             pipeline,
             observers=[self.observer]
+            + ([AnswerDetectionObserver(detection)] if detection else [])
             + ([self.capture] if self.capture else [])
             + self._local_observers(),
             enable_rtvi=enable_rtvi,

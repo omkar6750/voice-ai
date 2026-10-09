@@ -5181,6 +5181,16 @@ export interface components {
         /** CallLimits */
         CallLimits: {
             /**
+             * Voicemail Detection Enabled
+             * @default true
+             */
+            voicemail_detection_enabled: boolean;
+            /**
+             * Voicemail Detection Timeout Secs
+             * @default 5
+             */
+            voicemail_detection_timeout_secs: number;
+            /**
              * Max Duration Secs
              * @default 600
              */
@@ -7980,6 +7990,8 @@ export interface components {
             endpoint_id: string | null;
             /** Status */
             status: string;
+            /** Call Outcome */
+            call_outcome?: string | null;
             /**
              * Created At
              * Format: date-time

@@ -517,6 +517,8 @@ class Session:
                 except Exception as exc:
                     self.termination.summary.cleanup_status = "uncertain"
                     exception_event("voice-runtime", exc)
+                if self.driver and isinstance(getattr(self.driver, "call_outcome", None), dict):
+                    self.termination.summary.transport_evidence = self.driver.call_outcome
                 if self.text and self.text.pending_tasks:
                     await asyncio.gather(*tuple(self.text.pending_tasks), return_exceptions=True)
                 self.request.credentials.clear()

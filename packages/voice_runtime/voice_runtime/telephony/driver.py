@@ -9,7 +9,7 @@ from typing import Protocol
 from voice_runtime.diagnostics import modem_status_metadata
 from voice_runtime.execution.exchange import ExchangeTracker
 from voice_runtime.telephony.base import CallState
-from voice_runtime.telephony.session import TelephonySession
+from voice_runtime.telephony.session import Sim7600ConnectionTimeout, TelephonySession
 from voice_runtime.telephony.sim7600 import Sim7600Modem
 
 
@@ -54,14 +54,31 @@ class Sim7600CallDriver:
         self.session = None
         self.dial_attempted = False
         self.trace = None
+        self.tracker = None
+        self.call_outcome = None
+        self._outcome_recorded = False
 
     async def prepare(self, snapshot: dict, tracker: ExchangeTracker) -> None:
+        self.tracker = tracker
         endpoint = snapshot["_resolved"]["endpoint"]
         self.modem = self.modem_factory(
             endpoint["at_port"], endpoint["baudrate"], command_timeout=endpoint["at_timeout_secs"]
         )
         self.modem.trace = self.trace
         await self.modem.open()
+        if isinstance(self.modem, Sim7600Modem):
+
+            def record_event(event):
+                tracker.diagnostic(
+                    severity="info",
+                    category="modem_event",
+                    source="modem",
+                    code="modem_call_observation",
+                    message="Modem call observation",
+                    metadata=event,
+                )
+
+            self.modem.set_event_sink(record_event)
         status = await self.modem.status()
         if status.active_call:
             await self.modem.close()
@@ -80,12 +97,54 @@ class Sim7600CallDriver:
             raise RuntimeError("Modem is not ready for voice calling")
         await self.modem.ensure_pcm_format(snapshot["audio"]["sample_rate"])
         self.session = TelephonySession(self.modem, connect_timeout=self.connect_timeout)
+        if isinstance(self.modem, Sim7600Modem):
+            await self.modem.start_monitoring(record_event)
         await self.host.prepare(snapshot, tracker)
 
     async def call(self, destination: str) -> dict:
         self.dial_attempted = True
-        await self.session.start_call(destination)
+        try:
+            await self.session.start_call(destination)
+        except Exception as exc:
+            evidence = await self._capture_outcome()
+            reason = evidence["reason"] if evidence else "disconnect_unknown"
+            if reason == "disconnect_unknown" and isinstance(exc, Sim7600ConnectionTimeout):
+                reason = "connection_timeout"
+            if reason in {
+                "busy",
+                "no_answer",
+                "call_rejected",
+                "dial_failed",
+                "network_failure",
+                "modem_failure",
+                "connection_timeout",
+            }:
+                from voice_runtime.execution.termination import CallTermination
+
+                termination = getattr(self.host, "termination", None) or CallTermination()
+                termination.request(reason)
+                termination.summary.transport_evidence = evidence or {}
+                termination.pipeline_finished()
+                return {"termination": termination.snapshot()}
+            raise
         return await self.host.converse(self.modem)
+
+    async def _capture_outcome(self):
+        if not isinstance(self.modem, Sim7600Modem):
+            return None
+        self.call_outcome = await self.modem.capture_release()
+        if not self._outcome_recorded and self.tracker is not None:
+            self._outcome_recorded = True
+            self.tracker.diagnostic(
+                severity="info",
+                category="call_termination",
+                source="modem",
+                code=self.call_outcome["reason"],
+                message="Captured modem call release evidence",
+                uncertain=self.call_outcome["confidence"] != "confirmed",
+                metadata=self.call_outcome,
+            )
+        return self.call_outcome
 
     async def _verify_release(self):
         """Keep ownership until idle stays stable; cancel calls that appear late."""
@@ -129,6 +188,28 @@ class Sim7600CallDriver:
             self.trace.record("cleanup_started", component="telephony", source="cleanup")
         try:
             if self.modem:
+                # Read release cause before any cleanup hangup can replace it.
+                try:
+                    if (
+                        self.dial_attempted
+                        and isinstance(self.modem, Sim7600Modem)
+                        and (
+                            self.modem._disconnect_observed
+                            or self.modem._last_call_state
+                            in (CallState.IDLE, CallState.DISCONNECTED)
+                        )
+                    ):
+                        await self._capture_outcome()
+                except Exception:
+                    if self.tracker is not None:
+                        self.tracker.diagnostic(
+                            severity="warning",
+                            category="call_termination",
+                            source="modem",
+                            code="release_capture_failed",
+                            message="Modem release evidence unavailable",
+                            uncertain=True,
+                        )
                 try:
                     if self.session and self.dial_attempted:
                         # A briefly empty call list must not skip cancellation of an outgoing dial.
@@ -137,6 +218,19 @@ class Sim7600CallDriver:
                     from voice_runtime.safe_logs import error_category as classify
 
                     error_category = classify(exc)
+                if self.dial_attempted and isinstance(self.modem, Sim7600Modem):
+                    try:
+                        await self._capture_outcome()
+                    except Exception:
+                        if self.tracker is not None:
+                            self.tracker.diagnostic(
+                                severity="warning",
+                                category="call_termination",
+                                source="modem",
+                                code="release_capture_failed",
+                                message="Modem release evidence unavailable",
+                                uncertain=True,
+                            )
                 confirmed, final_state, verification_error = await self._verify_release()
                 error_category = error_category or verification_error
         finally:
