@@ -10,6 +10,10 @@ import {
   Braces,
   Check,
   Cpu,
+  CalendarDays,
+  MessageCircle,
+  Phone,
+  ScanLine,
   Code2,
   Layers,
   Menu,
@@ -123,10 +127,23 @@ function Header() {
             <Code2 className="size-5" />
           </a>
           <Show when="signed-out">
-            <SignInButton mode="modal" forceRedirectUrl="/"><Button variant="ghost" className="rounded-none">Sign in</Button></SignInButton>
-            <SignUpButton mode="modal" forceRedirectUrl="/"><Button className="rounded-none">Sign up</Button></SignUpButton>
+            <SignInButton mode="modal" forceRedirectUrl="/">
+              <Button variant="ghost" className="rounded-none">
+                Sign in
+              </Button>
+            </SignInButton>
+            <SignUpButton mode="modal" forceRedirectUrl="/">
+              <Button className="rounded-none">Sign up</Button>
+            </SignUpButton>
           </Show>
-          <Show when="signed-in"><Button asChild className="rounded-none"><Link to="/runs">Dashboard<ArrowUpRight data-icon="inline-end" /></Link></Button></Show>
+          <Show when="signed-in">
+            <Button asChild className="rounded-none">
+              <Link to="/runs">
+                Dashboard
+                <ArrowUpRight data-icon="inline-end" />
+              </Link>
+            </Button>
+          </Show>
           <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
             <SheetTrigger asChild>
               <Button
@@ -278,25 +295,42 @@ function Architecture() {
 
 const capabilities = [
   {
-    icon: Workflow,
-    title: "Conversations with a plan.",
-    text: "Compose agent flows, bind tools, tune prompts and test a version before publishing.",
-    tags: "FLOWS / PROMPTS / VERSIONING",
+    icon: Phone,
+    title: "Real voice calling",
+    text: "Connect cloud calls through Twilio, test in your browser, or use SIM7600 for local cellular testing.",
+    tags: "TWILIO / BROWSER / SIM7600",
   },
   {
-    icon: AudioLines,
-    title: "Sales is just the beginning.",
-    text: "Qualify leads, capture referrals, route callbacks and connect follow-up actions. Build support and scheduling workflows around your tools.",
-    tags: "QUALIFY / CAPTURE / FOLLOW UP",
+    icon: MessageCircle,
+    title: "WhatsApp during calls",
+    text: "Compose contextual follow-ups from the conversation and inspect message actions alongside the call transcript.",
+    tags: "COMPOSE / FOLLOW UP / TRACE",
+  },
+  {
+    icon: CalendarDays,
+    title: "Calendar booking",
+    text: "Check availability, route to an eligible team member and connect booking actions to the conversation.",
+    tags: "AVAILABILITY / SCHEDULING / TOOLS",
+  },
+  {
+    icon: ScanLine,
+    title: "Fast lead classification",
+    text: "Use JEV AI by TypeSafe AI for fast, structured lead classification. Capture intent and qualify leads inside your agent workflow.",
+    tags: "JEV AI / TYPESAFE AI / QUALIFICATION",
+  },
+  {
+    icon: Workflow,
+    title: "Your tools via MCP",
+    text: "Connect MCP servers and API actions. Give agents the tools and knowledge they need to take useful next steps.",
+    tags: "MCP / APIs / KNOWLEDGE",
   },
   {
     icon: ShieldCheck,
-    title: "A workspace for every team.",
-    text: "Clerk Organizations define tenant boundaries. Membership checks and encrypted action secrets keep access under control.",
+    title: "Multi-tenant workspaces",
+    text: "Manage organizations, agents and team access with Clerk Organizations, membership checks and encrypted action secrets.",
     tags: "ORGANIZATIONS / ROLES / VAULT",
   },
 ];
-
 export default function LandingPage() {
   return (
     <div
@@ -391,6 +425,31 @@ export default function LandingPage() {
             <span>Real Runs UI / Fictional demo data</span>
             <span>No customer records or credentials</span>
           </div>
+          <div className="mt-12 grid gap-8">
+            {["waterfall", "transcript"].map((view) => (
+              <figure
+                key={view}
+                className="overflow-hidden border border-border bg-card"
+              >
+                <img
+                  src={`/landing/runs-${view}.webp`}
+                  alt={`Runs ${view} with provider spans and tool evidence`}
+                  loading="lazy"
+                  decoding="async"
+                  width={view === "waterfall" ? 1828 : 1706}
+                  height={view === "waterfall" ? 860 : 922}
+                  className="h-auto w-full"
+                />
+                <figcaption className="p-6 font-mono text-xs text-muted-foreground">
+                  Runs / {view} · Edited product screenshot · Anonymized data ·
+                  Illustrative completed runs
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+          <h2 className="mt-16 text-4xl font-medium tracking-tight md:text-5xl">
+            End-to-end voice agents for your business.
+          </h2>
           <div className="mt-14 grid gap-10 md:grid-cols-3">
             {capabilities.map(({ icon: Icon, title, text, tags }) => (
               <article key={title} className="border-t border-border pt-7">
@@ -467,17 +526,18 @@ export default function LandingPage() {
           <FadeContent>
             <figure>
               <img
-                src="/landing/waveshare-reference.jpg"
-                width="1536"
-                height="1024"
-                alt="Original Waveshare SIM7600G-H M.2 4G HAT manufacturer photograph"
+                src="/landing/waveshare-waves.webp"
+                width="1448"
+                height="1086"
+                alt="Waveshare SIM7600 modem floating above soft blue signal waves"
                 loading="lazy"
                 className="w-full"
               />
               <figcaption className="mt-4 border-t border-border pt-4 font-mono text-[10px] leading-6 text-muted-foreground">
                 WAVESHARE SIM7600G-H M.2 4G HAT
                 <br />
-                Original manufacturer photograph · Used for local call testing.
+                Manufacturer photograph with edited background · Local call
+                testing.
               </figcaption>
             </figure>
           </FadeContent>
