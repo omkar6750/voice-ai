@@ -19,6 +19,7 @@ import {
   whatsappDeliveryStatus,
 } from "./model";
 import type { RunDetail, Selection, Timeline } from "./types";
+import { callOutcomeLabel } from "./status";
 
 export function Value({
   label,
@@ -115,6 +116,48 @@ function Evidence({
   const turnDecisions = diagnostics.filter(
     (diagnostic) => diagnostic.category === "turn_decision",
   );
+  const termination = run.termination ?? {};
+  const transportEvidence =
+    termination.transport_evidence &&
+    typeof termination.transport_evidence === "object"
+      ? (termination.transport_evidence as Record<string, unknown>)
+      : {};
+  const registration =
+    transportEvidence.registration &&
+    typeof transportEvidence.registration === "object"
+      ? (transportEvidence.registration as Record<string, unknown>)
+      : {};
+  const terminationCause =
+    typeof termination.cause === "string"
+      ? termination.cause
+      : run.call_outcome;
+  const outcome =
+    terminationCause === "unknown" || terminationCause === "disconnect_unknown"
+      ? typeof transportEvidence.reason === "string"
+        ? transportEvidence.reason
+        : terminationCause
+      : terminationCause;
+  const outcomeMessages: Record<string, string> = {
+    remote_hangup_likely:
+      "The modem release reason is consistent with the other side ending the call, but the network evidence is incomplete.",
+    local_hangup:
+      "A local hangup command was recorded before the modem reported the disconnect.",
+    network_failure: "The modem reported a network-side call failure.",
+    modem_failure: "The modem or its serial connection reported a failure.",
+    evidence_failure:
+      "Execution stopped because call evidence could not be saved. Unsaved evidence remains available for recovery.",
+    execution_lease_expired:
+      "Execution stopped because the runtime could no longer renew its ownership lease.",
+    duration_limit: "The call reached its configured duration limit.",
+    disconnect_unknown:
+      "The call disconnected, but the recorded evidence cannot attribute the cause.",
+  };
+  const outcomeMessage =
+    outcome === "remote_hangup"
+      ? `No local hangup or modem/network fault was recorded. The modem was voice-registered at release${typeof registration.rssi === "number" ? ` (signal ${registration.rssi}/31)` : ""}; classified as the other side ending the call.`
+      : outcome
+        ? (outcomeMessages[outcome] ?? null)
+        : null;
   if (selection.kind === "run")
     return (
       <>
@@ -127,6 +170,9 @@ function Evidence({
             <Value label="Run">{run.id}</Value>
             <Value label="Channel">{run.channel}</Value>
             <Value label="State">{run.status}</Value>
+            {outcome && (
+              <Value label="Call ended">{callOutcomeLabel(outcome)}</Value>
+            )}
             <Value label="Started">{stamp(run.started_at)}</Value>
             <Value label="Ended">{stamp(run.ended_at)}</Value>
             <Value label="Call">
@@ -134,8 +180,29 @@ function Evidence({
             </Value>
             <Value label="Hash">{run.config_hash ?? "Not recorded"}</Value>
           </dl>
-          <Json label="Call termination evidence" value={run.termination ?? undefined} />
-          <Json label="Observed modem URCs (sensitive payloads redacted)" value={diagnostics.filter((d) => d.category === "modem_event")} />
+          {outcomeMessage && (
+            <p className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
+              {outcomeMessage}
+            </p>
+          )}
+          {run.termination && (
+            <details className="rounded-md border px-3 py-2">
+              <summary className="cursor-pointer text-xs font-medium">
+                Technical call-end evidence
+              </summary>
+              <div className="mt-3 flex flex-col gap-3">
+                <Json label="Termination snapshot" value={run.termination} />
+                {diagnostics.some((d) => d.category === "modem_event") && (
+                  <Json
+                    label="Observed modem events"
+                    value={diagnostics.filter(
+                      (d) => d.category === "modem_event",
+                    )}
+                  />
+                )}
+              </div>
+            </details>
+          )}
           {run.error && <Json label="Run error" value={run.error} />}
           {issues.length ? (
             <section className="flex flex-col gap-2">
@@ -380,31 +447,51 @@ function Evidence({
     const span = timeline.spans.find((item) => item.id === selection.id);
     if (!span) return null;
     const classifierResults = classifierResultsFor(timeline, span);
-    const composerInput = span.category === "composer" && span.input && typeof span.input === "object" && !Array.isArray(span.input)
-      ? span.input as Record<string, unknown> : null;
-    const composerTool = span.category === "composer"
-      ? timeline.tools.find((tool) => tool.id === span.attributes?.tool_invocation_id)
-      : null;
-    const composerDiagnostics = span.category === "composer"
-      ? diagnostics.filter((item) => item.metadata?.operation_id === span.id)
-      : [];
-    const summaryDiagnostics = span.category === "summarizer"
-      ? diagnostics.filter(
-          (item) => item.metadata?.summary_operation_id === span.id,
-        )
-      : [];
-    const summaryApplied = summaryDiagnostics.find((item) => item.code === "applied");
-    const summaryConsumed = summaryDiagnostics.find((item) => item.code === "consumed");
-    const summaryConsumerId = summaryConsumed?.metadata?.consuming_llm_operation_id;
-    const summaryConsumer = typeof summaryConsumerId === "string"
-      ? timeline.spans.find((item) => item.id === summaryConsumerId)
-      : null;
+    const composerInput =
+      span.category === "composer" &&
+      span.input &&
+      typeof span.input === "object" &&
+      !Array.isArray(span.input)
+        ? (span.input as Record<string, unknown>)
+        : null;
+    const composerTool =
+      span.category === "composer"
+        ? timeline.tools.find(
+            (tool) => tool.id === span.attributes?.tool_invocation_id,
+          )
+        : null;
+    const composerDiagnostics =
+      span.category === "composer"
+        ? diagnostics.filter((item) => item.metadata?.operation_id === span.id)
+        : [];
+    const summaryDiagnostics =
+      span.category === "summarizer"
+        ? diagnostics.filter(
+            (item) => item.metadata?.summary_operation_id === span.id,
+          )
+        : [];
+    const summaryApplied = summaryDiagnostics.find(
+      (item) => item.code === "applied",
+    );
+    const summaryConsumed = summaryDiagnostics.find(
+      (item) => item.code === "consumed",
+    );
+    const summaryConsumerId =
+      summaryConsumed?.metadata?.consuming_llm_operation_id;
+    const summaryConsumer =
+      typeof summaryConsumerId === "string"
+        ? timeline.spans.find((item) => item.id === summaryConsumerId)
+        : null;
     return (
       <>
         <CardHeader>
-          <CardTitle>{span.category === "composer" ? "WhatsApp composer" : span.name}</CardTitle>
+          <CardTitle>
+            {span.category === "composer" ? "WhatsApp composer" : span.name}
+          </CardTitle>
           <CardDescription>
-            {span.category === "composer" ? `Template message · ${span.status}` : `${span.category} · ${span.status}`}
+            {span.category === "composer"
+              ? `Template message · ${span.status}`
+              : `${span.category} · ${span.status}`}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
@@ -415,7 +502,12 @@ function Evidence({
                   type="button"
                   size="sm"
                   variant="link"
-                  onClick={() => onSelect({ kind: "visit", id: String(span.attributes.node_visit_id) })}
+                  onClick={() =>
+                    onSelect({
+                      kind: "visit",
+                      id: String(span.attributes.node_visit_id),
+                    })
+                  }
                 >
                   View node-entry resolution
                 </Button>
@@ -447,13 +539,33 @@ function Evidence({
               <Value label="First audio">{duration(span.ttfa_ms)}</Value>
             )}
             {span.prompt_tokens != null && (
-              <Value label={span.category === "summarizer" ? "Estimated input tokens" : "Input tokens"}>{span.prompt_tokens}</Value>
+              <Value
+                label={
+                  span.category === "summarizer"
+                    ? "Estimated input tokens"
+                    : "Input tokens"
+                }
+              >
+                {span.prompt_tokens}
+              </Value>
             )}
-            {span.category === "composer" && span.prompt_tokens == null && <Value label="Input tokens">Not reported by this adapter</Value>}
+            {span.category === "composer" && span.prompt_tokens == null && (
+              <Value label="Input tokens">Not reported by this adapter</Value>
+            )}
             {span.completion_tokens != null && (
-              <Value label={span.category === "summarizer" ? "Estimated output tokens" : "Output tokens"}>{span.completion_tokens}</Value>
+              <Value
+                label={
+                  span.category === "summarizer"
+                    ? "Estimated output tokens"
+                    : "Output tokens"
+                }
+              >
+                {span.completion_tokens}
+              </Value>
             )}
-            {span.category === "composer" && span.completion_tokens == null && <Value label="Output tokens">Not reported by this adapter</Value>}
+            {span.category === "composer" && span.completion_tokens == null && (
+              <Value label="Output tokens">Not reported by this adapter</Value>
+            )}
             {span.total_tokens != null && (
               <Value label="Total tokens">{span.total_tokens}</Value>
             )}
@@ -493,25 +605,70 @@ function Evidence({
                   : " · not yet recorded as consumed"}
                 {summaryConsumer ? ` by ${summaryConsumer.name}` : ""}
               </p>
-              {summaryDiagnostics.filter((item) => item.code === "failed" || item.code === "discarded").map((item) => (
-                <p key={item.diagnostic_id} className="mt-1 text-destructive">{item.message}</p>
-              ))}
+              {summaryDiagnostics
+                .filter(
+                  (item) => item.code === "failed" || item.code === "discarded",
+                )
+                .map((item) => (
+                  <p key={item.diagnostic_id} className="mt-1 text-destructive">
+                    {item.message}
+                  </p>
+                ))}
             </div>
           )}
           {span.category === "composer" ? (
             <>
-              <Json label="Composer system prompt" value={composerInput?.system_prompt} />
-              <Json label="Plain Caller/Agent transcript" value={composerInput?.transcript} />
-              <Json label="Template fields and required links" value={{ fields: composerInput?.template_fields, required_urls: composerInput?.required_urls }} />
+              <Json
+                label="Composer system prompt"
+                value={composerInput?.system_prompt}
+              />
+              <Json
+                label="Plain Caller/Agent transcript"
+                value={composerInput?.transcript}
+              />
+              <Json
+                label="Template fields and required links"
+                value={{
+                  fields: composerInput?.template_fields,
+                  required_urls: composerInput?.required_urls,
+                }}
+              />
               <Json label="Composed template fields" value={span.output} />
-              <p className="text-xs text-muted-foreground">A composed message is only a draft. The linked tool records whether Meta accepted the send.</p>
-              {composerTool && <Button type="button" variant="outline" size="sm" onClick={() => onSelect({ kind: "tool", id: composerTool.id })}>View WhatsApp send result</Button>}
-              {composerDiagnostics.map((item) => <div key={item.diagnostic_id} className="border-l-2 border-destructive pl-3 text-xs"><p className="font-medium">{item.message}</p><p className="text-muted-foreground">Diagnostic ID: {item.diagnostic_id}</p></div>)}
+              <p className="text-xs text-muted-foreground">
+                A composed message is only a draft. The linked tool records
+                whether Meta accepted the send.
+              </p>
+              {composerTool && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    onSelect({ kind: "tool", id: composerTool.id })
+                  }
+                >
+                  View WhatsApp send result
+                </Button>
+              )}
+              {composerDiagnostics.map((item) => (
+                <div
+                  key={item.diagnostic_id}
+                  className="border-l-2 border-destructive pl-3 text-xs"
+                >
+                  <p className="font-medium">{item.message}</p>
+                  <p className="text-muted-foreground">
+                    Diagnostic ID: {item.diagnostic_id}
+                  </p>
+                </div>
+              ))}
             </>
           ) : (
             <>
               <Json label="Provider input / prompt" value={span.input} />
-              <Json label="Provider output / reasoning if captured" value={span.output} />
+              <Json
+                label="Provider output / reasoning if captured"
+                value={span.output}
+              />
             </>
           )}
           <Json label="Attributes" value={span.attributes} />
@@ -659,11 +816,23 @@ function Evidence({
               Originating LLM operation
             </Button>
           )}
-          {timeline.spans.filter((span) => span.category === "composer" && span.attributes?.tool_invocation_id === tool.id).map((span) => (
-            <Button key={span.id} type="button" variant="outline" size="sm" onClick={() => onSelect({ kind: "span", id: span.id })}>
-              Composer · {span.status} · {duration(span.duration_ms)}
-            </Button>
-          ))}
+          {timeline.spans
+            .filter(
+              (span) =>
+                span.category === "composer" &&
+                span.attributes?.tool_invocation_id === tool.id,
+            )
+            .map((span) => (
+              <Button
+                key={span.id}
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => onSelect({ kind: "span", id: span.id })}
+              >
+                Composer · {span.status} · {duration(span.duration_ms)}
+              </Button>
+            ))}
           <Json label="Arguments" value={tool.arguments} />
           <Json label="Final result" value={tool.result} />
           {resultsFor(timeline, tool).map((result) => (
@@ -767,7 +936,10 @@ function Evidence({
         >
           Timing span
         </Button>
-        <PromptResolutionEvidence input={visitSpan?.input} timeline={timeline} />
+        <PromptResolutionEvidence
+          input={visitSpan?.input}
+          timeline={timeline}
+        />
         {visit.triggered_by_tool_id && (
           <Button
             variant="outline"

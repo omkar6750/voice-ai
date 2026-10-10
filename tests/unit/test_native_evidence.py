@@ -30,6 +30,25 @@ class MemorySink:
         self.records.append(record)
 
 
+def test_repeated_context_notifications_keep_one_delivery_and_consumption():
+    sink = MemorySink()
+    tracker = ExchangeTracker("run-1", sink)
+    exchange = tracker.begin("caller")
+    invocation = tracker.start_tool("go_to_discovery", None, "function-1", {})
+    result = tracker.tool_result(invocation, {"status": "ok"}, is_final=True)
+    delivery = tracker.context_updated(invocation, result, context_message_index=2)
+    assert tracker.context_updated(invocation, result, context_message_index=4) == delivery
+    operation = tracker.start_operation("inference", "llm")
+    tracker.consume_results(exchange, operation["operation_id"])
+    assert tracker.context_updated(invocation, result, context_message_index=5) == delivery
+    tracker.consume_results(exchange, operation["operation_id"])
+    records = EvidenceBatch(records=sink.records).records
+    deliveries = [record for record in records if record.kind == "tool_result_context_updated"]
+    consumed = [record for record in records if record.kind == "tool_result_consumed"]
+    assert len(deliveries) == len(consumed) == 1
+    assert deliveries[0].context_message_index == 2
+
+
 def test_verbatim_opening_renders_whitelisted_state_and_nested_contact_values() -> None:
     rendered = render_opening(
         "Hello {{ contact.name }}, this is about {{campaign}}.",
@@ -252,6 +271,7 @@ def test_node_configuration_is_scoped_to_published_bindings(tmp_path):
     host._snapshot = {
         "system_prompt": "Global",
         "flow": {
+            "prompt_composition": "global_plus_node",
             "initial_node": "greeting",
             "nodes": [
                 {

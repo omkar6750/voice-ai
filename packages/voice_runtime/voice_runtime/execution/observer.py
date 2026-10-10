@@ -232,7 +232,9 @@ class EvidenceObserver(BaseObserver):
                 and not isinstance(frame, TranscriptionFrame)
             ):
                 self.llm_text.append(frame.text)
-            elif isinstance(frame, FunctionCallsStartedFrame):
+            elif data.direction == FrameDirection.DOWNSTREAM and isinstance(
+                frame, FunctionCallsStartedFrame
+            ):
                 for call in frame.function_calls:
                     if self.llm_operation:
                         self.function_operations[call.tool_call_id] = self.llm_operation[

@@ -43,9 +43,7 @@ def test_unknown_pipeline_end_does_not_invent_completion():
     assert call.summary.cause == "unknown"
 
 
-@pytest.mark.parametrize(
-    "cause", ["caller_hangup", "disconnect_unknown", "unknown", "pipeline_failure"]
-)
+@pytest.mark.parametrize("cause", ["caller_hangup", "disconnect_unknown", "unknown"])
 def test_terminal_visit_counts_as_completed_without_rewriting_cause(cause):
     call = CallTermination()
     call.summary.terminal_node = "closing"
@@ -54,6 +52,24 @@ def test_terminal_visit_counts_as_completed_without_rewriting_cause(cause):
     assert call.summary.execution_status == "completed"
     assert call.summary.evidence_status == "completed"
     assert call.summary.cause == cause
+
+
+@pytest.mark.parametrize(
+    "cause",
+    [
+        "pipeline_failure",
+        "provider_failure",
+        "evidence_failure",
+        "duration_limit",
+        "execution_lease_expired",
+    ],
+)
+def test_terminal_visit_does_not_hide_execution_failure(cause):
+    call = CallTermination()
+    call.summary.terminal_node = "closing"
+    call.request(cause)
+    call.pipeline_finished()
+    assert call.summary.execution_status == "failed"
 
 
 def test_output_drain_is_local_playback_evidence():

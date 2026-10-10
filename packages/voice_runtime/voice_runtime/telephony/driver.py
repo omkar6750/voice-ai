@@ -184,9 +184,19 @@ class Sim7600CallDriver:
         confirmed = False
         final_state = None
         error_category = None
+        pipeline_stopped = False
         if self.trace is not None:
             self.trace.record("cleanup_started", component="telephony", source="cleanup")
         try:
+            # Stop PCM workers before hangup disables the modem's audio path.
+            # Even failed pipeline shutdown must still attempt physical release.
+            try:
+                await asyncio.wait_for(self.host.close(), timeout=10)
+                pipeline_stopped = True
+            except Exception as exc:
+                from voice_runtime.safe_logs import error_category as classify
+
+                error_category = classify(exc)
             if self.modem:
                 # Read release cause before any cleanup hangup can replace it.
                 try:
@@ -232,16 +242,9 @@ class Sim7600CallDriver:
                                 uncertain=True,
                             )
                 confirmed, final_state, verification_error = await self._verify_release()
+                confirmed = confirmed and pipeline_stopped
                 error_category = error_category or verification_error
         finally:
-            try:
-                await asyncio.wait_for(self.host.close(), timeout=10)
-            except Exception as exc:
-                confirmed = False
-                if error_category is None:
-                    from voice_runtime.safe_logs import error_category as classify
-
-                    error_category = classify(exc)
             if self.modem:
                 try:
                     await self.modem.close()

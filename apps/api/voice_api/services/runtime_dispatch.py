@@ -136,6 +136,8 @@ async def dispatch(session, run, *, browser_session_id="", conversation_id=None,
     run = await session.get(Run, run.id, with_for_update=True, populate_existing=True)
     if await session.get(RuntimeAssignment, run.id):
         raise HTTPException(409, "Concurrent dispatch already assigned")
+    if run.status != "queued":
+        raise HTTPException(409, "Run was cancelled before runtime preparation")
     grant = token_urlsafe(32)
     generation = str(uuid4())
     assignment = RuntimeAssignment(
@@ -183,7 +185,14 @@ async def dispatch(session, run, *, browser_session_id="", conversation_id=None,
         telephony.clear()
         resolved = None
         body.clear()
+    assignment = await session.get(
+        RuntimeAssignment, run.id, with_for_update=True, populate_existing=True
+    )
     assignment.boot_id = prepared["boot_id"]
+    if assignment.state == "stopping":
+        await session.commit()
+        await control("/v1/sessions/stop", identity(assignment))
+        return assignment
     assignment.state = "starting"
     if call:
         call.provider_metadata = {
@@ -221,4 +230,6 @@ async def stop(session, run_id):
         return
     assignment.state = "stopping"
     await session.commit()
-    await control("/v1/sessions/stop", identity(assignment))
+    # Preparation may still be in flight. Dispatch observes this fence before starting.
+    if assignment.boot_id:
+        await control("/v1/sessions/stop", identity(assignment))

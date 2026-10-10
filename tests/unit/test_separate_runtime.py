@@ -76,6 +76,137 @@ async def test_parallel_sessions_and_busy_rejection(settings):
         await m.close()
 
 
+async def test_terminal_cleanup_reaches_api_when_evidence_is_rejected(settings, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from voice_runtime.execution.evidence_client import EvidenceDeliveryError
+
+    m = await manager_for(settings)
+    requests = []
+    try:
+        s = await m.prepare(prepared())
+        s.termination.request("pipeline_failure")
+        s.spool.deliver_once = AsyncMock(side_effect=EvidenceDeliveryError(retryable=False))
+        s.pending_updates.append({"invalid": "kept for investigation"})
+        monkeypatch.setattr(s, "upload_artifacts", AsyncMock())
+
+        async def backend(request):
+            body = json.loads(request.content)
+            requests.append(body)
+            if body.get("context_updates") or body.get("records"):
+                return httpx.Response(409, json={"detail": "Rejected evidence"})
+            return httpx.Response(200, json={"accepted": 0, "renewed": False})
+
+        await m.control_client.aclose()
+        m.control_client = httpx.AsyncClient(
+            transport=httpx.MockTransport(backend), base_url=settings.api_base_url
+        )
+        await s.finish({})
+        terminal = [body for body in requests if not body.get("context_updates")]
+        assert terminal
+        assert terminal[-1]["lifecycle"]["termination"]["cleanup_status"] == "confirmed"
+        assert terminal[-1]["lifecycle"]["evidence_incomplete"] is True
+        assert s.state == "ended" and s.cleanup_pending
+        assert s.pending_updates  # A terminal acknowledgement must not discard unsaved evidence.
+    finally:
+        await m.close()
+
+
+async def test_failed_host_cleanup_still_closes_media(settings, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    m = await manager_for(settings)
+    try:
+        s = await m.prepare(prepared())
+        media = SimpleNamespace(close=AsyncMock())
+        s.media = media
+        s.host = SimpleNamespace(close=AsyncMock(side_effect=OSError("cleanup failed")))
+        monkeypatch.setattr(s, "upload_artifacts", AsyncMock())
+        await s.finish({})
+        media.close.assert_awaited_once()
+        assert s.outcome["termination"]["cleanup_status"] == "uncertain"
+    finally:
+        await m.close()
+
+
+async def test_spool_close_failure_does_not_hide_confirmed_transport_release(settings, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    m = await manager_for(settings)
+    try:
+        s = await m.prepare(prepared())
+        close = s.spool.close
+
+        async def close_then_fail():
+            await close()
+            raise OSError("spool acknowledgement unavailable")
+
+        monkeypatch.setattr(s.spool, "close", close_then_fail)
+        monkeypatch.setattr(s, "upload_artifacts", AsyncMock())
+        await s.finish({})
+        assert s.state == "ended" and s.cleanup_pending
+        assert s.outcome["termination"]["cleanup_status"] == "confirmed"
+        assert s.outcome["evidence_incomplete"] is True
+    finally:
+        await m.close()
+
+
+async def test_debug_artifact_failure_cannot_block_terminal_cleanup(settings, monkeypatch):
+    from unittest.mock import AsyncMock, Mock
+
+    m = await manager_for(settings)
+    try:
+        s = await m.prepare(prepared())
+        close = s.diagnostic_capture.close
+
+        def close_then_fail():
+            close()
+            raise OSError("diagnostic file cannot be finalized")
+
+        monkeypatch.setattr(s.diagnostic_capture, "close", Mock(side_effect=close_then_fail))
+        monkeypatch.setattr(s, "upload_artifacts", AsyncMock())
+        await s.finish({})
+        assert s.state == "ended" and s.cleanup_pending
+        assert s.outcome["termination"]["cleanup_status"] == "confirmed"
+        assert s.outcome["artifacts_incomplete"] is True
+    finally:
+        await m.close()
+
+
+@pytest.mark.parametrize("deadline_expired", [True, False])
+async def test_execution_deadline_is_distinct_from_internal_timeout(
+    settings, monkeypatch, deadline_expired
+):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    m = await manager_for(settings)
+    try:
+        s = await m.prepare(prepared(snapshot={"call_limits": {"max_duration_secs": 0.05}}))
+
+        async def converse(media):
+            if deadline_expired:
+                await asyncio.sleep(1)
+            raise TimeoutError("internal operation timed out")
+
+        host = SimpleNamespace(prepare=AsyncMock(), converse=converse, close=AsyncMock())
+
+        def make_host():
+            s.host = host
+            return host
+
+        monkeypatch.setattr(s, "make_host", make_host)
+        monkeypatch.setattr(s, "upload_artifacts", AsyncMock())
+        await asyncio.create_task(s.run_pipeline(object()))
+        assert s.outcome["termination"]["cause"] == (
+            "duration_limit" if deadline_expired else "pipeline_failure"
+        )
+        assert s.state == "ended"
+    finally:
+        await m.close()
+
+
 async def test_duplicate_start_does_not_spawn_twice(settings):
     m = await manager_for(settings)
     try:
@@ -88,6 +219,35 @@ async def test_duplicate_start_does_not_spawn_twice(settings):
         other = body.model_copy(update={"generation": uuid4()})
         with pytest.raises(HTTPException):
             await m.prepare(other)
+    finally:
+        await m.close()
+
+
+@pytest.mark.parametrize("task_started", [False, True])
+async def test_operator_stop_before_media_or_task_start_cleans_up(
+    settings, monkeypatch, task_started
+):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from voice_runner.main import stop
+    from voice_shared.contracts import SessionIdentity
+
+    m = await manager_for(settings)
+    try:
+        s = await m.prepare(prepared())
+        monkeypatch.setattr(s, "upload_artifacts", AsyncMock())
+        if task_started:
+            s.task = asyncio.create_task(asyncio.sleep(60))
+        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(manager=m)))
+        identity = SessionIdentity(run_id=s.run_id, generation=s.generation, boot_id=s.boot_id)
+        assert (await stop(identity, request))["state"] == "stopping"
+        await m.start(s)
+        assert s.state != "waiting_media"
+        await s.task
+        assert s.closed.is_set()
+        assert s.outcome["termination"]["cause"] == "cancelled"
+        assert s.outcome["termination"]["cleanup_status"] == "confirmed"
     finally:
         await m.close()
 
@@ -200,6 +360,7 @@ async def test_lease_expiry_finishes_waiting_call(settings):
 
 @pytest.mark.parametrize("full", [False, True])
 def test_redaction_precedes_truncation(monkeypatch, full):
+    monkeypatch.setenv("VOICE_ENV", "production")
     monkeypatch.setenv("VOICE_INBOUND_API_LOGS_NO_TRUNCATE", str(full))
     monkeypatch.setenv("VOICE_API_LOG_MAX_BODY_CHARS", "128")
     value = {
@@ -270,6 +431,7 @@ def test_runtime_has_no_database_or_api_imports():
     [(a, b, c) for a in (False, True) for b in (False, True) for c in (False, True)],
 )
 def test_all_logging_combinations_keep_secrets_private(monkeypatch, inbound, outbound, full):
+    monkeypatch.setenv("VOICE_ENV", "production")
     monkeypatch.setenv("VOICE_ENABLE_INBOUND_API_LOGS", str(inbound))
     monkeypatch.setenv("VOICE_ENABLE_OUTBOUND_API_LOGS", str(outbound))
     for direction in ("inbound", "outbound"):
@@ -393,7 +555,7 @@ def test_runtime_browser_single_use_ticket_and_binary_round_trip(settings, monke
 
     monkeypatch.setattr(runtime_module, "get_settings", lambda: settings)
 
-    async def sync(self, records=None):
+    async def sync(self, records=None, **kwargs):
         return len(records or [])
 
     monkeypatch.setattr(Session, "sync", sync)

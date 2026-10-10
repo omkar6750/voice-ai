@@ -15,12 +15,12 @@ from voice_runtime.telephony.sim7600 import Sim7600Modem
 from voice_runtime.telephony.status import ModemStatusReader
 
 
-def outcome(report=None, signals=()):
+def outcome(report=None, signals=(), registration=None, errors=()):
     return determine_outcome(
         events=[{"signal": s, "observed_at_ns": i} for i, s in enumerate(signals)],
         report=report,
-        errors=[],
-        registration={},
+        errors=list(errors),
+        registration=registration or {},
     )
 
 
@@ -53,6 +53,40 @@ def test_missing_status_is_unknown_not_confirmed_registration_loss():
     assert not missing.sim_status_known
     actual = ModemStatusReader().from_results({"AT+CREG?": ["+CREG: 0,2"]}, serial_connected=True)
     assert actual.voice_registration_known and not actual.voice_registered
+
+
+def test_other_side_release_when_local_hangup_absent_and_network_is_healthy():
+    result = outcome(
+        "Regular deactivation",
+        ["NO CARRIER"],
+        {"voice_registered": True, "rssi": 15},
+    )
+    assert (result.reason, result.confidence) == ("remote_hangup", "high")
+
+
+def test_registration_loss_before_disconnect_is_classified_as_network_failure():
+    result = outcome(
+        None,
+        ["voice_registration_lost", "NO CARRIER"],
+        {"voice_registered": False, "rssi": None},
+    )
+    assert (result.reason, result.confidence) == ("network_failure", "high")
+
+
+@pytest.mark.parametrize(
+    ("registration", "errors", "signals", "reason"),
+    [
+        ({"voice_registered": None, "rssi": 15}, [], ["NO CARRIER"], "disconnect_unknown"),
+        ({"voice_registered": True, "rssi": None}, [], ["NO CARRIER"], "disconnect_unknown"),
+        ({"voice_registered": True, "rssi": 15}, ["AT+CSQ:timeout"], ["NO CARRIER"], "disconnect_unknown"),
+        ({"voice_registered": True, "rssi": 15}, [], ["local_hangup", "NO CARRIER"], "local_hangup"),
+    ],
+)
+def test_other_side_release_requires_no_local_hangup_and_healthy_known_network(
+    registration, errors, signals, reason
+):
+    result = outcome("Regular deactivation", signals, registration, errors)
+    assert result.reason == reason
 
 
 class Port:
@@ -89,13 +123,24 @@ class Port:
         pass
 
 
+def test_routine_at_poll_commands_do_not_emit_operational_log_lines(monkeypatch):
+    from voice_runtime.telephony import sim7600
+
+    events = []
+    monkeypatch.setattr(sim7600, "operational_event", lambda *args, **kwargs: events.append(args))
+    modem = Sim7600Modem("fake", serial_factory=lambda *a, **kw: Port())
+    modem._serial = Port()
+    assert modem._command_sync("AT+CLCC") == ["OK"]
+    assert events == []
+
+
 async def wait_until(check):
     async with asyncio.timeout(1):
         while not check():  # noqa: ASYNC110 -- bounded polling of a cross-thread fake serial sink
             await asyncio.sleep(0.005)
 
 
-async def test_idle_reader_records_all_urcs_unknowns_and_preserves_release_before_cleanup():
+async def test_idle_reader_records_call_urcs_only_and_preserves_release_before_cleanup():
     port = Port()
     modem = Sim7600Modem("fake", serial_factory=lambda *a, **kw: port)
     events = []
@@ -105,7 +150,7 @@ async def test_idle_reader_records_all_urcs_unknowns_and_preserves_release_befor
         for line in [b'+NEW_EVENT: "private-name",+15551234567\r\n', b"BUSY\r\n", b"BUSY\r\n"]:
             port.lines.put(line)
         await wait_until(lambda: sum(e["signal"] == "BUSY" for e in events) == 2)
-        assert "+NEW_EVENT" in str(events)
+        assert "+NEW_EVENT" not in str(events)
         assert "private-name" not in str(events) and "15551234567" not in str(events)
         first = await modem.capture_release()
         assert first["reason"] == "busy"
@@ -228,13 +273,11 @@ async def test_human_detection_does_not_trigger_timeout_or_voicemail_hangup():
     detection.host.worker.cancel.assert_not_awaited()
 
 
-def test_plain_and_unknown_numeric_urcs_during_a_command_are_retained():
+def test_unrelated_and_unknown_urcs_during_a_command_are_not_retained():
     modem = Sim7600Modem("fake")
     modem._handle_unsolicited("SMS Ready", "command", "AT+CLCC")
     modem._handle_unsolicited("+FUTURE_END: 1,32,0,16", "command", "AT+CLCC")
-    assert len(modem._events) == 2
-    assert "+FUTURE_END:1,32,0,16" in modem._events[1]["signal"]
-    assert modem._events[0]["payload_bytes"] > 0
+    assert len(modem._events) == 0
 
 
 async def test_failed_detection_releases_gate_without_failing_main_pipeline():

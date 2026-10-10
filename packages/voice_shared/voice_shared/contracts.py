@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -12,6 +13,33 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 class Contract(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class ModemEndpointStatus(Contract):
+    """The same status payload is used by probes, recovery and API JSON storage."""
+
+    checked_at: datetime | None = None
+    alive: bool = False
+    serial_connected: bool = False
+    sim_ready: bool | None = None
+    voice_registered: bool | None = None
+    data_registered: bool | None = None
+    packet_attached: bool | None = None
+    can_make_call: bool | None = None
+    active_call: bool | None = None
+    call_state: str | None = None
+    rssi: int | None = None
+    signal_quality: int | None = None
+    operator: str | None = None
+    radio_access: str = "unknown"
+    band: str | None = None
+    roaming: bool | None = None
+    usb_audio_supported: bool | None = None
+    usb_audio_active: bool | None = None
+    voice_registration_known: bool | None = None
+    data_registration_known: bool | None = None
+    sim_status_known: bool | None = None
+    last_error: str | None = None
 
 
 class PrepareSession(Contract):

@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from voice_api.api.deps import get_session, require_platform_admin, require_runtime_service
@@ -37,6 +38,15 @@ def _endpoint_status(endpoint: RuntimeEndpoint, now: datetime) -> EndpointStatus
     return EndpointStatus.model_validate(values)
 
 
+def _runtime_modem_status(payload) -> EndpointStatus:
+    try:
+        return EndpointStatus.model_validate(payload)
+    except ValidationError:
+        raise HTTPException(
+            502, "Runtime modem status is incompatible; restart API and runtime with matching code"
+        ) from None
+
+
 @router.get(
     "/runtime-endpoints",
     response_model=RuntimeEndpointsResponse,
@@ -47,7 +57,9 @@ async def list_endpoints(session: AsyncSession = Session) -> dict:
     rows = (await session.scalars(select(RuntimeEndpoint).order_by(RuntimeEndpoint.name))).all()
     active_runs = (
         await session.execute(
-            platform_admin_read(select(Run.endpoint_id, Run.id).where(Run.status.in_(ACTIVE)))
+            platform_admin_read(
+                select(Run.endpoint_id, Run.id, Run.status).where(Run.status.in_(ACTIVE))
+            )
         )
     ).all()
     active_by_endpoint = {run.endpoint_id: run.id for run in active_runs if run.endpoint_id}
@@ -61,6 +73,9 @@ async def list_endpoints(session: AsyncSession = Session) -> dict:
                 "config": row.config,
                 "created_at": row.created_at,
                 "active_run_id": active_by_endpoint.get(row.id),
+                "active_run_status": next(
+                    (run.status for run in active_runs if run.endpoint_id == row.id), None
+                ),
                 "status": _endpoint_status(row, now),
                 "last_seen_at": row.last_seen_at.isoformat() if row.last_seen_at else None,
                 "updated_at": row.updated_at.isoformat() if row.updated_at else None,
@@ -82,7 +97,7 @@ async def get_endpoint(endpoint_id: str, session: AsyncSession = Session) -> dic
         raise HTTPException(404, "Runtime endpoint not found")
     active = await session.scalar(
         platform_admin_read(
-            select(Run.id).where(Run.endpoint_id == endpoint.id, Run.status.in_(ACTIVE))
+            select(Run).where(Run.endpoint_id == endpoint.id, Run.status.in_(ACTIVE))
         )
     )
     now = datetime.now(UTC)
@@ -90,7 +105,8 @@ async def get_endpoint(endpoint_id: str, session: AsyncSession = Session) -> dic
         "id": endpoint.id,
         "name": endpoint.name,
         "config": endpoint.config,
-        "active_run_id": active,
+        "active_run_id": active.id if active else None,
+        "active_run_status": active.status if active else None,
         "status": _endpoint_status(endpoint, now),
         "last_seen_at": endpoint.last_seen_at.isoformat() if endpoint.last_seen_at else None,
         "updated_at": endpoint.updated_at.isoformat() if endpoint.updated_at else None,
@@ -139,7 +155,7 @@ async def probe_endpoint(endpoint_id: str, session: AsyncSession = Session) -> d
     from voice_api.services.runtime_dispatch import control
 
     response = await control("/v1/modems/probe", config.model_dump(mode="json"))
-    status = EndpointStatus.model_validate(response["status"])
+    status = _runtime_modem_status(response.get("status"))
 
     endpoint.status = status.model_dump(mode="json")
     endpoint.last_seen_at = datetime.now(UTC)
@@ -223,7 +239,7 @@ async def recover(endpoint_id: str, session: AsyncSession = Session) -> dict:
             "reason": "runtime_unavailable",
             "message": "Runtime recovery check failed. Start or restart the runtime with the current API URL, then retry.",
         }
-    status = EndpointStatus.model_validate(proof["status"]) if proof.get("status") else None
+    status = _runtime_modem_status(proof["status"]) if proof.get("status") else None
     if status:
         endpoint.status = status.model_dump(mode="json")
         endpoint.last_seen_at = datetime.now(UTC)

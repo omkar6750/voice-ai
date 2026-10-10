@@ -270,25 +270,6 @@ class Sim7600Modem(TelephonyTransport):
             }:
                 safe = re.sub(r'"[^"\r\n]*"', '"<redacted>"', redact_at_response(line))
             else:
-                # Unknown URCs are retained by type, hash and size; their payload may be
-                # an SMS body, a location or private subscriber information.
-                import hashlib
-
-                safe = (
-                    prefix
-                    if re.fullmatch(r"[+A-Z_ ]{1,64}", prefix)
-                    else "unclassified_serial_line"
-                ) + ":<redacted>"
-                payload = line.split(":", 1)[1].strip() if ":" in line else ""
-                if payload and re.fullmatch(r"[-+0-9, ]{1,240}", payload):
-                    # Small numeric status/cause fields remain useful for new firmware
-                    # URCs; long subscriber/device identifiers are still redacted.
-                    safe = prefix + ":" + redact_at_response(payload)
-                self._observe(
-                    safe + ":sha256=" + hashlib.sha256(line.encode()).hexdigest(),
-                    source,
-                    payload_bytes=len(line.encode()),
-                )
                 safe = None
             if safe is not None:
                 self._observe(safe, source)
@@ -300,7 +281,16 @@ class Sim7600Modem(TelephonyTransport):
             # Preserve just registration status, excluding cell/location identifiers.
             fields = line.split(":", 1)[1].strip().split(",")
             status = fields[1] if len(fields) > 1 and fields[1].strip().isdigit() else fields[0]
-            self._observe(line.split(":", 1)[0] + ":" + status.strip(), source)
+            if source == "urc":
+                status = status.strip()
+                self._observe(line.split(":", 1)[0] + ":" + status, source)
+                if status in {"0", "3"}:
+                    signal = (
+                        "voice_registration_lost"
+                        if line.startswith("+CREG:")
+                        else "data_registration_lost"
+                    )
+                    self._observe(signal, source)
         elif line.startswith("+CLCC:"):
             state = parse_call_state([line])
             if state == CallState.DISCONNECTED:
@@ -429,12 +419,6 @@ class Sim7600Modem(TelephonyTransport):
         started = time.monotonic()
         if self.trace is not None:
             self.trace.record("command_started", component="modem", command=safe_command)
-        operational_event(
-            RuntimeEvent.MODEM_COMMAND,
-            status="started",
-            component="modem",
-            at_command=safe_command,
-        )
         lines: list[str] = []
         pending = self._idle_pending
         outcome = "unknown"
@@ -457,7 +441,7 @@ class Sim7600Modem(TelephonyTransport):
                     line = raw_line.decode("ascii", errors="replace").strip()
                     if not line or line == command:
                         continue
-                    was_unsolicited = self._handle_unsolicited(line, "command", command)
+                    self._handle_unsolicited(line, "command", command)
                     if line in {"NO CARRIER", "BUSY", "NO ANSWER", "NO DIALTONE"}:
                         self._disconnect_observed = True
                         response = {
@@ -474,32 +458,7 @@ class Sim7600Modem(TelephonyTransport):
                                 response=response,
                                 source="urc",
                             )
-                        operational_event(
-                            RuntimeEvent.MODEM_RESPONSE,
-                            response="rejected",
-                            component="modem",
-                            at_command=safe_command,
-                            at_response_line=line,
-                        )
                         raise ModemCommandError(f"modem rejected {label}: {line}")
-                    response_class = (
-                        "ok"
-                        if line == "OK"
-                        else "rejected"
-                        if line == "ERROR" or line.startswith(("+CME ERROR", "+CMS ERROR"))
-                        else "data"
-                    )
-                    operational_event(
-                        RuntimeEvent.MODEM_RESPONSE,
-                        response=response_class,
-                        component="modem",
-                        at_command=safe_command,
-                        at_response_line=(
-                            line.split(":", 1)[0] + ":<redacted>"
-                            if was_unsolicited
-                            else redact_at_response(line)
-                        ),
-                    )
                     lines.append(line)
                     if line == "OK":
                         outcome = "ok"

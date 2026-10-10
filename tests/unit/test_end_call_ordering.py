@@ -64,6 +64,19 @@ async def test_end_call_delivers_result_before_end_without_followup_inference():
     host.worker.cancel.assert_not_awaited()
 
 
+async def test_duplicate_context_notification_does_not_repeat_flow_side_effects():
+    host, manager, events = setup_flow()
+
+    async def result_callback(result, *, properties):
+        await properties.on_context_updated()
+        await properties.on_context_updated()
+
+    execute = await manager._create_transition_func("end_call", host._handler("end_call"))
+    await execute(params("end_call", result_callback))
+    host.tracker.context_updated.assert_called_once()
+    assert events.count("end_frame") == 1
+
+
 async def test_repeated_end_call_records_results_but_queues_one_end_frame():
     host, manager, events = setup_flow()
     execute = await manager._create_transition_func("end_call", host._handler("end_call"))

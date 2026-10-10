@@ -20,6 +20,7 @@ from voice_api.db.tenant_scope import bind_run_organization
 from voice_api.models import (
     BrowserSession,
     Call,
+    Callback,
     CredentialLease,
     ProviderCredential,
     Run,
@@ -216,14 +217,22 @@ async def sync(body: RuntimeSync, session=Session):
         from voice_runtime.execution.termination import TerminationSummary
 
         termination = TerminationSummary.model_validate(lifecycle["termination"])
+        execution_status = (
+            "cancelled" if termination.cause == "cancelled" else termination.execution_status
+        )
         if run.status in {"queued", "claimed", "running", "uncertain"}:
             run.status = (
-                termination.execution_status
-                if termination.cleanup_status == "confirmed"
-                else "uncertain"
+                execution_status if termination.cleanup_status == "confirmed" else "uncertain"
             )
             run.ended_at = (
                 (run.ended_at or now()) if termination.cleanup_status == "confirmed" else None
+            )
+            run.error = (
+                None
+                if run.status in {"completed", "cancelled"}
+                else "Call cleanup is unconfirmed; verify transport release before reuse"
+                if run.status == "uncertain"
+                else f"Call ended: {termination.cause.replace('_', ' ')}"
             )
         run.final_state = safe_evidence({**(run.final_state or {}), **lifecycle})
         assignment.state = "ended" if termination.cleanup_status == "confirmed" else "uncertain"
@@ -237,8 +246,16 @@ async def sync(body: RuntimeSync, session=Session):
             call.status = "uncertain"
             call.ended_at = None
         if call and call.provider != "twilio" and termination.cleanup_status == "confirmed":
-            call.status = "completed" if termination.execution_status == "completed" else "failed"
+            call.status = execution_status
             call.ended_at = call.ended_at or now()
+        if call and call.provider != "twilio":
+            callback = await session.scalar(
+                select(Callback).where(Callback.call_id == call.id).with_for_update()
+            )
+            if callback:
+                callback.status = call.status
+                if call.status == "completed":
+                    callback.completed_at = call.ended_at
         await session.execute(
             update(RunContextEvent)
             .where(RunContextEvent.run_id == run.id, RunContextEvent.status == "pending")

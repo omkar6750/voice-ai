@@ -1,5 +1,5 @@
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 
 from voice_runtime.telephony.base import CallState
@@ -30,6 +30,14 @@ class ModemStatus:
     sim_status_known: bool = False
     last_error: str | None = None
     checked_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+    def endpoint_payload(self) -> dict:
+        from voice_shared.contracts import ModemEndpointStatus
+
+        values = asdict(self)
+        values.pop("available_transports")
+        values["call_state"] = self.call_state.value
+        return ModemEndpointStatus.model_validate(values).model_dump(mode="json")
 
 
 @dataclass(frozen=True)

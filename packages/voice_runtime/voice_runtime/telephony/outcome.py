@@ -62,8 +62,30 @@ def determine_outcome(
         )
     ):
         outcome.reason, outcome.confidence = "network_failure", "confirmed"
+    elif any(
+        event.get("signal") == "voice_registration_lost"
+        and (cleared is None or event.get("observed_at_ns", 0) <= cleared)
+        for event in events
+    ):
+        outcome.reason, outcome.confidence = "network_failure", "high"
     elif "serial_io_error" in signals:
         outcome.reason, outcome.confidence = "modem_failure", "confirmed"
+    elif (
+        cleared is not None
+        and not errors
+        and registration.get("voice_registered") is True
+        and isinstance(registration.get("rssi"), int)
+        and registration["rssi"] >= 15
+        and not any(
+            event.get("signal") in {"serial_io_error", "voice_registration_lost"}
+            for event in events
+        )
+    ):
+        # Operational attribution rule: no local release, modem remained registered
+        # with usable signal, and no transport/network fault was observed. This is a
+        # high-confidence other-side release classification, not a carrier-supplied
+        # identity for the party that sent the release.
+        outcome.reason, outcome.confidence = "remote_hangup", "high"
     elif "normal call clearing" in text:
         outcome.reason, outcome.confidence = "remote_hangup_likely", "likely"
     # Registration loss supports a diagnosis but cannot alone establish why a call cleared.

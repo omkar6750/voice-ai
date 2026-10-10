@@ -222,8 +222,13 @@ class TracedFlowManager(FlowManager):
                 ):
                     result_properties = replace(result_properties, run_llm=False)
                 previous_context_callback = result_properties.on_context_updated
+                context_notified = False
 
                 async def context_updated() -> None:
+                    nonlocal context_notified
+                    if context_notified:
+                        return
+                    context_notified = True
                     self.tracker.context_updated(
                         invocation_id,
                         result_id,

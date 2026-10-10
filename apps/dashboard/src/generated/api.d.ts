@@ -1053,6 +1053,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop Run
+         * @description Request transport cleanup; never release a live modem from the dashboard alone.
+         */
+        post: operations["stop_run_api_v1_runs__run_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs": {
         parameters: {
             query?: never;
@@ -3422,6 +3442,26 @@ export interface paths {
         get: operations["dial_options_api_dial_options_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{run_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop Run
+         * @description Request transport cleanup; never release a live modem from the dashboard alone.
+         */
+        post: operations["stop_run_api_runs__run_id__stop_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6141,7 +6181,10 @@ export interface components {
              */
             redialed: false;
         };
-        /** EndpointStatus */
+        /**
+         * EndpointStatus
+         * @description Named public schema for the shared runtime status contract.
+         */
         EndpointStatus: {
             /** Checked At */
             checked_at?: string | null;
@@ -6188,6 +6231,12 @@ export interface components {
             usb_audio_supported?: boolean | null;
             /** Usb Audio Active */
             usb_audio_active?: boolean | null;
+            /** Voice Registration Known */
+            voice_registration_known?: boolean | null;
+            /** Data Registration Known */
+            data_registration_known?: boolean | null;
+            /** Sim Status Known */
+            sim_status_known?: boolean | null;
             /** Last Error */
             last_error?: string | null;
         };
@@ -8020,6 +8069,8 @@ export interface components {
             created_at: string;
             /** Active Run Id */
             active_run_id?: string | null;
+            /** Active Run Status */
+            active_run_status?: ("claimed" | "running" | "uncertain") | null;
             status: components["schemas"]["EndpointStatus"];
             /** Last Seen At */
             last_seen_at?: string | null;
@@ -8206,6 +8257,15 @@ export interface components {
              * @default false
              */
             dispatch: boolean;
+        };
+        /** StopRunResponse */
+        StopRunResponse: {
+            /** Run Id */
+            run_id: string;
+            /** Status */
+            status: string;
+            /** Stop Requested */
+            stop_requested: boolean;
         };
         /** SummarizerConfig */
         SummarizerConfig: {
@@ -11592,6 +11652,37 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    stop_run_api_v1_runs__run_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StopRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -16917,6 +17008,37 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    stop_run_api_runs__run_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StopRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

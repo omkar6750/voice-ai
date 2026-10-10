@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/table";
 import { isActive, stamp } from "./model";
 import { StatusBadge } from "./status";
+import { EndCallButton } from "./end-call-button";
 import type { components } from "@/generated/api";
 
 function formatProvider(provider?: string) {
@@ -51,7 +52,10 @@ export function RunsPage() {
   const scope = JSON.stringify([userId, orgId, support]);
   const cursorScope = useRef(scope);
   const cursors = cursorScope.current === scope ? storedCursors : [];
-  useEffect(() => { cursorScope.current = scope; setCursors([]); }, [scope]);
+  useEffect(() => {
+    cursorScope.current = scope;
+    setCursors([]);
+  }, [scope]);
   const [debouncedSearch, setDebouncedSearch] = useState("");
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -120,7 +124,12 @@ export function RunsPage() {
         </div>
         <Button
           variant="outline"
-          onClick={() => { setCursors([]); void queryClient.invalidateQueries({ queryKey: ["runs", userId, orgId, support] }); }}
+          onClick={() => {
+            setCursors([]);
+            void queryClient.invalidateQueries({
+              queryKey: ["runs", userId, orgId, support],
+            });
+          }}
           disabled={runsQuery.isFetching}
         >
           <RefreshCw data-icon="inline-start" /> Refresh
@@ -196,6 +205,9 @@ export function RunsPage() {
                 <TableHead>Provider</TableHead>
                 <TableHead>Started</TableHead>
                 <TableHead>State</TableHead>
+                <TableHead>
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -225,10 +237,21 @@ export function RunsPage() {
                     {stamp(run.started_at ?? run.created_at)}
                   </TableCell>
                   <TableCell>
-                    <StatusBadge status={run.status} outcome={run.call_outcome} />
+                    <StatusBadge
+                      status={run.status}
+                      outcome={run.call_outcome}
+                    />
                     {isActive(run.status) && (
                       <span className="sr-only">Active</span>
                     )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <EndCallButton
+                      run={run}
+                      onRequested={() => {
+                        void runsQuery.refetch();
+                      }}
+                    />
                   </TableCell>
                 </TableRow>
               ))}

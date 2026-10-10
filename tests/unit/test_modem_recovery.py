@@ -170,18 +170,23 @@ async def test_api_recovery_updates_run_call_and_assignment_only_with_proof(monk
     async def control(path, body):
         assert path == "/v1/modems/reconcile"
         assert body["session"]["generation"] == assignment.generation
+        from dataclasses import asdict
+
+        status = asdict(
+            ModemStatus(
+                alive=True,
+                serial_connected=True,
+                call_state=CallState.IDLE if verified else CallState.ACTIVE,
+                active_call=not verified,
+            )
+        )
+        status.pop("available_transports")
+        status["call_state"] = status["call_state"].value
         return {
             "verified": verified,
             "reason": "idle_verified" if verified else "call_active",
             "message": "checked",
-            "status": {
-                "alive": True,
-                "serial_connected": True,
-                "call_state": "idle" if verified else "active",
-                "active_call": not verified,
-                "usb_audio_active": False,
-                "checked_at": datetime.now(UTC).isoformat(),
-            },
+            "status": status,
         }
 
     monkeypatch.setattr(api, "bind_organization", lambda *args: None)
@@ -194,3 +199,21 @@ async def test_api_recovery_updates_run_call_and_assignment_only_with_proof(monk
     assert assignment.state == ("ended" if verified else "uncertain")
     assert database.committed
     assert not result.get("redialed", False)
+    # Exercise the same strict serialization used for JSON storage and dashboard responses.
+    from voice_api.schemas.execution import EndpointRecoveryResponse, EndpointStatus
+
+    EndpointRecoveryResponse.model_validate(result)
+    stored = EndpointStatus.model_validate(endpoint.status)
+    assert stored.voice_registration_known is False
+
+
+def test_status_contract_keeps_historical_records_and_rejects_malformed_runtime_status():
+    from fastapi import HTTPException
+    from voice_api.api.v1.endpoints.remote_execution import _runtime_modem_status
+    from voice_api.schemas.execution import EndpointStatus
+
+    assert EndpointStatus.model_validate({"alive": False}).voice_registration_known is None
+    with pytest.raises(HTTPException) as exc:
+        _runtime_modem_status({"alive": True, "unsupported_new_field": True})
+    assert exc.value.status_code == 502
+    assert "incompatible" in exc.value.detail

@@ -29,6 +29,50 @@ class Modem:
 
 
 @pytest.mark.asyncio
+async def test_pipeline_stops_before_hangup_disables_pcm():
+    from types import SimpleNamespace
+
+    events = []
+
+    async def stop_pipeline():
+        events.append("pipeline_stopped")
+
+    async def hangup():
+        assert events == ["pipeline_stopped"]
+        events.append("hangup")
+
+    modem = Modem([], CallState.IDLE)
+    modem.hangup.side_effect = hangup
+    driver = Sim7600CallDriver(SimpleNamespace(close=AsyncMock(side_effect=stop_pipeline)))
+    driver.modem = modem
+    driver.session = TelephonySession(modem)
+    driver.dial_attempted = True
+    driver._verify_release = AsyncMock(return_value=(True, CallState.IDLE, None))
+    result = await driver.close()
+    assert events == ["pipeline_stopped", "hangup"]
+    assert result["release_confirmed"]
+
+
+@pytest.mark.asyncio
+async def test_failed_pipeline_shutdown_still_hangs_up_and_closes_modem():
+    from types import SimpleNamespace
+
+    modem = Modem([], CallState.IDLE)
+    host = SimpleNamespace(close=AsyncMock(side_effect=RuntimeError("shutdown failed")))
+    driver = Sim7600CallDriver(host)
+    driver.modem = modem
+    driver.session = TelephonySession(modem)
+    driver.dial_attempted = True
+    driver._verify_release = AsyncMock(return_value=(True, CallState.IDLE, None))
+    result = await driver.close()
+    modem.hangup.assert_awaited_once()
+    modem.close.assert_awaited_once()
+    host.close.assert_awaited_once()
+    assert not result["release_confirmed"]
+    assert result["error_category"] is not None
+
+
+@pytest.mark.asyncio
 async def test_late_call_is_hung_up_again_before_stable_release(monkeypatch):
     clock = Clock()
     monkeypatch.setattr(driver_module, "monotonic", clock.monotonic, raising=False)

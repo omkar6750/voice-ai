@@ -18,6 +18,44 @@ from voice_runtime.execution.termination import TerminationSummary
 from voice_runtime.safe_logs import RuntimeEvent, error_category, opaque_id, operational_event
 
 
+def apply_transport_outcome(
+    final_state: dict | None, transport_evidence: dict, diagnostics: list[dict]
+) -> tuple[dict, str | None]:
+    """Attach call-release evidence and refine a missing transport outcome."""
+    state = dict(final_state or {})
+    termination_data = state.get("termination")
+    if not isinstance(termination_data, dict):
+        state["call_outcome"] = transport_evidence
+        return state, None
+
+    termination = dict(termination_data)
+    termination["transport_evidence"] = transport_evidence
+    reason = transport_evidence.get("reason")
+    if termination.get("cause") in {"unknown", "disconnect_unknown"} and reason in {
+        "busy",
+        "no_answer",
+        "call_rejected",
+        "dial_failed",
+        "network_failure",
+        "modem_failure",
+        "remote_hangup",
+        "remote_hangup_likely",
+    }:
+        termination["cause"] = reason
+        confidence = transport_evidence.get("confidence")
+        for diagnostic in diagnostics:
+            if (
+                diagnostic.get("category") == "call_termination"
+                and diagnostic.get("code") == "disconnect_unknown"
+            ):
+                diagnostic["code"] = reason
+                diagnostic["uncertain"] = confidence not in {"confirmed", "high"}
+        state["termination"] = termination
+        return state, reason
+    state["termination"] = termination
+    return state, None
+
+
 def runtime_token_for_run(secret: str, run_id: str) -> str:
     return f"{run_id}.{hashlib.sha256(f'{secret}:{run_id}'.encode()).hexdigest()}"
 
@@ -193,11 +231,11 @@ async def execute_call(
                 )
         transport_evidence = getattr(driver, "call_outcome", None)
         if isinstance(transport_evidence, dict):
-            final_state = dict(final_state or {})
-            if isinstance(final_state.get("termination"), dict):
-                final_state["termination"]["transport_evidence"] = transport_evidence
-            else:
-                final_state["call_outcome"] = transport_evidence
+            final_state, release_reason = apply_transport_outcome(
+                final_state, transport_evidence, diagnostics
+            )
+            if release_reason:
+                error = f"Call ended without flow completion: {release_reason}"
         if spool is None:
             incomplete = True
         else:

@@ -231,6 +231,8 @@ class ExchangeTracker:
         metadata = self._tool_result_metadata.get(result_id)
         if metadata is None or metadata["invocation_id"] != invocation_id:
             raise ValueError("context delivery must reference a recorded tool result")
+        if metadata.get("delivery_id"):
+            return metadata["delivery_id"]
         delivery_id = uuid4().hex
         self.emit(
             "tool_result_context_updated",
@@ -242,6 +244,7 @@ class ExchangeTracker:
             is_final=metadata["is_final"],
             context_message_index=context_message_index,
         )
+        metadata["delivery_id"] = delivery_id
         self._pending_results.append(result_id)
         return delivery_id
 
@@ -416,6 +419,8 @@ class ExchangeTracker:
         metadata = self._classifier_result_metadata.get(result_id)
         if metadata is None:
             raise ValueError("context delivery must reference a recorded classifier result")
+        if metadata.get("delivery_id"):
+            return metadata["delivery_id"]
         delivery_id = uuid4().hex
         self.emit(
             "classifier_context_updated",
@@ -427,6 +432,7 @@ class ExchangeTracker:
             node_key=metadata["node_key"],
             context_message_index=context_message_index,
         )
+        metadata["delivery_id"] = delivery_id
         return delivery_id
 
     def consume_classifier_results(

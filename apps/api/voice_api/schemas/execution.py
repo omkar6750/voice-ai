@@ -3,6 +3,7 @@ from typing import Literal
 
 from pydantic import Field
 from voice_runtime.contracts.base import ConfigModel
+from voice_shared.contracts import ModemEndpointStatus
 
 from voice_api.schemas.diagnostics import DiagnosticInput
 
@@ -21,26 +22,8 @@ class EndpointBody(ConfigModel):
     config: EndpointConfig
 
 
-class EndpointStatus(ConfigModel):
-    checked_at: datetime | None = None
-    alive: bool = False
-    serial_connected: bool = False
-    sim_ready: bool | None = None
-    voice_registered: bool | None = None
-    data_registered: bool | None = None
-    packet_attached: bool | None = None
-    can_make_call: bool | None = None
-    active_call: bool | None = None
-    call_state: str | None = None
-    rssi: int | None = None
-    signal_quality: int | None = None
-    operator: str | None = None
-    radio_access: str = "unknown"
-    band: str | None = None
-    roaming: bool | None = None
-    usb_audio_supported: bool | None = None
-    usb_audio_active: bool | None = None
-    last_error: str | None = None
+class EndpointStatus(ModemEndpointStatus):
+    """Named public schema for the shared runtime status contract."""
 
 
 class RuntimeEndpointResponse(ConfigModel):
@@ -49,6 +32,7 @@ class RuntimeEndpointResponse(ConfigModel):
     config: EndpointConfig
     created_at: datetime
     active_run_id: str | None = None
+    active_run_status: Literal["claimed", "running", "uncertain"] | None = None
     status: EndpointStatus
     last_seen_at: datetime | None = None
     updated_at: datetime | None = None

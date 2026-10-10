@@ -50,8 +50,6 @@ class RuntimeEvent(StrEnum):
     PCM_CAPTURED = "pcm_captured"
     CAPTURE_CLOSED = "capture_closed"
     FRAME_OBSERVED = "frame_observed"
-    MODEM_COMMAND = "modem_command"
-    MODEM_RESPONSE = "modem_response"
 
 
 _MARKS = frozenset(

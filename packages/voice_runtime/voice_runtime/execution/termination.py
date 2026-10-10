@@ -21,6 +21,7 @@ TerminationCause = Literal[
     "call_rejected",
     "voicemail",
     "modem_failure",
+    "remote_hangup",
     "remote_hangup_likely",
     "local_hangup",
     "terminal_completed",
@@ -30,6 +31,8 @@ TerminationCause = Literal[
     "network_failure",
     "provider_failure",
     "pipeline_failure",
+    "evidence_failure",
+    "execution_lease_expired",
     "cancelled",
     "caller_idle_timeout",
     "duration_limit",
@@ -54,6 +57,17 @@ class TerminationSummary(ConfigModel):
 
     @property
     def execution_status(self) -> Literal["completed", "failed"]:
+        if self.cause in {
+            "provider_failure",
+            "pipeline_failure",
+            "evidence_failure",
+            "execution_lease_expired",
+            "network_failure",
+            "modem_failure",
+            "drain_timeout",
+            "duration_limit",
+        }:
+            return "failed"
         completed = (
             self.terminal_node is not None or self.cause in {"terminal_completed", "agent_hangup"}
         ) and self.pipeline_finished_at_ns is not None
@@ -93,7 +107,13 @@ class CallTermination:
             self.summary.requested_at_ns = time.time_ns()
             self._requested_clock = time.monotonic()
             return True
-        failures = {"provider_failure", "pipeline_failure", "network_failure", "drain_timeout"}
+        failures = {
+            "provider_failure",
+            "pipeline_failure",
+            "evidence_failure",
+            "network_failure",
+            "drain_timeout",
+        }
         if cause in failures or (not graceful and self.summary.pipeline_finished_at_ns is None):
             # Preserve the first failure, but do not mistake an interrupted goodbye
             # for success merely because the agent requested it first.

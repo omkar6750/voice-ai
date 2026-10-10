@@ -45,6 +45,9 @@ def _endpoint_status(endpoint: RuntimeEndpoint, now: datetime) -> EndpointStatus
 
 def _modem_status(status: ModemStatus) -> EndpointStatus:
     return EndpointStatus(
+        voice_registration_known=status.voice_registration_known,
+        data_registration_known=status.data_registration_known,
+        sim_status_known=status.sim_status_known,
         checked_at=status.checked_at,
         alive=status.alive,
         serial_connected=status.serial_connected,

@@ -178,22 +178,24 @@ class Session:
         else:
             self.manager.dropped_logs += 1
 
-    async def sync(self, records=None):
+    async def sync(self, records=None, *, lifecycle_only=False):
         async with self.send_lock:
             async with self.aux_lock:
-                updates = list(self.pending_updates[:100])
-                logs = list(self.pending_logs[:100])
+                updates = [] if lifecycle_only else list(self.pending_updates[:100])
+                logs = [] if lifecycle_only else list(self.pending_logs[:100])
                 seq = self.log_sequence + 1 if logs else self.log_sequence
                 if logs:
                     await self.persist_aux()
             metrics = self.manager.metrics() if time.monotonic() >= self.next_heartbeat else {}
-            if self.text:
+            if self.text and not lifecycle_only:
                 async with self.text.lock:
                     text_records = list(self.text.records[:100])
             else:
                 text_records = []
             text_checkpoint = (
-                self.text.checkpoint if self.text and self.text.checkpoint_dirty else None
+                self.text.checkpoint
+                if self.text and self.text.checkpoint_dirty and not lifecycle_only
+                else None
             )
             body = {
                 **self.identity(),
@@ -226,11 +228,13 @@ class Session:
             if response.status_code >= 400:
                 if self.text:
                     self.text.emit({"type": "persistence", "state": "delayed"})
-                raise EvidenceDeliveryError(retryable=response.status_code >= 500)
+                raise EvidenceDeliveryError(
+                    retryable=response.status_code == 429 or response.status_code >= 500
+                )
             reply = response.json()
             if reply.get("accepted") != len(records or []):
                 raise EvidenceDeliveryError(retryable=False)
-            if self.text:
+            if self.text and not lifecycle_only:
                 accepted = reply.get("text_accepted", 0)
                 if accepted != len(text_records):
                     raise EvidenceDeliveryError(retryable=False)
@@ -246,17 +250,23 @@ class Session:
                 )
             if reply.get("renewed"):
                 self.lease_until = time.monotonic() + 30
-            if reply.get("stop") and self.task and not self.task.done():
+            if (
+                reply.get("stop")
+                and self.state not in {"stopping", "closing"}
+                and self.task
+                and not self.task.done()
+            ):
                 self.termination.request("cancelled")
                 self.task.cancel()
             if self.host:
                 for event in reply.get("context_events", []):
                     self.host.pending_context.setdefault(event["id"], event)
-            async with self.aux_lock:
-                del self.pending_updates[: reply.get("context_accepted", len(updates))]
-                del self.pending_logs[: len(logs)]
-                self.log_sequence = seq
-                await self.persist_aux()
+            if not lifecycle_only:
+                async with self.aux_lock:
+                    del self.pending_updates[: reply.get("context_accepted", len(updates))]
+                    del self.pending_logs[: len(logs)]
+                    self.log_sequence = seq
+                    await self.persist_aux()
             self.next_heartbeat = time.monotonic() + 10
             self.synced_aux = self.outcome is not None
             return len(records or [])
@@ -282,6 +292,7 @@ class Session:
                     await self.sync()
             except EvidenceDeliveryError as exc:
                 if not exc.retryable:
+                    self.termination.request("evidence_failure")
                     if self.text:
                         await self.text.failure(
                             "persistence",
@@ -292,6 +303,7 @@ class Session:
                         self.task.cancel()
                     raise
             except (OSError, RuntimeError):
+                self.termination.request("evidence_failure")
                 self.manager.capacity.storage_healthy = False
                 if self.task:
                     self.task.cancel()
@@ -314,7 +326,7 @@ class Session:
             if (
                 time.monotonic() > self.lease_until or time.time() > self.request.expires_at
             ) and self.state != "prepared":
-                self.termination.request("cancelled")
+                self.termination.request("execution_lease_expired")
                 if self.task:
                     self.task.cancel()
                 elif not self.connected:
@@ -325,6 +337,7 @@ class Session:
                 and not self.connected
                 and time.monotonic() - self.created > 60
             ):
+                self.termination.request("connection_timeout")
                 if self.task:
                     self.task.cancel()
                 else:
@@ -415,13 +428,14 @@ class Session:
         self.connected = True
         self.state = "running"
         outcome = {}
+        execution_deadline = None
         try:
             host = self.make_host()
             limit = min(
                 self.manager.settings.call_max_duration_seconds,
                 self.request.snapshot.get("call_limits", {}).get("max_duration_secs", 600),
             )
-            async with asyncio.timeout(limit):
+            async with asyncio.timeout(limit) as execution_deadline:
                 if self.request.channel == "sim7600":
                     from voice_runtime.telephony.driver import Sim7600CallDriver
 
@@ -445,12 +459,21 @@ class Session:
         except asyncio.CancelledError:
             self.termination.request("cancelled")
         except Exception as exc:
-            self.termination.request("pipeline_failure")
             exception_event("voice-runtime", exc)
             from voice_runtime.diagnostics import exception_diagnostic
             from voice_runtime.telephony.session import Sim7600ConnectionTimeout
 
-            if isinstance(exc, Sim7600ConnectionTimeout):
+            if execution_deadline and execution_deadline.expired():
+                self.termination.request("duration_limit")
+                self.tracker.diagnostic(
+                    severity="error",
+                    category="call_termination",
+                    source="runtime",
+                    code="duration_limit",
+                    message="Call reached its configured execution deadline",
+                )
+            elif isinstance(exc, Sim7600ConnectionTimeout):
+                self.termination.request("connection_timeout")
                 self.tracker.diagnostic(
                     severity="error",
                     category="call_connection",
@@ -463,6 +486,7 @@ class Session:
                     },
                 )
             else:
+                self.termination.request("pipeline_failure")
                 self.tracker.diagnostic(
                     **exception_diagnostic(exc, source="runtime", code="call_execution_failed")
                 )
@@ -480,7 +504,10 @@ class Session:
             try:
                 try:
                     if self.driver:
-                        cleanup = await self.driver.close()
+                        cleanup = await asyncio.wait_for(
+                            self.driver.close(),
+                            timeout=self.manager.settings.sim7600_release_timeout_seconds + 25,
+                        )
                         if not cleanup.get("release_confirmed"):
                             outcome["dispatch_uncertain"] = True
                             self.tracker.diagnostic(
@@ -493,9 +520,27 @@ class Session:
                                 metadata=cleanup,
                             )
                     elif self.host:
-                        await self.host.close()
+                        await asyncio.wait_for(self.host.close(), timeout=10)
+                    self.termination.summary.cleanup_status = (
+                        "uncertain"
+                        if outcome.get("dispatch_uncertain") and not self.call_sid
+                        else "confirmed"
+                    )
+                except Exception as exc:
+                    self.termination.summary.cleanup_status = "uncertain"
+                    exception_event("voice-runtime", exc)
+                    self.tracker.diagnostic(
+                        severity="error",
+                        category="call_cleanup",
+                        source="runtime",
+                        code="transport_cleanup_failed",
+                        uncertain=True,
+                        message="Pipeline or modem cleanup failed; release requires verification",
+                    )
+                # Media/controller cleanup must still run if pipeline cleanup failed.
+                try:
                     if self.media:
-                        await self.media.close()
+                        await asyncio.wait_for(self.media.close(), timeout=15)
                     elif self.call_sid:
                         from voice_runtime.telephony.twilio import (
                             TwilioCallController,
@@ -508,17 +553,31 @@ class Session:
                                 for k, v in self.request.telephony_credentials.items()
                             }
                         )
-                        await TwilioCallController(creds).hangup(self.call_sid)
-                    self.termination.summary.cleanup_status = (
-                        "uncertain"
-                        if outcome.get("dispatch_uncertain") and not self.call_sid
-                        else "confirmed"
-                    )
+                        await asyncio.wait_for(
+                            TwilioCallController(creds).hangup(self.call_sid), timeout=15
+                        )
                 except Exception as exc:
                     self.termination.summary.cleanup_status = "uncertain"
                     exception_event("voice-runtime", exc)
+                    self.tracker.diagnostic(
+                        severity="error",
+                        category="call_cleanup",
+                        source="runtime",
+                        code="transport_cleanup_failed",
+                        uncertain=True,
+                        message="Media release failed; transport cleanup is unconfirmed",
+                    )
                 if self.driver and isinstance(getattr(self.driver, "call_outcome", None), dict):
+                    from voice_runtime.execution.runner import apply_transport_outcome
+
+                    _, reason = apply_transport_outcome(
+                        {"termination": self.termination.snapshot()},
+                        self.driver.call_outcome,
+                        [],
+                    )
                     self.termination.summary.transport_evidence = self.driver.call_outcome
+                    if reason:
+                        self.termination.summary.cause = reason
                 if self.text and self.text.pending_tasks:
                     await asyncio.gather(*tuple(self.text.pending_tasks), return_exceptions=True)
                 self.request.credentials.clear()
@@ -529,14 +588,20 @@ class Session:
                 self.delivery_task.cancel()
                 await asyncio.gather(self.delivery_task, return_exceptions=True)
                 artifacts_incomplete = False
-                if self.trace:
-                    await asyncio.to_thread(self.trace.close)
-                    self.manager.dropped_logs += self.trace.dropped
-                    await asyncio.sleep(0)
-                await asyncio.to_thread(self.diagnostic_capture.close)
-                if self.request.channel != "text_test" and (
-                    self.host or self.diagnostic_capture.path.stat().st_size
-                ):
+                try:
+                    if self.trace:
+                        await asyncio.to_thread(self.trace.close)
+                        self.manager.dropped_logs += self.trace.dropped
+                        await asyncio.sleep(0)
+                except Exception as exc:
+                    artifacts_incomplete = True
+                    exception_event("voice-runtime", exc)
+                try:
+                    await asyncio.to_thread(self.diagnostic_capture.close)
+                except Exception as exc:
+                    artifacts_incomplete = True
+                    exception_event("voice-runtime", exc)
+                if self.request.channel != "text_test":
                     try:
                         async with self.manager.upload_semaphore:
                             await self.upload_artifacts()
@@ -550,9 +615,9 @@ class Session:
                     "provider_call_id": self.call_sid,
                     "artifacts_incomplete": artifacts_incomplete,
                 }
-                await self.persist_aux()
                 incomplete = False
                 try:
+                    await self.persist_aux()
                     async with asyncio.timeout(30):
                         await self.spool.flush()
                         while await self.spool.deliver_once(self):
@@ -562,7 +627,24 @@ class Session:
                             await self.sync()
                 except Exception:
                     incomplete = True
-                await self.spool.close()
+                self.outcome["evidence_incomplete"] = incomplete
+                # Send ownership release independently of a rejected evidence batch.
+                # Unsaved records remain in the durable spool for investigation/replay.
+                try:
+                    await self.persist_aux()
+                except Exception:
+                    incomplete = True
+                    self.outcome["evidence_incomplete"] = True
+                try:
+                    await self.spool.close()
+                except Exception as exc:
+                    incomplete = True
+                    self.outcome["evidence_incomplete"] = True
+                    exception_event("voice-runtime", exc)
+                try:
+                    await self.sync(lifecycle_only=True)
+                except Exception:
+                    incomplete = True
                 self.cleanup_pending = incomplete or artifacts_incomplete
                 self.state = (
                     "uncertain"
@@ -624,6 +706,7 @@ class Session:
                         await self.upload_artifacts()
                     if self.outcome:
                         self.outcome["artifacts_incomplete"] = False
+                        await self.sync(lifecycle_only=True)
                         while await self.spool.deliver_once(self):
                             pass
                         await self.sync()

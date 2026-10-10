@@ -1,7 +1,6 @@
 """Verify stopped execution and idle hardware without dialing or hanging up a live call."""
 
 import asyncio
-from dataclasses import asdict
 
 import serial
 from voice_runtime.telephony.sim7600 import Sim7600Modem
@@ -54,9 +53,7 @@ async def verify_modem_recovery(manager, body):
     try:
         async with asyncio.timeout(15):
             snapshot = await modem.probe_status()
-            status = asdict(snapshot)
-            status.pop("available_transports", None)
-            status["call_state"] = snapshot.call_state.value
+            status = snapshot.endpoint_payload()
             if not snapshot.alive or not snapshot.serial_connected or snapshot.last_error:
                 return blocked(
                     "probe_failed",
@@ -72,9 +69,7 @@ async def verify_modem_recovery(manager, body):
             if snapshot.usb_audio_active:
                 await modem.stop_usb_audio()
                 snapshot = await modem.probe_status()
-                status = asdict(snapshot)
-                status.pop("available_transports", None)
-                status["call_state"] = snapshot.call_state.value
+                status = snapshot.endpoint_payload()
                 if (
                     not snapshot.alive
                     or not snapshot.serial_connected

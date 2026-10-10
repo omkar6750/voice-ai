@@ -23,6 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { isActive, duration, stamp } from "./model";
+import { EndCallButton } from "./end-call-button";
 import { StatusBadge } from "./status";
 import { Waterfall } from "./waterfall";
 import { Transcript } from "./transcript";
@@ -47,7 +48,11 @@ function DebugLog({ artifact }: { artifact: Artifact }) {
     try {
       const sessionToken = await getToken();
       if (!sessionToken) throw new Error("Sign in required");
-      const blob = await requestBlob(sessionToken, "/artifacts/" + artifact.id + "/file", supportSession);
+      const blob = await requestBlob(
+        sessionToken,
+        "/artifacts/" + artifact.id + "/file",
+        supportSession,
+      );
       setContent(await blob.text());
     } catch (cause) {
       toast.error(
@@ -117,7 +122,9 @@ export function RunDetailPage() {
           api<RunDetail>("/runs/" + runId),
           api<Timeline>("/runs/" + runId + "/timeline"),
           api<{ runs: RunSummary[] }>("/runs"),
-          supportSession ? Promise.resolve({ artifacts: [] as Artifact[] }) : api<{ artifacts: Artifact[] }>("/runs/" + runId + "/artifacts"),
+          supportSession
+            ? Promise.resolve({ artifacts: [] as Artifact[] })
+            : api<{ artifacts: Artifact[] }>("/runs/" + runId + "/artifacts"),
         ]);
         if (currentRun.current !== runId) return;
         setRun(detail);
@@ -169,7 +176,10 @@ export function RunDetailPage() {
     timeline?.spans.filter((span) => span.category === "llm") ?? [];
   const composerSpans =
     timeline?.spans.filter((span) => span.category === "composer") ?? [];
-  const composerDuration = composerSpans.reduce((sum, span) => sum + (span.duration_ms ?? 0), 0);
+  const composerDuration = composerSpans.reduce(
+    (sum, span) => sum + (span.duration_ms ?? 0),
+    0,
+  );
   const llmFirstToken =
     llmSpans
       .filter((span) => span.ttfb_ms != null)
@@ -223,7 +233,10 @@ export function RunDetailPage() {
                   <span className="truncate text-muted-foreground">
                     {item.channel}
                   </span>
-                  <StatusBadge status={item.status} outcome={item.call_outcome} />
+                  <StatusBadge
+                    status={item.status}
+                    outcome={item.call_outcome}
+                  />
                 </span>
               </Link>
             ))}
@@ -237,7 +250,11 @@ export function RunDetailPage() {
         >
           <ArrowLeft className="size-4" /> All runs
         </Link>
-        <Button asChild variant="outline" size="sm" className="mb-3 ml-3"><Link to={`/referrals?run=${runId}`}>Referrals from this conversation</Link></Button>
+        <Button asChild variant="outline" size="sm" className="mb-3 ml-3">
+          <Link to={`/referrals?run=${runId}`}>
+            Referrals from this conversation
+          </Link>
+        </Button>
         {loading && !run ? (
           <div className="flex flex-col gap-3">
             <Skeleton className="h-10 w-2/3" />
@@ -282,6 +299,13 @@ export function RunDetailPage() {
                 </div>
               </div>
               <div className="flex gap-2">
+                <EndCallButton
+                  key={run.id}
+                  run={run}
+                  onRequested={() => {
+                    void load(true);
+                  }}
+                />
                 <Button
                   variant="outline"
                   size="sm"
@@ -313,10 +337,14 @@ export function RunDetailPage() {
               <span>
                 Provider operations <strong>{timeline.spans.length}</strong>
               </span>
-              {composerSpans.length > 0 && <span>
-                WhatsApp composer <strong>{composerSpans.length}</strong>
-                {composerDuration > 0 ? ` · ${duration(composerDuration)} total` : ""}
-              </span>}
+              {composerSpans.length > 0 && (
+                <span>
+                  WhatsApp composer <strong>{composerSpans.length}</strong>
+                  {composerDuration > 0
+                    ? ` · ${duration(composerDuration)} total`
+                    : ""}
+                </span>
+              )}
               <span>
                 LLM calls <strong>{llmSpans.length}</strong>
               </span>
@@ -343,7 +371,10 @@ export function RunDetailPage() {
                 Avg LLM first token{" "}
                 <strong>
                   {llmFirstToken.length
-                    ? duration(llmFirstToken.reduce((a, b) => a + b, 0) / llmFirstToken.length)
+                    ? duration(
+                        llmFirstToken.reduce((a, b) => a + b, 0) /
+                          llmFirstToken.length,
+                      )
                     : "Not recorded"}
                 </strong>
               </span>
@@ -409,7 +440,9 @@ export function RunDetailPage() {
                     )}
                   </CardContent>
                 </Card>
-                {debugLogs.map((artifact) => <DebugLog key={artifact.id} artifact={artifact} />)}
+                {debugLogs.map((artifact) => (
+                  <DebugLog key={artifact.id} artifact={artifact} />
+                ))}
               </div>
               <Inspector
                 selection={selection}

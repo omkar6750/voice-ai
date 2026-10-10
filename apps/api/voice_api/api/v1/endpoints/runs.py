@@ -16,6 +16,7 @@ from voice_api.models import (
     ConversationMessage,
     Exchange,
     Run,
+    RuntimeAssignment,
     ToolInvocation,
     TraceSpan,
 )
@@ -31,6 +32,42 @@ from voice_shared.request_evidence import is_internal_span
 router = APIRouter(tags=["runs"])
 Session = Depends(get_session)
 Operator = Depends(require_legacy_owner)
+
+
+class StopRunResponse(BaseModel):
+    run_id: str
+    status: str
+    stop_requested: bool
+
+
+@router.post("/runs/{run_id}/stop", response_model=StopRunResponse)
+async def stop_run(run_id: str, session: AsyncSession = Session, _: None = Operator) -> dict:
+    """Request transport cleanup; never release a live modem from the dashboard alone."""
+    from voice_api.models.common import now
+    from voice_api.services.runtime_dispatch import stop
+
+    run = await session.get(Run, run_id, with_for_update=True, populate_existing=True)
+    if run is None:
+        raise HTTPException(404, "Run not found")
+    if run.channel not in {"phone", "browser"}:
+        raise HTTPException(409, "Use the chat test controls to end this session")
+    if run.status in {"completed", "failed", "cancelled"}:
+        return {"run_id": run.id, "status": run.status, "stop_requested": False}
+    assignment = await session.get(RuntimeAssignment, run.id, with_for_update=True)
+    if assignment:
+        await stop(session, run.id)
+        return {"run_id": run.id, "status": run.status, "stop_requested": True}
+    if run.status != "queued":
+        raise HTTPException(409, "Execution owner is unavailable; reconcile before releasing it")
+    call = await session.scalar(select(Call).where(Call.run_id == run.id))
+    run.status = "cancelled"
+    run.ended_at = now()
+    run.final_state = {**(run.final_state or {}), "cancelled_before_dispatch": True}
+    if call:
+        call.status = "cancelled"
+        call.ended_at = run.ended_at
+    await session.commit()
+    return {"run_id": run.id, "status": run.status, "stop_requested": True}
 
 
 class BrowserRunRequest(BaseModel):

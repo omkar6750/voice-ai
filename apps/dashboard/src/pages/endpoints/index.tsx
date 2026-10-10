@@ -341,6 +341,19 @@ export function EndpointsPage() {
               status.rssi != null ? 2 * status.rssi - 113 : null;
             const monitoring = monitoringIds.has(ep.id);
             const probing = probingEndpointId === ep.id;
+            const needsRecovery = ep.active_run_status === "uncertain";
+            const simReady =
+              status.sim_status_known === false ? null : status.sim_ready;
+            const voiceRegistered =
+              status.voice_registration_known === false
+                ? null
+                : status.voice_registered;
+            const dataRegistered =
+              status.data_registration_known === false
+                ? null
+                : status.data_registered;
+            const stale =
+              checkedAt !== null && Date.now() - checkedAt.getTime() >= 120_000;
             return (
               <Card key={ep.id} className="flex flex-col justify-between">
                 <CardHeader className="pb-3">
@@ -349,8 +362,14 @@ export function EndpointsPage() {
                       <Radio className="size-4 text-primary" />
                       {ep.name}
                     </CardTitle>
-                    <Badge variant={status.alive ? "default" : "secondary"}>
-                      {status.alive ? "Online" : "Offline"}
+                    <Badge
+                      variant={status.alive && !stale ? "default" : "secondary"}
+                    >
+                      {stale
+                        ? "Status stale"
+                        : status.alive
+                          ? "Online"
+                          : "Offline"}
                     </Badge>
                   </div>
                   <CardDescription className="text-xs">
@@ -364,11 +383,11 @@ export function EndpointsPage() {
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">SIM Card:</span>
                       <span className="font-medium">
-                        {status.sim_ready === true ? (
+                        {simReady === true ? (
                           <span className="flex items-center gap-1 text-emerald-600">
                             <CheckCircle2 className="size-3" /> Ready
                           </span>
-                        ) : status.sim_ready === false ? (
+                        ) : simReady === false ? (
                           <span className="flex items-center gap-1 text-destructive">
                             <XCircle className="size-3" /> Not Ready
                           </span>
@@ -401,9 +420,9 @@ export function EndpointsPage() {
                         Voice network:
                       </span>
                       <span className="font-medium">
-                        {status.voice_registered === true
+                        {voiceRegistered === true
                           ? "Registered"
-                          : status.voice_registered === false
+                          : voiceRegistered === false
                             ? "Not registered"
                             : "Unknown"}
                       </span>
@@ -414,11 +433,11 @@ export function EndpointsPage() {
                         Data network:
                       </span>
                       <span className="font-medium">
-                        {status.data_registered === true
+                        {dataRegistered === true
                           ? status.packet_attached
                             ? "Registered · attached"
                             : "Registered · not attached"
-                          : status.data_registered === false
+                          : dataRegistered === false
                             ? "Not registered"
                             : "Unknown"}
                       </span>
@@ -494,7 +513,8 @@ export function EndpointsPage() {
                     {ep.active_run_id ? (
                       <Badge variant="destructive" asChild>
                         <Link to={`/runs/${ep.active_run_id}`}>
-                          Occupied (Run #{ep.active_run_id.slice(0, 8)})
+                          {needsRecovery ? "Needs recovery" : "Occupied"} (Run #
+                          {ep.active_run_id.slice(0, 8)})
                         </Link>
                       </Badge>
                     ) : (
@@ -529,7 +549,9 @@ export function EndpointsPage() {
                         : probing
                           ? "Testing…"
                           : ep.active_run_id
-                            ? "Modem in use"
+                            ? needsRecovery
+                              ? "Recover before testing"
+                              : "Modem in use"
                             : "Test connection"}
                     </Button>
                   </div>

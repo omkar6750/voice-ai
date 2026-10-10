@@ -6,14 +6,17 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from voice_runtime.execution.runner import execute_call
+from voice_runtime.execution.runner import apply_transport_outcome, execute_call
 from voice_runtime.execution.termination import CallTermination
 
 
-async def run_driver(tmp_path, state, *, cleanup_error=None):
+async def run_driver(tmp_path, state, *, cleanup_error=None, call_outcome=None):
     requests = []
     driver = SimpleNamespace(
-        prepare=AsyncMock(), call=AsyncMock(return_value=state), close=AsyncMock()
+        prepare=AsyncMock(),
+        call=AsyncMock(return_value=state),
+        close=AsyncMock(),
+        call_outcome=call_outcome,
     )
     driver.close.side_effect = cleanup_error
 
@@ -97,6 +100,43 @@ async def test_driver_without_new_termination_contract_keeps_existing_behavior(t
     result, requests = await run_driver(tmp_path, {"legacy_result": "ok"})
     assert result == "completed"
     assert requests[-1][1]["final_state"]["runtime"] == {"legacy_result": "ok"}
+
+
+def test_modem_release_evidence_updates_unknown_call_outcome():
+    termination = CallTermination()
+    termination.request("disconnect_unknown")
+    termination.pipeline_finished()
+    state = {"termination": termination.snapshot()}
+    evidence = {
+        "reason": "remote_hangup",
+        "confidence": "high",
+        "registration": {"voice_registered": True, "rssi": 15},
+        "events": [{"signal": "NO CARRIER"}],
+    }
+    diagnostics = [
+        {
+            "category": "call_termination",
+            "code": "disconnect_unknown",
+            "uncertain": True,
+        }
+    ]
+    final_state, reason = apply_transport_outcome(state, evidence, diagnostics)
+    reported = final_state["termination"]
+    assert reason == "remote_hangup"
+    assert reported["cause"] == "remote_hangup"
+    assert reported["transport_evidence"] == evidence
+    assert diagnostics[0]["code"] == "remote_hangup"
+    assert diagnostics[0]["uncertain"] is False
+
+
+def test_transport_disconnect_evidence_does_not_hide_pipeline_failure():
+    final_state, reason = apply_transport_outcome(
+        {"termination": {"cause": "pipeline_failure"}},
+        {"reason": "remote_hangup", "confidence": "high"},
+        [],
+    )
+    assert reason is None
+    assert final_state["termination"]["cause"] == "pipeline_failure"
 
 
 async def test_uncertain_transport_remains_reserved_without_final_success(tmp_path):

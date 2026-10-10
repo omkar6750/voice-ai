@@ -389,12 +389,25 @@ async def start(body: SessionIdentity, request: Request):
 
 @app.post("/v1/sessions/stop", dependencies=[Depends(authenticate)])
 async def stop(body: SessionIdentity, request: Request):
-    s = request.app.state.manager.get(body.run_id, body.generation, body.boot_id)
-    s.termination.request("caller_hangup")
-    if s.task:
-        s.task.cancel()
-    elif not s.closed.is_set():
-        s.task = asyncio.create_task(s.finish({"status": "failed"}))
+    manager = request.app.state.manager
+    async with manager.lock:
+        s = manager.get(body.run_id, body.generation, body.boot_id)
+        if s.closed.is_set() or s.state in {"stopping", "closing"}:
+            return {"state": s.state}
+        s.state = "stopping"
+        s.termination.request("cancelled")
+        task = s.task
+        if task:
+            task.cancel()
+
+        async def finish_stop():
+            if task:
+                await asyncio.gather(task, return_exceptions=True)
+            # Cancellation before a coroutine starts never executes its finally block.
+            if not s.closed.is_set():
+                await s.finish({"status": "failed"})
+
+        s.task = asyncio.create_task(finish_stop())
     return {"state": s.state}
 
 
@@ -602,7 +615,6 @@ async def twilio(websocket: WebSocket, correlation_id: str):
 
 @app.post("/v1/modems/probe", dependencies=[Depends(authenticate)])
 async def probe_modem(body: ModemProbe, request: Request):
-    from dataclasses import asdict
     from datetime import UTC, datetime
 
     from voice_runtime.telephony.sim7600 import Sim7600Modem
@@ -624,9 +636,7 @@ async def probe_modem(body: ModemProbe, request: Request):
     modem = Sim7600Modem(body.at_port, body.baudrate, command_timeout=body.at_timeout_secs)
     try:
         async with asyncio.timeout(30):
-            status = asdict(await modem.probe_status())
-            status.pop("available_transports", None)
-            status["call_state"] = status["call_state"].value
+            status = (await modem.probe_status()).endpoint_payload()
             return {"status": status}
     except Exception as exc:
         exception_event("voice-runtime", exc)
