@@ -1,6 +1,8 @@
 """Credential-free settings and runtime capabilities for the supported voice stack."""
 
+import json
 from copy import deepcopy
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, ValidationInfo, model_validator
@@ -9,6 +11,19 @@ from .base import ConfigModel
 from .gnani import GNANI_LANGUAGES, GNANI_VOICES
 
 SARVAM_LLM_MODELS = ("sarvam-105b", "sarvam-105b-conversations")
+SARVAM_V4_CATALOG = json.loads(Path(__file__).with_name("sarvam_v4_voices.json").read_text())
+SARVAM_V4_VOICES = {voice["id"]: voice for voice in SARVAM_V4_CATALOG["voices"]}
+SARVAM_V4_LANGUAGES = [
+    "en-IN",
+    "hi-IN",
+    "bn-IN",
+    "gu-IN",
+    "kn-IN",
+    "mr-IN",
+    "pa-IN",
+    "ta-IN",
+    "te-IN",
+]
 
 # Bulbul v3's documented speakers. This credential-free catalog is returned by
 # /providers; it is not a provider voice-list API call. Keep IDs case-sensitive.
@@ -82,6 +97,8 @@ class SarvamRealtimeSTTConfig(ConfigModel):
     silence_duration_ms: int = Field(default=500, gt=0)
     min_speech_duration_ms: int = Field(default=250, gt=0)
     prefix_padding_ms: int | None = Field(default=None, ge=0)
+    turn_timing: Literal["local", "server_only"] = "local"
+    turn_stop_timeout_seconds: float | None = Field(default=None, ge=1, le=10)
 
 
 class STTConfig(ConfigModel):
@@ -199,6 +216,15 @@ class CartesiaTTSConfig(ConfigModel):
     pronunciation_dict_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
+class SarvamTTSConfig(ConfigModel):
+    pitch: float | None = Field(default=None, ge=-0.5, le=0.5)
+    loudness: float | None = Field(default=None, ge=0.1, le=2.5)
+    enable_preprocessing: bool | None = None
+    temperature: float | None = Field(default=None, ge=0.01, le=1)
+    min_buffer_size: int | None = Field(default=None, ge=30, le=200)
+    max_chunk_length: int | None = Field(default=None, ge=50, le=500)
+
+
 class TTSConfig(ConfigModel):
     provider: Literal["sarvam", "cartesia", "gnani"] = "sarvam"
     model: str = "bulbul:v3"
@@ -206,6 +232,7 @@ class TTSConfig(ConfigModel):
     language: str = "en-IN"
     pace: float = Field(default=1.0, gt=0)
     cartesia: CartesiaTTSConfig | None = None
+    sarvam: SarvamTTSConfig | None = None
 
     @model_validator(mode="after")
     def validate_provider_model(self):
@@ -214,13 +241,42 @@ class TTSConfig(ConfigModel):
             "cartesia": "sonic-3",
             "gnani": "timbre-v2.5",
         }[self.provider]
-        if self.model != expected:
+        if self.model != expected and not (
+            self.provider == "sarvam" and self.model == "bulbul:v4-flash"
+        ):
             raise ValueError(
                 f"TTS model '{self.model}' is not supported by provider '{self.provider}'; "
                 f"use '{expected}'"
             )
         if self.provider != "cartesia" and self.cartesia is not None:
             raise ValueError("Cartesia settings require the Cartesia provider")
+        if self.sarvam is not None and self.provider != "sarvam":
+            raise ValueError("Sarvam settings require the Sarvam provider")
+        if self.provider == "sarvam":
+            if not self.voice.strip():
+                raise ValueError("Select a Sarvam voice explicitly")
+            if (
+                self.sarvam
+                and self.sarvam.min_buffer_size
+                and self.sarvam.max_chunk_length
+                and self.sarvam.min_buffer_size > self.sarvam.max_chunk_length
+            ):
+                raise ValueError("Minimum buffer cannot exceed maximum chunk length")
+            if self.model == "bulbul:v4-flash":
+                if self.voice not in SARVAM_V4_VOICES:
+                    raise ValueError("Select an explicit Bulbul v4 persona")
+                if self.language not in SARVAM_V4_LANGUAGES:
+                    raise ValueError("Bulbul v4 has no persona for this language; use v3")
+                if not 0.5 <= self.pace <= 2:
+                    raise ValueError("Bulbul v4 pace must be between 0.5 and 2")
+                if self.sarvam and self.sarvam.temperature is not None:
+                    raise ValueError("Bulbul v4 does not support temperature")
+            elif self.voice in SARVAM_V4_VOICES:
+                raise ValueError("Bulbul v4 personas require bulbul:v4-flash")
+            elif self.sarvam and (
+                self.sarvam.pitch is not None or self.sarvam.loudness is not None
+            ):
+                raise ValueError("Bulbul v3 does not support pitch or loudness")
         if self.provider == "gnani":
             if self.voice not in GNANI_VOICES:
                 raise ValueError("Select a supported Gnani Timbre v2.5 voice")
@@ -258,7 +314,7 @@ RUNTIME_PROVIDER_CAPABILITIES: dict[str, dict] = {
         "models_by_slot": {
             "llm": list(SARVAM_LLM_MODELS),
             "stt": ["saaras:v3-realtime", "saaras:v4"],
-            "tts": ["bulbul:v3"],
+            "tts": ["bulbul:v3", "bulbul:v4-flash"],
         },
         "languages": ["en-IN", "hi-IN", "mr-IN", "te-IN"],
         "voices": [
@@ -300,7 +356,59 @@ def runtime_provider_capability(provider: str) -> dict:
     """Return a defensive copy of one provider's runtime capability definition."""
 
     try:
-        return deepcopy(RUNTIME_PROVIDER_CAPABILITIES[provider])
+        result = deepcopy(RUNTIME_PROVIDER_CAPABILITIES[provider])
+        if provider == "sarvam":
+            result["voices_by_model"] = {
+                "bulbul:v3": deepcopy(result["voices"]),
+                "bulbul:v4-flash": [
+                    {**voice, "name": f"{voice['name']} · {voice['language']} · {voice['style']}"}
+                    for voice in SARVAM_V4_CATALOG["voices"]
+                ],
+            }
+            result["languages_by_model"] = {
+                "bulbul:v3": [
+                    "en-IN",
+                    "hi-IN",
+                    "bn-IN",
+                    "gu-IN",
+                    "kn-IN",
+                    "ml-IN",
+                    "mr-IN",
+                    "od-IN",
+                    "pa-IN",
+                    "ta-IN",
+                    "te-IN",
+                ],
+                "bulbul:v4-flash": SARVAM_V4_LANGUAGES,
+            }
+            common = {
+                "pace": {"type": "number", "minimum": 0.5, "maximum": 2, "default": 1},
+                "min_buffer_size": {"type": "number", "minimum": 30, "maximum": 200, "default": 50},
+                "max_chunk_length": {
+                    "type": "number",
+                    "minimum": 50,
+                    "maximum": 500,
+                    "default": 150,
+                },
+            }
+            result["fields_by_model"] = {
+                "bulbul:v3": {
+                    **common,
+                    "temperature": {
+                        "type": "number",
+                        "minimum": 0.01,
+                        "maximum": 1,
+                        "default": 0.6,
+                    },
+                },
+                "bulbul:v4-flash": {
+                    **common,
+                    "pitch": {"type": "number", "minimum": -0.5, "maximum": 0.5, "default": 0},
+                    "loudness": {"type": "number", "minimum": 0.1, "maximum": 2.5, "default": 1},
+                    "enable_preprocessing": {"type": "boolean", "default": True},
+                },
+            }
+        return result
     except KeyError as exc:
         raise ValueError(f"Unknown runtime provider '{provider}'") from exc
 

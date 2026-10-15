@@ -28,9 +28,12 @@ from voice_api.api.v1.endpoints.platform import router as platform_router
 from voice_api.api.v1.endpoints.recordings import router as recordings_router
 from voice_api.api.v1.endpoints.referrals import router as referrals_router
 from voice_api.api.v1.endpoints.run_debug import router as run_debug_router
+from voice_api.api.v1.endpoints.runtime_readiness import router as readiness_router
 from voice_api.core.runtime_config import use_separate_runtime
 
 api_router = APIRouter()
+
+api_router.include_router(readiness_router)
 api_router.include_router(mcp_tokens_router)
 api_router.include_router(run_debug_router)
 

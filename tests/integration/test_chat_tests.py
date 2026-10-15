@@ -22,6 +22,13 @@ from voice_api.services import chat_service
 from voice_runtime.contracts import AgentConfig
 
 
+@pytest.fixture(autouse=True)
+def ready_runtime(monkeypatch):
+    # Dispatch protocol is mocked in these rollback-only persistence tests.
+    # Real readiness HTTP state transitions are covered in test_runtime_readiness.
+    monkeypatch.setattr("voice_api.services.runtime_readiness.require_runtime_ready", AsyncMock())
+
+
 @pytest.fixture
 async def version(database):
     agent = Agent(name="chat-test-" + str(uuid4()))
@@ -31,7 +38,16 @@ async def version(database):
         {
             "name": "Chat test",
             "classifier": {"enabled": False},
-            "flow": {"initial_node": "opening", "nodes": [{"id": "opening", "terminal": True}]},
+            "flow": {
+                "initial_node": "opening",
+                "nodes": [
+                    {
+                        "id": "opening",
+                        "terminal": True,
+                        "task_messages": [{"role": "user", "content": "Say hello."}],
+                    }
+                ],
+            },
         }
     ).model_dump(mode="json")
     version = AgentVersion(agent_id=agent.id, version=1, revision=1, status="draft", config=config)
@@ -41,7 +57,9 @@ async def version(database):
 
 
 async def test_frozen_draft_contact_override_and_text_credentials(database, version):
-    contact = Contact(name="Tester", phone_number="+919876543210", timezone="Asia/Calcutta")
+    contact = Contact(
+        name="Tester", first_name="Tester", phone_number="+919876543210", timezone="Asia/Calcutta"
+    )
     database.add(contact)
     await database.commit()
     row = await chat_service.create(
@@ -63,7 +81,8 @@ async def test_frozen_draft_contact_override_and_text_credentials(database, vers
     assert row.snapshot["flow"]["nodes"][0].get("role_message") != "New instruction"
 
 
-async def test_commit_ack_replay_and_hidden_voice_runs(database, version):
+async def test_commit_ack_replay_and_hidden_voice_runs(database, version, monkeypatch):
+    monkeypatch.setenv("VOICE_ENV", "prod")
     row = await chat_service.create(database, CreateChat(agent_version_id=version.id))
     run = Run(
         channel="text_test",
@@ -342,7 +361,13 @@ async def test_phone_dispatch_compiles_before_claiming(database, version, monkey
 
     version.status = "published"
     version.published_at = now()
-    contact = Contact(name="Dispatch test", phone_number="+12025550123", timezone="UTC")
+    contact = Contact(
+        name="Dispatch test",
+        first_name="Dispatch",
+        last_name="test",
+        phone_number="+12025550123",
+        timezone="UTC",
+    )
     endpoint = RuntimeEndpoint(
         name="dispatch-" + str(uuid4()), config={"at_port": "COM3", "audio_port": "COM4"}
     )

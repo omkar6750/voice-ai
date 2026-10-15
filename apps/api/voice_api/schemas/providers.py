@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from voice_runtime.contracts.cadence import JevQuestion
 
 ProviderSlot = Literal["llm", "stt", "tts", "embedding"]
@@ -18,6 +18,9 @@ class ProviderField(BaseModel):
     type: Literal["string", "number", "boolean", "object"]
     runtime_supported: bool = True
     description: str | None = None
+    minimum: float | None = None
+    maximum: float | None = None
+    default: JsonValue = None
 
 
 class ProviderVoice(BaseModel):
@@ -26,6 +29,8 @@ class ProviderVoice(BaseModel):
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     gender: str | None = None
+    language: str | None = None
+    style: str | None = None
 
 
 class ModelPricingResponse(BaseModel):
@@ -138,6 +143,9 @@ class ProviderEntryResponse(BaseModel):
     models: list[str]
     models_by_slot: dict[ProviderSlot, list[str]]
     voices: list[ProviderVoice] = Field(default_factory=list)
+    voices_by_model: dict[str, list[ProviderVoice]] = Field(default_factory=dict)
+    languages_by_model: dict[str, list[str]] = Field(default_factory=dict)
+    fields_by_model: dict[str, dict[str, ProviderField]] = Field(default_factory=dict)
     languages: list[str] = Field(default_factory=list)
     fields: dict[str, ProviderField] = Field(default_factory=dict)
     status: ProviderStatus

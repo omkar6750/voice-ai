@@ -2506,7 +2506,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4,<5" },
     { name = "mcp", specifier = ">=2.2,<3" },
     { name = "pgvector", specifier = ">=0.3,<1" },
-    { name = "pipecat-ai", extras = ["cartesia", "cli", "google", "groq", "openrouter", "sarvam", "silero", "websocket"], specifier = ">=1.11,<2" },
+    { name = "pipecat-ai", extras = ["cartesia", "cli", "google", "groq", "openrouter", "sarvam", "silero", "websocket"], specifier = "==1.11.0" },
     { name = "psutil", specifier = ">=6,<8" },
     { name = "pydantic-settings", specifier = ">=2.9,<3" },
     { name = "pypdf", specifier = ">=5,<7" },

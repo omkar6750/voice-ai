@@ -83,7 +83,8 @@ async def test_sarvam_bulbul_voice_catalog_without_provider_requests(monkeypatch
     )
     sarvam = next(entry for entry in registry.providers if entry.provider == "sarvam")
     voices = {voice.id: voice for voice in sarvam.voices}
-    assert sarvam.models_by_slot["tts"] == ["bulbul:v3"]
+    assert sarvam.models_by_slot["tts"] == ["bulbul:v3", "bulbul:v4-flash"]
+    assert len(sarvam.voices_by_model["bulbul:v4-flash"]) == 222
     assert sarvam.fields["voice"].runtime_supported
     assert len(voices) == 37
     assert voices["shubh"].gender == "male"

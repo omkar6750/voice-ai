@@ -11,6 +11,7 @@ import httpx
 from fastapi import HTTPException
 from sqlalchemy import select
 from voice_shared.contracts import configuration_hash
+from voice_shared.logging import emit
 
 from voice_api.core.runtime_config import get_runtime_settings as get_settings
 from voice_api.models import Call, Run, RuntimeAssignment
@@ -51,11 +52,54 @@ async def control(path, body):
     try:
         response = await client().post(path, json=body)
     except httpx.HTTPError:
-        raise HTTPException(503, "Runtime unavailable; check execution before retrying") from None
+        diagnostic_id = uuid4().hex
+        emit(
+            {
+                "service": "voice-api",
+                "event": "runtime_control_failed",
+                "level": "ERROR",
+                "category": "runtime_execution_uncertain",
+                "diagnostic_id": diagnostic_id,
+            }
+        )
+        raise HTTPException(
+            503,
+            {
+                "code": "runtime_execution_uncertain",
+                "diagnostic_id": diagnostic_id,
+                "message": "Runtime did not acknowledge this operation. Check execution before retrying.",
+            },
+        ) from None
     if response.status_code >= 400:
+        code, message = (
+            (
+                "runtime_execution_uncertain",
+                "Runtime gateway unavailable; execution must be reconciled before retrying.",
+            )
+            if response.status_code in {502, 503, 504}
+            else ("runtime_authentication_failed", "Runtime control authentication failed.")
+            if response.status_code in {401, 403}
+            else (
+                "runtime_stale_or_conflicting_session",
+                "Runtime session changed or conflicts with an existing execution; reconcile before retrying.",
+            )
+            if response.status_code in {404, 409}
+            else ("runtime_preparation_rejected", "Runtime rejected the session configuration.")
+        )
+        diagnostic_id = uuid4().hex
+        emit(
+            {
+                "service": "voice-api",
+                "event": "runtime_control_failed",
+                "level": "ERROR",
+                "category": code,
+                "http_status": response.status_code,
+                "diagnostic_id": diagnostic_id,
+            }
+        )
         raise HTTPException(
             response.status_code if response.status_code in {404, 409, 422, 503} else 502,
-            "Runtime rejected this operation",
+            {"code": code, "message": message, "diagnostic_id": diagnostic_id},
         )
     return response.json()
 
@@ -82,6 +126,9 @@ async def dispatch(session, run, *, browser_session_id="", conversation_id=None,
         raise HTTPException(
             409, "Run is already claimed or ended; refusing to modify its frozen snapshot"
         )
+    from voice_api.services.runtime_readiness import require_runtime_ready
+
+    await require_runtime_ready()
     call = await session.scalar(select(Call).where(Call.run_id == run.id))
     provider = run.channel if run.channel in {"browser", "text_test"} else call.provider
     if provider not in {"browser", "text_test"}:
