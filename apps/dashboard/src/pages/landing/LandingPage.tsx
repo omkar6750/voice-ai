@@ -35,8 +35,7 @@ import { clerkUrls } from "@/app/clerk-config";
 
 const RunPreview = lazy(() => import("./RunPreview"));
 const github = "https://github.com/omkar6750/voice-ai";
-const product =
-  "https://robu.in/product/waveshare-sim7600g-h-m-2-4g-hat-for-raspberry-pi-lte-cat4-high-speed-4g-3g-2g-gnss-global-band/";
+const product = "https://www.waveshare.com/wiki/SIM7600G-H-M2_4G_HAT";
 // Scoped semantic tokens leave the operational dashboard palette unchanged.
 export const landingTheme = "landing-theme bg-background text-foreground";
 const gutter = "mx-auto w-full max-w-6xl px-6 md:px-12";
@@ -398,55 +397,94 @@ export default function LandingPage() {
       >
         <FadeContent>
           <p className={eyebrow}>01 / The control room</p>
-          <div className="mt-5 grid gap-6 md:grid-cols-2">
-            <h2 className="text-4xl font-medium leading-tight tracking-[-.05em] md:text-6xl">
-              Design the conversation.
-              <br />
-              <span className="text-muted-foreground">See what happened.</span>
-            </h2>
-            <p className="max-w-md text-sm leading-7 text-muted-foreground md:justify-self-end md:self-end">
-              One workspace for agent authoring, conversation testing and run
-              evidence. Follow the transcript into the tools, flow visits and
-              provider operations behind it.
-            </p>
-          </div>
-          <div className="mt-12">
+          <div className="mt-5 grid items-center gap-10 lg:grid-cols-2 lg:gap-16">
+            <div>
+              <h2 className="text-4xl font-medium leading-tight tracking-[-.05em] md:text-6xl">
+                Design the conversation.
+                <br />
+                <span className="text-muted-foreground">
+                  Add a human touch.
+                </span>
+              </h2>
+              <p className="mt-8 max-w-md text-base leading-8 text-muted-foreground">
+                Give every caller room to be heard. Shape an agent that asks
+                thoughtful questions, understands the context and helps people
+                take the next step.
+              </p>
+              <p className="mt-5 font-mono text-[11px] uppercase tracking-widest text-primary">
+                Your voice. Your flow. A more personal follow-up.
+              </p>
+            </div>
             <Suspense
               fallback={
                 <p className="p-12 text-muted-foreground">
-                  Loading product preview…
+                  Loading conversation…
                 </p>
               }
             >
               <RunPreview />
             </Suspense>
           </div>
-          <div className="mt-4 flex flex-wrap justify-between gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            <span>Real Runs UI / Fictional demo data</span>
-            <span>No customer records or credentials</span>
-          </div>
-          <div className="mt-12 grid gap-8">
-            {["waterfall", "transcript"].map((view) => (
-              <figure
-                key={view}
-                className="overflow-hidden border border-border bg-card"
+          <div className="mt-20 grid items-center gap-8 xl:grid-cols-[minmax(0,1fr)_180px_minmax(0,1fr)]">
+            <figure className="min-w-0 border border-border bg-card">
+              <a
+                href="/landing/runs-waterfall.webp"
+                target="_blank"
+                rel="noreferrer"
+                className="block focus-visible:outline-2 focus-visible:outline-primary"
+                aria-label="Open full-size run waterfall screenshot"
               >
                 <img
-                  src={`/landing/runs-${view}.webp`}
-                  alt={`Runs ${view} with provider spans and tool evidence`}
+                  src="/landing/runs-waterfall.webp"
+                  alt="Run waterfall showing inference, synthesis, playback and transcription spans"
                   loading="lazy"
                   decoding="async"
-                  width={view === "waterfall" ? 1828 : 1706}
-                  height={view === "waterfall" ? 860 : 922}
+                  width="1828"
+                  height="860"
                   className="h-auto w-full"
                 />
-                <figcaption className="p-6 font-mono text-xs text-muted-foreground">
-                  Runs / {view} · Edited product screenshot · Anonymized data ·
-                  Illustrative completed runs
-                </figcaption>
-              </figure>
-            ))}
+              </a>
+              <figcaption className="p-4 text-xs text-muted-foreground">
+                Every exchange, down to the provider span.
+              </figcaption>
+            </figure>
+            <div className="xl:text-center">
+              <p className={eyebrow}>Go deeper</p>
+              <h3 className="mt-3 text-2xl font-medium tracking-tight">
+                From a natural call to a clear diagnosis.
+              </h3>
+              <p className="mt-4 text-sm leading-6 text-muted-foreground">
+                Trace the timing. Inspect the tools. Understand what happened
+                behind every reply.
+              </p>
+            </div>
+            <figure className="min-w-0 border border-border bg-card">
+              <a
+                href="/landing/runs-transcript.webp"
+                target="_blank"
+                rel="noreferrer"
+                className="block focus-visible:outline-2 focus-visible:outline-primary"
+                aria-label="Open full-size transcript and tool diagnostics screenshot"
+              >
+                <img
+                  src="/landing/runs-transcript.webp"
+                  alt="Run transcript with WhatsApp composition and tool diagnostics"
+                  loading="lazy"
+                  decoding="async"
+                  width="1706"
+                  height="922"
+                  className="h-auto w-full"
+                />
+              </a>
+              <figcaption className="p-4 text-xs text-muted-foreground">
+                The conversation and the actions behind it.
+              </figcaption>
+            </figure>
           </div>
+          <p className="mt-4 font-mono text-[10px] text-muted-foreground">
+            Edited product screenshots · Anonymized data · Illustrative
+            completed runs · Click to inspect
+          </p>
           <h2 className="mt-16 text-4xl font-medium tracking-tight md:text-5xl">
             End-to-end voice agents for your business.
           </h2>
@@ -519,7 +557,7 @@ export default function LandingPage() {
               rel="noreferrer"
               className="mt-8 inline-flex items-center gap-2 text-xs text-primary underline-offset-4 hover:underline"
             >
-              Explore the Waveshare HAT
+              Read the SIM7600 documentation
               <ArrowUpRight className="size-4" />
             </a>
           </FadeContent>
@@ -535,9 +573,6 @@ export default function LandingPage() {
               />
               <figcaption className="mt-4 border-t border-border pt-4 font-mono text-[10px] leading-6 text-muted-foreground">
                 WAVESHARE SIM7600G-H M.2 4G HAT
-                <br />
-                Manufacturer photograph with edited background · Local call
-                testing.
               </figcaption>
             </figure>
           </FadeContent>
