@@ -222,7 +222,7 @@ function Architecture() {
   return (
     <section
       id="architecture"
-      className={cn(gutter, "scroll-mt-8 py-24 md:py-32")}
+      className="mx-auto w-full max-w-[1600px] scroll-mt-8 px-6 py-20 md:px-12 md:py-24"
     >
       <FadeContent>
         <p className={eyebrow}>02 / Under the surface</p>
@@ -393,11 +393,13 @@ export default function LandingPage() {
 
       <section
         id="platform"
-        className={cn(gutter, "scroll-mt-8 py-24 md:py-32")}
+        className="mx-auto w-full max-w-[1600px] scroll-mt-8 px-6 py-20 md:px-12 md:py-24"
       >
         <FadeContent>
-          <p className={eyebrow}>01 / The control room</p>
-          <div className="mt-5 grid items-center gap-10 lg:grid-cols-2 lg:gap-16">
+          <p className={cn(eyebrow, "mx-auto max-w-6xl")}>
+            01 / The control room
+          </p>
+          <div className="mx-auto mt-5 grid max-w-6xl items-start gap-8 lg:grid-cols-[1.1fr_1fr] lg:gap-14">
             <div>
               <h2 className="text-4xl font-medium leading-tight tracking-[-.05em] md:text-6xl">
                 Design the conversation.
@@ -425,13 +427,13 @@ export default function LandingPage() {
               <RunPreview />
             </Suspense>
           </div>
-          <div className="mt-20 grid items-center gap-8 xl:grid-cols-[minmax(0,1fr)_180px_minmax(0,1fr)]">
-            <figure className="min-w-0 border border-border bg-card">
+          <div className="mt-14 grid items-start gap-5 lg:grid-cols-2">
+            <figure className="min-w-0">
               <a
                 href="/landing/runs-waterfall.webp"
                 target="_blank"
                 rel="noreferrer"
-                className="block focus-visible:outline-2 focus-visible:outline-primary"
+                className="relative block aspect-[17/10] overflow-hidden bg-card focus-visible:outline-2 focus-visible:outline-primary"
                 aria-label="Open full-size run waterfall screenshot"
               >
                 <img
@@ -441,29 +443,16 @@ export default function LandingPage() {
                   decoding="async"
                   width="1828"
                   height="860"
-                  className="h-auto w-full"
+                  className="absolute top-0 right-0 h-full w-auto max-w-none"
                 />
               </a>
-              <figcaption className="p-4 text-xs text-muted-foreground">
-                Every exchange, down to the provider span.
-              </figcaption>
             </figure>
-            <div className="xl:text-center">
-              <p className={eyebrow}>Go deeper</p>
-              <h3 className="mt-3 text-2xl font-medium tracking-tight">
-                From a natural call to a clear diagnosis.
-              </h3>
-              <p className="mt-4 text-sm leading-6 text-muted-foreground">
-                Trace the timing. Inspect the tools. Understand what happened
-                behind every reply.
-              </p>
-            </div>
-            <figure className="min-w-0 border border-border bg-card">
+            <figure className="min-w-0">
               <a
                 href="/landing/runs-transcript.webp"
                 target="_blank"
                 rel="noreferrer"
-                className="block focus-visible:outline-2 focus-visible:outline-primary"
+                className="relative block aspect-[17/10] overflow-hidden bg-card focus-visible:outline-2 focus-visible:outline-primary"
                 aria-label="Open full-size transcript and tool diagnostics screenshot"
               >
                 <img
@@ -473,18 +462,20 @@ export default function LandingPage() {
                   decoding="async"
                   width="1706"
                   height="922"
-                  className="h-auto w-full"
+                  className="absolute top-0 right-0 h-[105%] w-auto max-w-none"
                 />
               </a>
-              <figcaption className="p-4 text-xs text-muted-foreground">
-                The conversation and the actions behind it.
-              </figcaption>
             </figure>
           </div>
-          <p className="mt-4 font-mono text-[10px] text-muted-foreground">
-            Edited product screenshots · Anonymized data · Illustrative
-            completed runs · Click to inspect
-          </p>
+          <div className="mt-6 flex flex-col gap-3 border-t border-border pt-5 md:flex-row md:items-baseline md:justify-between">
+            <h3 className="text-xl font-medium tracking-tight">
+              Go deeper. Understand every reply.
+            </h3>
+            <p className="max-w-xl text-sm leading-6 text-muted-foreground">
+              Trace provider timing, inspect tool activity and find the details
+              behind every conversation.
+            </p>
+          </div>
           <h2 className="mt-16 text-4xl font-medium tracking-tight md:text-5xl">
             End-to-end voice agents for your business.
           </h2>
