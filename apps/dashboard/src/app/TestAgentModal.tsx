@@ -1,7 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { waitForRuntime } from "./runtime-readiness";
 import { PipecatClient } from "@pipecat-ai/client-js";
-import { ProtobufFrameSerializer, WebSocketTransport } from "@pipecat-ai/websocket-transport";
+import {
+  ProtobufFrameSerializer,
+  WebSocketTransport,
+} from "@pipecat-ai/websocket-transport";
 import { Link } from "react-router-dom";
 import {
   ChevronDown,
@@ -29,7 +33,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@/components/ui/native-select";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -79,7 +86,11 @@ type TestAgentModalProps = {
   hideTrigger?: boolean;
 };
 
-export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger = false }: TestAgentModalProps = {}) {
+export function TestAgentModal({
+  open: controlledOpen,
+  onOpenChange,
+  hideTrigger = false,
+}: TestAgentModalProps = {}) {
   const api = useApi();
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
@@ -98,7 +109,8 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
   });
   const integrationsQuery = useQuery({
     queryKey: ["test-agent-options", "integrations"],
-    queryFn: () => api<{ connections: IntegrationConnection[] }>("/integrations"),
+    queryFn: () =>
+      api<{ connections: IntegrationConnection[] }>("/integrations"),
     enabled: open,
     staleTime: 60_000,
   });
@@ -106,11 +118,17 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const contacts = contactsQuery.data?.contacts ?? [];
   const connections = integrationsQuery.data?.connections ?? [];
-  const optionsLoading = agentsQuery.isPending || contactsQuery.isPending || integrationsQuery.isPending;
-  const optionsError = agentsQuery.error ?? contactsQuery.error ?? integrationsQuery.error;
+  const optionsLoading =
+    agentsQuery.isPending ||
+    contactsQuery.isPending ||
+    integrationsQuery.isPending;
+  const optionsError =
+    agentsQuery.error ?? contactsQuery.error ?? integrationsQuery.error;
 
   // Context Mode: contact | custom | none
-  const [contextMode, setContextMode] = useState<"contact" | "custom" | "none">("contact");
+  const [contextMode, setContextMode] = useState<"contact" | "custom" | "none">(
+    "contact",
+  );
   const [selectedContactId, setSelectedContactId] = useState("");
   const [usePhoneOverride, setUsePhoneOverride] = useState(false);
   const [overridePhone, setOverridePhone] = useState("");
@@ -125,8 +143,11 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
 
   // Active call identity for live banner & post-call linkage
   const [activeContactId, setActiveContactId] = useState<string | null>(null);
-  const [activeDisplayName, setActiveDisplayName] = useState<string>("Anonymous");
-  const [activeTargetPhone, setActiveTargetPhone] = useState<string | null>(null);
+  const [activeDisplayName, setActiveDisplayName] =
+    useState<string>("Anonymous");
+  const [activeTargetPhone, setActiveTargetPhone] = useState<string | null>(
+    null,
+  );
 
   const [callState, setCallState] = useState<
     "idle" | "requesting" | "connecting" | "connected" | "ended"
@@ -141,10 +162,21 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
   const sessionIdRef = useRef<string | null>(null);
   const timerRef = useRef<number | null>(null);
   const startingRef = useRef(false);
+  const readinessAbort = useRef<AbortController | null>(null);
   const userEndedRef = useRef(false);
+  useEffect(
+    () => () => {
+      userEndedRef.current = true;
+      readinessAbort.current?.abort();
+    },
+    [],
+  );
   const apiRef = useRef(api);
   apiRef.current = api;
-  const callInProgress = callState === "requesting" || callState === "connecting" || callState === "connected";
+  const callInProgress =
+    callState === "requesting" ||
+    callState === "connecting" ||
+    callState === "connected";
   const debugLifecycle = (event: string, details?: unknown) => {
     if (import.meta.env.VITE_DEBUG_PERF === "true") {
       console.debug(`[browser-test] ${event}`, details ?? "");
@@ -154,22 +186,25 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
   useEffect(() => {
     if (!selectedAgentId && agents.length > 0) {
       const preferredAgent = agents.find(
-        (a) => a.active_version_id || a.published_version_id || a.latest_version_id,
+        (a) =>
+          a.active_version_id || a.published_version_id || a.latest_version_id,
       );
       setSelectedAgentId(preferredAgent?.id ?? agents[0].id);
     }
   }, [agents, selectedAgentId]);
 
   useEffect(() => {
-    if (!selectedContactId && contacts.length > 0) setSelectedContactId(contacts[0].id);
+    if (!selectedContactId && contacts.length > 0)
+      setSelectedContactId(contacts[0].id);
   }, [contacts, selectedContactId]);
 
   useEffect(() => {
-    if (optionsError) toast.error("Failed to load test call options: " + optionsError.message);
+    if (optionsError)
+      toast.error("Failed to load test call options: " + optionsError.message);
   }, [optionsError]);
 
   const hasWhatsApp = connections.some(
-    (c) => c.provider === "whatsapp_cloud" && c.enabled && !c.deleted_at
+    (c) => c.provider === "whatsapp_cloud" && c.enabled && !c.deleted_at,
   );
 
   const selectedContact = contacts.find((c) => c.id === selectedContactId);
@@ -232,6 +267,11 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
     debugLifecycle("start", { agentId: selectedAgentId, contextMode });
     try {
       setCallState("requesting");
+      const readiness = new AbortController();
+      readinessAbort.current = readiness;
+      await waitForRuntime(api, readiness.signal);
+      readiness.signal.throwIfAborted();
+      if (userEndedRef.current) return;
       const agent = agents.find((a) => a.id === selectedAgentId);
       const agentVersionId =
         agent?.active_version_id ||
@@ -291,7 +331,12 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
         body: JSON.stringify(payload),
       });
       sessionIdRef.current = session.id;
-      debugLifecycle("session-created", { sessionId: session.id, runId: session.run_id });
+      if (userEndedRef.current)
+        throw new DOMException("Cancelled", "AbortError");
+      debugLifecycle("session-created", {
+        sessionId: session.id,
+        runId: session.run_id,
+      });
       setRunId(session.run_id);
       setCallState("connecting");
 
@@ -307,7 +352,9 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
           onBotStartedSpeaking: () => setIsSpeaking(true),
           onBotStoppedSpeaking: () => setIsSpeaking(false),
           onDisconnected: () => {
-            debugLifecycle("client-disconnected", { sessionId: sessionIdRef.current });
+            debugLifecycle("client-disconnected", {
+              sessionId: sessionIdRef.current,
+            });
             setIsSpeaking(false);
             void finishCall(!userEndedRef.current);
           },
@@ -316,22 +363,40 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
       clientRef.current = client;
       debugLifecycle("initializing-devices", { sessionId: session.id });
       await client.initDevices();
+      if (userEndedRef.current)
+        throw new DOMException("Cancelled", "AbortError");
       const { ticket, ws_url } = await api<{ ticket: string; ws_url?: string }>(
         `/browser-sessions/${session.id}/ticket`,
         { method: "POST" },
       );
       debugLifecycle("ticket-issued", { sessionId: session.id });
+      if (userEndedRef.current)
+        throw new DOMException("Cancelled", "AbortError");
       await client.connect({
-        wsUrl: ws_url ?? websocketUrl(`/browser-sessions/${session.id}/ws?ticket=${encodeURIComponent(ticket)}`),
+        wsUrl:
+          ws_url ??
+          websocketUrl(
+            `/browser-sessions/${session.id}/ws?ticket=${encodeURIComponent(ticket)}`,
+          ),
       });
+      if (userEndedRef.current) {
+        await client.disconnect();
+        throw new DOMException("Cancelled", "AbortError");
+      }
       debugLifecycle("connected", { sessionId: session.id });
       setCallState("connected");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      debugLifecycle("startup-failed", { message: msg, sessionId: sessionIdRef.current });
-      toast.error("Failed to start test call: " + msg);
+      debugLifecycle("startup-failed", {
+        message: msg,
+        sessionId: sessionIdRef.current,
+      });
+      if (!userEndedRef.current)
+        toast.error("Failed to start test call: " + msg);
       if (sessionIdRef.current) {
-        void api(`/browser-sessions/${sessionIdRef.current}`, { method: "DELETE" }).catch(() => {});
+        void api(`/browser-sessions/${sessionIdRef.current}`, {
+          method: "DELETE",
+        }).catch(() => {});
       }
       userEndedRef.current = true;
       setCallState("idle");
@@ -342,6 +407,7 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
   };
 
   const endTestCall = async () => {
+    readinessAbort.current?.abort();
     userEndedRef.current = true;
     await finishCall(false);
   };
@@ -375,7 +441,12 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
       debugLifecycle("pagehide-delete", { sessionId });
       // keepalive lets the browser finish the DELETE when a refresh or tab
       // close interrupts the React tree and would otherwise leave a run active.
-      void apiRef.current(`/browser-sessions/${sessionId}`, { method: "DELETE", keepalive: true }).catch(() => {});
+      void apiRef
+        .current(`/browser-sessions/${sessionId}`, {
+          method: "DELETE",
+          keepalive: true,
+        })
+        .catch(() => {});
     };
     window.addEventListener("pagehide", terminateSession);
     return () => {
@@ -398,12 +469,14 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
   return (
     <>
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        {!hideTrigger && <DialogTrigger asChild>
-          <Button variant="outline" size="sm" className="gap-2">
-            <Radio className="size-4 text-emerald-500 animate-pulse" />
-            <span>Test Agent</span>
-          </Button>
-        </DialogTrigger>}
+        {!hideTrigger && (
+          <DialogTrigger asChild>
+            <Button variant="outline" size="sm" className="gap-2">
+              <Radio className="size-4 text-emerald-500 animate-pulse" />
+              <span>Test Agent</span>
+            </Button>
+          </DialogTrigger>
+        )}
         <DialogContent
           className="sm:max-w-lg max-h-[90vh] overflow-y-auto"
           showCloseButton={!callInProgress}
@@ -413,7 +486,8 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
           <DialogHeader>
             <DialogTitle>Test Agent</DialogTitle>
             <DialogDescription>
-              Speak directly with your configured agent using your browser microphone and speakers.
+              Speak directly with your configured agent using your browser
+              microphone and speakers.
             </DialogDescription>
           </DialogHeader>
 
@@ -421,25 +495,33 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
             <div className="flex flex-col gap-4 py-2">
               {/* Agent Selection */}
               <label className="flex flex-col gap-1.5">
-                <span className="text-xs font-medium text-muted-foreground">Select Agent</span>
+                <span className="text-xs font-medium text-muted-foreground">
+                  Select Agent
+                </span>
                 <NativeSelect
                   className="w-full"
                   value={selectedAgentId}
                   onChange={(e) => setSelectedAgentId(e.target.value)}
                   disabled={optionsLoading || agents.length === 0}
                 >
-                  {optionsLoading ? <NativeSelectOption value="">Loading agents…</NativeSelectOption> : agents.map((agent) => {
-                    const status = agent.active_version_id
-                      ? "Active"
-                      : agent.latest_version_status === "published"
-                        ? "Published"
-                        : "Draft";
-                    return (
-                      <NativeSelectOption key={agent.id} value={agent.id}>
-                        {agent.name} ({status})
-                      </NativeSelectOption>
-                    );
-                  })}
+                  {optionsLoading ? (
+                    <NativeSelectOption value="">
+                      Loading agents…
+                    </NativeSelectOption>
+                  ) : (
+                    agents.map((agent) => {
+                      const status = agent.active_version_id
+                        ? "Active"
+                        : agent.latest_version_status === "published"
+                          ? "Published"
+                          : "Draft";
+                      return (
+                        <NativeSelectOption key={agent.id} value={agent.id}>
+                          {agent.name} ({status})
+                        </NativeSelectOption>
+                      );
+                    })
+                  )}
                 </NativeSelect>
               </label>
 
@@ -457,7 +539,10 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
                       <MessageSquare className="size-3" /> WhatsApp Live
                     </Badge>
                   ) : (
-                    <Badge variant="outline" className="text-[11px] gap-1 text-muted-foreground">
+                    <Badge
+                      variant="outline"
+                      className="text-[11px] gap-1 text-muted-foreground"
+                    >
                       <MessageSquare className="size-3" /> WhatsApp Offline
                     </Badge>
                   )}
@@ -480,7 +565,8 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
                   <TabsContent value="contact" className="space-y-3 pt-2">
                     {contacts.length === 0 ? (
                       <div className="rounded border border-dashed p-3 text-center text-xs text-muted-foreground">
-                        No contacts found. Use Custom Lead or create a contact in the Contacts tab.
+                        No contacts found. Use Custom Lead or create a contact
+                        in the Contacts tab.
                       </div>
                     ) : (
                       <>
@@ -490,7 +576,9 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
                           </span>
                           <NativeSelect
                             value={selectedContactId}
-                            onChange={(e) => setSelectedContactId(e.target.value)}
+                            onChange={(e) =>
+                              setSelectedContactId(e.target.value)
+                            }
                           >
                             {contacts.map((c) => (
                               <NativeSelectOption key={c.id} value={c.id}>
@@ -522,13 +610,16 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
                               )}
                             </div>
                             {selectedContact.metadata &&
-                              Object.keys(selectedContact.metadata).length > 0 && (
+                              Object.keys(selectedContact.metadata).length >
+                                0 && (
                                 <div className="text-[11px] text-muted-foreground pt-1 border-t border-dashed mt-1.5">
                                   {Object.entries(selectedContact.metadata)
                                     .slice(0, 2)
                                     .map(([k, v]) => (
                                       <span key={k} className="mr-3">
-                                        <span className="font-medium text-foreground">{k}:</span>{" "}
+                                        <span className="font-medium text-foreground">
+                                          {k}:
+                                        </span>{" "}
                                         {String(v)}
                                       </span>
                                     ))}
@@ -542,10 +633,15 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
                             <input
                               type="checkbox"
                               checked={usePhoneOverride}
-                              onChange={(e) => setUsePhoneOverride(e.target.checked)}
+                              onChange={(e) =>
+                                setUsePhoneOverride(e.target.checked)
+                              }
                               className="rounded border-input"
                             />
-                            <span>Deliver WhatsApp messages to a different test number</span>
+                            <span>
+                              Deliver WhatsApp messages to a different test
+                              number
+                            </span>
                           </label>
 
                           {usePhoneOverride && (
@@ -556,8 +652,9 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
                                 placeholder="Enter test phone number"
                               />
                               <p className="text-[11px] text-muted-foreground">
-                                The agent will address you as {selectedContact?.name || "the contact"},
-                                but WhatsApp tools will deliver to this number.
+                                The agent will address you as{" "}
+                                {selectedContact?.name || "the contact"}, but
+                                WhatsApp tools will deliver to this number.
                               </p>
                             </div>
                           )}
@@ -578,7 +675,8 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
                         placeholder="e.g. 7304058886"
                       />
                       <p className="text-[11px] text-muted-foreground">
-                        Agent tools will send WhatsApp messages to this phone number.
+                        Agent tools will send WhatsApp messages to this phone
+                        number.
                       </p>
                     </div>
 
@@ -596,7 +694,9 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
                     <div>
                       <button
                         type="button"
-                        onClick={() => setShowAdvancedCustom(!showAdvancedCustom)}
+                        onClick={() =>
+                          setShowAdvancedCustom(!showAdvancedCustom)
+                        }
                         className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
                       >
                         <span>Advanced Context Variables</span>
@@ -625,7 +725,9 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
                             </span>
                             <Input
                               value={customBusiness}
-                              onChange={(e) => setCustomBusiness(e.target.value)}
+                              onChange={(e) =>
+                                setCustomBusiness(e.target.value)
+                              }
                               placeholder="e.g. Acme Corp"
                             />
                           </label>
@@ -647,8 +749,9 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
                   {/* Mode 3: No Context */}
                   <TabsContent value="none" className="pt-2">
                     <div className="rounded border border-dashed p-3 text-center text-xs text-muted-foreground">
-                      Raw browser test without persona or external phone number. Tools requiring a
-                      phone number will simulate or report missing contact.
+                      Raw browser test without persona or external phone number.
+                      Tools requiring a phone number will simulate or report
+                      missing contact.
                     </div>
                   </TabsContent>
                 </Tabs>
@@ -659,12 +762,16 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
                 <Volume2 className="mx-auto mb-1.5 size-6 text-muted-foreground" />
                 <p className="text-sm font-medium">Ready to talk</p>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  WebSocket browser audio with microphone echo cancellation, VAD, and live tool
-                  dispatch.
+                  WebSocket browser audio with microphone echo cancellation,
+                  VAD, and live tool dispatch.
                 </p>
               </div>
 
-              <Button onClick={startTestCall} disabled={optionsLoading || !selectedAgentId} className="w-full gap-2">
+              <Button
+                onClick={startTestCall}
+                disabled={optionsLoading || !selectedAgentId}
+                className="w-full gap-2"
+              >
                 <Mic className="size-4" /> Start Test Call
               </Button>
             </div>
@@ -676,7 +783,11 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
                 <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-50" />
                 <Radio className="size-6 text-emerald-600" />
               </div>
-              <p className="text-sm font-medium">Connecting WebSocket session…</p>
+              <p className="text-sm font-medium">
+                {callState === "requesting"
+                  ? "Starting voice runtime…"
+                  : "Connecting WebSocket session…"}
+              </p>
               <p className="text-xs text-muted-foreground">
                 Initializing browser microphone and dial-in pipeline.
               </p>
@@ -706,7 +817,8 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
               {/* Context Summary Banner */}
               <div className="w-full rounded-lg border bg-muted/40 p-3 text-center text-xs space-y-1">
                 <div className="font-medium text-foreground">
-                  Talking as: <span className="font-semibold">{activeDisplayName}</span>
+                  Talking as:{" "}
+                  <span className="font-semibold">{activeDisplayName}</span>
                 </div>
                 {activeTargetPhone && (
                   <div className="text-muted-foreground flex items-center justify-center gap-1.5">
@@ -741,7 +853,11 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
                   onClick={toggleMute}
                   className="gap-2"
                 >
-                  {isMuted ? <MicOff className="size-4" /> : <Mic className="size-4" />}
+                  {isMuted ? (
+                    <MicOff className="size-4" />
+                  ) : (
+                    <Mic className="size-4" />
+                  )}
                   {isMuted ? "Unmute" : "Mute"}
                 </Button>
 
@@ -768,7 +884,14 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
               </p>
               <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
                 {canReconnect && (
-                  <Button variant="default" size="sm" onClick={() => { setCanReconnect(false); setCallState("idle"); }}>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => {
+                      setCanReconnect(false);
+                      setCallState("idle");
+                    }}
+                  >
                     Reconnect
                   </Button>
                 )}
@@ -781,7 +904,10 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
                 )}
                 {activeContactId && (
                   <Button asChild variant="ghost" size="sm">
-                    <Link to={`/contacts/${activeContactId}`} onClick={() => setOpen(false)}>
+                    <Link
+                      to={`/contacts/${activeContactId}`}
+                      onClick={() => setOpen(false)}
+                    >
                       View Contact Timeline
                     </Link>
                   </Button>
@@ -791,9 +917,18 @@ export function TestAgentModal({ open: controlledOpen, onOpenChange, hideTrigger
           )}
 
           <DialogFooter className="sm:justify-between">
-            <span className="text-[11px] text-muted-foreground">Pipecat WebSocket</span>
+            <span className="text-[11px] text-muted-foreground">
+              Pipecat WebSocket
+            </span>
             {callState === "ended" && (
-              <Button variant="ghost" size="sm" onClick={() => { setCanReconnect(false); setCallState("idle"); }}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setCanReconnect(false);
+                  setCallState("idle");
+                }}
+              >
                 Done
               </Button>
             )}

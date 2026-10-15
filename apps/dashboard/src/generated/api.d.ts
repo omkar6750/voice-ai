@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runtime-readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Readiness */
+        get: operations["readiness_api_v1_runtime_readiness_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/orgs/{org_id}/mcp-tokens": {
         parameters: {
             query?: never;
@@ -2410,6 +2427,23 @@ export interface paths {
         put?: never;
         /** Complete */
         post: operations["complete_api_v1_runtime_artifacts_complete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runtime-readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Readiness */
+        get: operations["readiness_api_runtime_readiness_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -7508,6 +7542,20 @@ export interface components {
             };
             /** Voices */
             voices?: components["schemas"]["ProviderVoice"][];
+            /** Voices By Model */
+            voices_by_model?: {
+                [key: string]: components["schemas"]["ProviderVoice"][];
+            };
+            /** Languages By Model */
+            languages_by_model?: {
+                [key: string]: string[];
+            };
+            /** Fields By Model */
+            fields_by_model?: {
+                [key: string]: {
+                    [key: string]: components["schemas"]["ProviderField"];
+                };
+            };
             /** Languages */
             languages?: string[];
             /** Fields */
@@ -7541,6 +7589,11 @@ export interface components {
             runtime_supported: boolean;
             /** Description */
             description?: string | null;
+            /** Minimum */
+            minimum?: number | null;
+            /** Maximum */
+            maximum?: number | null;
+            default?: components["schemas"]["JsonValue"];
         };
         /** ProviderVoice */
         ProviderVoice: {
@@ -7550,6 +7603,10 @@ export interface components {
             name: string;
             /** Gender */
             gender?: string | null;
+            /** Language */
+            language?: string | null;
+            /** Style */
+            style?: string | null;
         };
         /** ReconcileBody */
         ReconcileBody: {
@@ -8082,6 +8139,21 @@ export interface components {
             /** Endpoints */
             endpoints: components["schemas"]["RuntimeEndpointResponse"][];
         };
+        /** RuntimeReadiness */
+        RuntimeReadiness: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "starting" | "ready" | "busy" | "unavailable";
+            /**
+             * Retry After Seconds
+             * @default 3
+             */
+            retry_after_seconds: number;
+            /** Code */
+            code?: string | null;
+        };
         /** RuntimeSync */
         RuntimeSync: {
             /**
@@ -8198,6 +8270,29 @@ export interface components {
             min_speech_duration_ms: number;
             /** Prefix Padding Ms */
             prefix_padding_ms?: number | null;
+            /**
+             * Turn Timing
+             * @default local
+             * @enum {string}
+             */
+            turn_timing: "local" | "server_only";
+            /** Turn Stop Timeout Seconds */
+            turn_stop_timeout_seconds?: number | null;
+        };
+        /** SarvamTTSConfig */
+        SarvamTTSConfig: {
+            /** Pitch */
+            pitch?: number | null;
+            /** Loudness */
+            loudness?: number | null;
+            /** Enable Preprocessing */
+            enable_preprocessing?: boolean | null;
+            /** Temperature */
+            temperature?: number | null;
+            /** Min Buffer Size */
+            min_buffer_size?: number | null;
+            /** Max Chunk Length */
+            max_chunk_length?: number | null;
         };
         /** ScheduleCallback */
         ScheduleCallback: {
@@ -8355,6 +8450,7 @@ export interface components {
              */
             pace: number;
             cartesia?: components["schemas"]["CartesiaTTSConfig"] | null;
+            sarvam?: components["schemas"]["SarvamTTSConfig"] | null;
         };
         /** TelephonySelection */
         TelephonySelection: {
@@ -9385,6 +9481,26 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    readiness_api_v1_runtime_readiness_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeReadiness"];
                 };
             };
         };
@@ -14741,6 +14857,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readiness_api_runtime_readiness_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeReadiness"];
                 };
             };
         };

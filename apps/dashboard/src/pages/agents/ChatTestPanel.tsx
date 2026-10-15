@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { waitForRuntime } from "../../app/runtime-readiness";
 import { useAuth } from "@clerk/react";
 import { useApi, ApiError, useSupportSession } from "@/app/api";
 import type { components } from "@/generated/api";
@@ -139,6 +140,8 @@ export function ChatTestPanel({
   const sequence = useRef(0);
   const runtimeRun = useRef("");
   const mounted = useRef(true);
+  const readinessAbort = useRef<AbortController | null>(null);
+  const [warming, setWarming] = useState(false);
   const scopeEpoch = useRef(0);
   const connectionEpoch = useRef(0);
   const inspectorEpoch = useRef(0);
@@ -192,6 +195,7 @@ export function ChatTestPanel({
     void loadContacts();
     return () => {
       mounted.current = false;
+      readinessAbort.current?.abort();
       scopeEpoch.current++;
       connectionEpoch.current++;
       inspectorEpoch.current++;
@@ -414,6 +418,12 @@ export function ChatTestPanel({
     setBusy(true);
     setError(null);
     try {
+      const readiness = new AbortController();
+      readinessAbort.current = readiness;
+      setWarming(true);
+      await waitForRuntime(api, readiness.signal);
+      readiness.signal.throwIfAborted();
+      setWarming(false);
       const setup: Setup = {
         agent_version_id: version.id,
         contact_id: contactId || null,
@@ -434,8 +444,10 @@ export function ChatTestPanel({
       await loadHistory();
       await connect(row);
     } catch (err) {
-      setError(failure(err, "Setup"));
+      if (!readinessAbort.current?.signal.aborted)
+        setError(failure(err, "Setup"));
     } finally {
+      setWarming(false);
       setBusy(false);
     }
   }
@@ -717,8 +729,20 @@ export function ChatTestPanel({
                   </AlertDescription>
                 </Alert>
                 <Button disabled={busy} onClick={() => void start()}>
-                  {busy ? "Preparing…" : "Start conversation"}
+                  {warming
+                    ? "Starting voice runtime…"
+                    : busy
+                      ? "Preparing…"
+                      : "Start conversation"}
                 </Button>
+                {warming && (
+                  <Button
+                    variant="ghost"
+                    onClick={() => readinessAbort.current?.abort()}
+                  >
+                    Cancel
+                  </Button>
+                )}
               </div>
             ) : (
               <>

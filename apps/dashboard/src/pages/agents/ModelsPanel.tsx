@@ -1,4 +1,5 @@
 import { ReadOnlyValue } from "@/components/record-page";
+import { Button } from "@/components/ui/button";
 import {
   Field,
   FieldDescription,
@@ -10,6 +11,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { NumberField } from "./ConfigFields";
+import { selectTtsModel, sarvamDefaults } from "./speech-model";
 import {
   CredentialBindingSelect,
   bindCredential,
@@ -61,8 +63,16 @@ export function ModelsPanel({
     (provider) => provider.provider === config.tts.provider,
   );
   const ttsModels = selectedTts?.models_by_slot?.tts ?? [];
-  const ttsLanguages = selectedTts?.languages ?? [];
-  const ttsVoices = selectedTts?.voices ?? [];
+  const ttsLanguages =
+    selectedTts?.languages_by_model?.[config.tts.model] ??
+    selectedTts?.languages ??
+    [];
+  const ttsVoices =
+    selectedTts?.voices_by_model?.[config.tts.model] ??
+    selectedTts?.voices ??
+    [];
+  const v4 =
+    config.tts.provider === "sarvam" && config.tts.model === "bulbul:v4-flash";
   const ttsField = (name: string) => selectedTts?.fields?.[name];
   const ttsFieldSupported = (name: string) =>
     ttsField(name)?.runtime_supported ?? false;
@@ -567,96 +577,146 @@ export function ModelsPanel({
               </FieldDescription>
             </Field>
             {config.stt.provider === "sarvam" && (
-                <>
-                  <Field>
-                    <FieldLabel htmlFor="stt-realtime-language">
-                      Realtime language
-                    </FieldLabel>
-                    <NativeSelect
-                      id="stt-realtime-language"
-                      value={config.stt.realtime.language_code}
-                      disabled={disabled}
-                      onChange={(event) =>
-                        change({
-                          ...config,
-                          stt: {
-                            ...config.stt,
-                            realtime: {
-                              ...config.stt.realtime,
-                              language_code: event.target.value,
-                            },
+              <>
+                <Field>
+                  <FieldLabel>Turn timing</FieldLabel>
+                  <NativeSelect
+                    value={config.stt.realtime.turn_timing ?? "local"}
+                    disabled={disabled}
+                    onChange={(event) =>
+                      change({
+                        ...config,
+                        stt: {
+                          ...config.stt,
+                          realtime: {
+                            ...config.stt.realtime,
+                            turn_timing: event.target.value as
+                              "local" | "server_only",
                           },
-                        })
-                      }
-                    >
-                      <option value="auto">Auto detect</option>
-                      {config.language.supported_languages.map((language) => (
-                        <option key={language} value={language}>
-                          {language}
-                        </option>
-                      ))}
-                    </NativeSelect>
-                    <FieldDescription>
-                      Auto detect supports code-mixed speech across Sarvam’s
-                      supported languages.
-                    </FieldDescription>
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="stt-realtime-mode">
-                      Transcript mode
-                    </FieldLabel>
-                    <NativeSelect
-                      id="stt-realtime-mode"
-                      value={config.stt.realtime.mode}
-                      disabled={disabled}
-                      onChange={(event) =>
-                        change({
-                          ...config,
-                          stt: {
-                            ...config.stt,
-                            realtime: {
-                              ...config.stt.realtime,
-                              mode: event.target.value as AgentConfig["stt"]["realtime"]["mode"],
-                            },
+                        },
+                      })
+                    }
+                  >
+                    <option value="local">Local VAD timing</option>
+                    <option value="server_only">Server-only endpointing</option>
+                  </NativeSelect>
+                  <FieldDescription>
+                    Server-only skips Silero; local VAD latency metrics are
+                    unavailable.
+                  </FieldDescription>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={disabled}
+                    onClick={() =>
+                      change({
+                        ...config,
+                        stt: {
+                          ...config.stt,
+                          realtime: {
+                            ...config.stt.realtime,
+                            stream_type: "fast",
+                            turn_timing: "server_only",
+                            turn_stop_timeout_seconds: 3,
                           },
-                        })
-                      }
-                    >
-                      <option value="codemix">Code-mixed</option>
-                      <option value="transcribe">Transcribe</option>
-                      <option value="verbatim">Verbatim</option>
-                      <option value="translit">Transliterate</option>
-                      <option value="translate">Translate</option>
-                    </NativeSelect>
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="stt-realtime-stream">
-                      Partial transcript speed
-                    </FieldLabel>
-                    <NativeSelect
-                      id="stt-realtime-stream"
-                      value={config.stt.realtime.stream_type}
-                      disabled={disabled}
-                      onChange={(event) =>
-                        change({
-                          ...config,
-                          stt: {
-                            ...config.stt,
-                            realtime: {
-                              ...config.stt.realtime,
-                              stream_type: event.target.value as AgentConfig["stt"]["realtime"]["stream_type"],
-                            },
+                        },
+                      })
+                    }
+                  >
+                    Apply low-latency draft preset
+                  </Button>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="stt-realtime-language">
+                    Realtime language
+                  </FieldLabel>
+                  <NativeSelect
+                    id="stt-realtime-language"
+                    value={config.stt.realtime.language_code}
+                    disabled={disabled}
+                    onChange={(event) =>
+                      change({
+                        ...config,
+                        stt: {
+                          ...config.stt,
+                          realtime: {
+                            ...config.stt.realtime,
+                            language_code: event.target.value,
                           },
-                        })
-                      }
-                    >
-                      <option value="fast">Fast</option>
-                      <option value="balanced">Balanced</option>
-                      <option value="simulated">Final only</option>
-                    </NativeSelect>
-                  </Field>
-                </>
-              )}
+                        },
+                      })
+                    }
+                  >
+                    <option value="auto">Auto detect</option>
+                    {config.language.supported_languages.map((language) => (
+                      <option key={language} value={language}>
+                        {language}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                  <FieldDescription>
+                    Auto detect supports code-mixed speech across Sarvam’s
+                    supported languages.
+                  </FieldDescription>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="stt-realtime-mode">
+                    Transcript mode
+                  </FieldLabel>
+                  <NativeSelect
+                    id="stt-realtime-mode"
+                    value={config.stt.realtime.mode}
+                    disabled={disabled}
+                    onChange={(event) =>
+                      change({
+                        ...config,
+                        stt: {
+                          ...config.stt,
+                          realtime: {
+                            ...config.stt.realtime,
+                            mode: event.target
+                              .value as AgentConfig["stt"]["realtime"]["mode"],
+                          },
+                        },
+                      })
+                    }
+                  >
+                    <option value="codemix">Code-mixed</option>
+                    <option value="transcribe">Transcribe</option>
+                    <option value="verbatim">Verbatim</option>
+                    <option value="translit">Transliterate</option>
+                    <option value="translate">Translate</option>
+                  </NativeSelect>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="stt-realtime-stream">
+                    Partial transcript speed
+                  </FieldLabel>
+                  <NativeSelect
+                    id="stt-realtime-stream"
+                    value={config.stt.realtime.stream_type}
+                    disabled={disabled}
+                    onChange={(event) =>
+                      change({
+                        ...config,
+                        stt: {
+                          ...config.stt,
+                          realtime: {
+                            ...config.stt.realtime,
+                            stream_type: event.target
+                              .value as AgentConfig["stt"]["realtime"]["stream_type"],
+                          },
+                        },
+                      })
+                    }
+                  >
+                    <option value="fast">Fast</option>
+                    <option value="balanced">Balanced</option>
+                    <option value="simulated">Final only</option>
+                  </NativeSelect>
+                </Field>
+              </>
+            )}
           </FieldGroup>
         </div>
 
@@ -688,6 +748,7 @@ export function ModelsPanel({
                       model: defaultModel,
                       voice: defaultVoice,
                       pace: provider === "sarvam" ? config.tts.pace : 1,
+                      sarvam: provider === "sarvam" ? config.tts.sarvam : null,
                       language:
                         provider === "gnani" ? "en-IN" : config.tts.language,
                       cartesia:
@@ -741,7 +802,7 @@ export function ModelsPanel({
                 selectionOnly
                 disabled={disabled || ttsModels.length <= 1}
                 onChange={(model) =>
-                  change({ ...config, tts: { ...config.tts, model } })
+                  change({ ...config, tts: selectTtsModel(config.tts, model) })
                 }
                 placeholder="Search models..."
               />
@@ -750,31 +811,23 @@ export function ModelsPanel({
             <Field>
               <FieldLabel htmlFor="tts-voice">Voice</FieldLabel>
               {ttsVoices.length ? (
-                <NativeSelect
+                <SearchableSelect
                   id="tts-voice"
-                  className="w-full"
                   value={config.tts.voice}
                   disabled={disabled || !ttsFieldSupported("voice")}
-                  onChange={(event) =>
+                  selectionOnly
+                  placeholder="Choose a voice explicitly…"
+                  options={ttsVoices.map((voice) => ({
+                    value: voice.id,
+                    label: `${voice.name} · ${voice.id}`,
+                  }))}
+                  onChange={(voice) =>
                     change({
                       ...config,
-                      tts: { ...config.tts, voice: event.target.value },
+                      tts: { ...config.tts, voice },
                     })
                   }
-                >
-                  {!ttsVoices.some(
-                    (voice) => voice.id === config.tts.voice,
-                  ) && (
-                    <option value={config.tts.voice}>
-                      {config.tts.voice} (stored)
-                    </option>
-                  )}
-                  {ttsVoices.map((voice) => (
-                    <option key={voice.id} value={voice.id}>
-                      {voice.name}
-                    </option>
-                  ))}
-                </NativeSelect>
+                />
               ) : (
                 <Input
                   id="tts-voice"
@@ -853,6 +906,128 @@ export function ModelsPanel({
                 }
               />
             ) : null}
+            {config.tts.provider === "sarvam" && (
+              <>
+                {(v4
+                  ? [
+                      {
+                        key: "pitch" as const,
+                        label: "Pitch",
+                        min: -0.5,
+                        max: 0.5,
+                        step: 0.05,
+                        fallback: 0,
+                      },
+                      {
+                        key: "loudness" as const,
+                        label: "Loudness",
+                        min: 0.1,
+                        max: 2.5,
+                        step: 0.1,
+                        fallback: 1,
+                      },
+                    ]
+                  : [
+                      {
+                        key: "temperature" as const,
+                        label: "Temperature",
+                        min: 0.01,
+                        max: 1,
+                        step: 0.05,
+                        fallback: 0.6,
+                      },
+                    ]
+                ).map((field) => (
+                  <NumberField
+                    key={field.key}
+                    id={`sarvam-${field.key}`}
+                    label={field.label}
+                    min={field.min}
+                    max={field.max}
+                    step={field.step}
+                    value={config.tts.sarvam?.[field.key] ?? field.fallback}
+                    disabled={disabled}
+                    onChange={(value) =>
+                      change({
+                        ...config,
+                        tts: {
+                          ...config.tts,
+                          sarvam: {
+                            ...sarvamDefaults,
+                            ...config.tts.sarvam,
+                            [field.key]: value,
+                          },
+                        },
+                      })
+                    }
+                  />
+                ))}
+                {v4 && (
+                  <Field>
+                    <FieldLabel>Text preprocessing</FieldLabel>
+                    <Checkbox
+                      checked={config.tts.sarvam?.enable_preprocessing ?? true}
+                      disabled={disabled}
+                      onCheckedChange={(value) =>
+                        change({
+                          ...config,
+                          tts: {
+                            ...config.tts,
+                            sarvam: {
+                              ...sarvamDefaults,
+                              ...config.tts.sarvam,
+                              enable_preprocessing: value === true,
+                            },
+                          },
+                        })
+                      }
+                    />
+                    <FieldDescription>
+                      Normalize dates, numbers and mixed-script text.
+                    </FieldDescription>
+                  </Field>
+                )}
+                {[
+                  {
+                    key: "min_buffer_size" as const,
+                    label: "Streaming buffer characters",
+                    min: 30,
+                    max: 200,
+                    fallback: 50,
+                  },
+                  {
+                    key: "max_chunk_length" as const,
+                    label: "Maximum chunk characters",
+                    min: 50,
+                    max: 500,
+                    fallback: 150,
+                  },
+                ].map((field) => (
+                  <NumberField
+                    key={field.key}
+                    id={`sarvam-${field.key}`}
+                    label={field.label}
+                    min={field.min}
+                    max={field.max}
+                    value={config.tts.sarvam?.[field.key] ?? field.fallback}
+                    disabled={disabled}
+                    onChange={(value) =>
+                      change({
+                        ...config,
+                        tts: {
+                          ...config.tts,
+                          sarvam: {
+                            ...sarvamDefaults,
+                            ...config.tts.sarvam,
+                            [field.key]: value,
+                          },
+                        },
+                      })
+                    }
+                  />
+                ))}
+              </>
+            )}
             {config.tts.provider === "cartesia" && (
               <>
                 <Field>
