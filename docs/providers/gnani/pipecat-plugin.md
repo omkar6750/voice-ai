@@ -275,7 +275,7 @@ All streaming audio must be sent as **raw PCM binary frames** — no container f
 | **Bytes per frame** | **1,024 bytes** (512 samples × 2 bytes) | **1,024 bytes** (512 samples × 2 bytes) |
 | Frame duration | 32 ms | 64 ms |
 
-Frames must be sent at **real-time cadence**. See [STT Realtime — PCM Specification](/api/STT/stt-websocket#pcm-specification) for full details.
+Frames must be sent at **real-time cadence**. See [STT Realtime — PCM Specification](https://docs.gnani.ai/api/STT/stt-websocket#pcm-specification) for full details.
 
 ### Settings
 
@@ -313,7 +313,7 @@ async def build_pipeline():
 
 | Parameter | Type | Default | Description |
 | - | - | - | - |
-| `voice` | `string` | `"Pranav"` | Voice ID. See [Available Voices](/api/TTS/available-voices). |
+| `voice` | `string` | `"Pranav"` | Voice ID. See [Available Voices](https://docs.gnani.ai/api/TTS/available-voices). |
 | `sample_rate` | `int` | `16000` | Output sample rate in Hz. |
 
 ***
@@ -342,7 +342,7 @@ tts = GnaniSSETTSService(
 
 | Parameter | Type | Default | Description |
 | - | - | - | - |
-| `voice` | `string` | `"Pranav"` | Voice ID. See [Available Voices](/api/TTS/available-voices). |
+| `voice` | `string` | `"Pranav"` | Voice ID. See [Available Voices](https://docs.gnani.ai/api/TTS/available-voices). |
 | `sample_rate` | `int` | `16000` | Output sample rate in Hz. |
 
 ***
@@ -371,14 +371,14 @@ tts = GnaniTTSService(
 
 | Parameter | Type | Default | Description |
 | - | - | - | - |
-| `voice` | `string` | `"Pranav"` | Voice ID. See [Available Voices](/api/TTS/available-voices). |
+| `voice` | `string` | `"Pranav"` | Voice ID. See [Available Voices](https://docs.gnani.ai/api/TTS/available-voices). |
 | `sample_rate` | `int` | `16000` | Output sample rate in Hz. |
 
 ***
 
 ## Available Voices
 
-To see the available voices, [click here](/api/TTS/available-voices).
+To see the available voices, [click here](https://docs.gnani.ai/api/TTS/available-voices).
 
 ***
 
@@ -386,11 +386,11 @@ To see the available voices, [click here](/api/TTS/available-voices).
 
 ### STT Languages (Speech-to-Text)
 
-STT uses BCP-47 locale codes (e.g. `hi-IN`, `bn-IN`). For the full list, see [STT — Supported Languages](/api/STT/speech-to-text#supported-languages).
+STT uses BCP-47 locale codes (e.g. `hi-IN`, `bn-IN`). For the full list, see [STT — Supported Languages](https://docs.gnani.ai/api/STT/speech-to-text#supported-languages).
 
 ### TTS Languages (Text-to-Speech)
 
-TTS uses the same BCP-47 `-IN` suffixed codes as STT (e.g. `hi-IN`, `en-IN`, `ta-IN`). See [TTS REST — Request Parameters](/api/TTS/tts-inference#request-parameters) and the [Voice Catalog](/api/TTS/available-voices).
+TTS uses the same BCP-47 `-IN` suffixed codes as STT (e.g. `hi-IN`, `en-IN`, `ta-IN`). See [TTS REST — Request Parameters](https://docs.gnani.ai/api/TTS/tts-inference#request-parameters) and the [Voice Catalog](https://docs.gnani.ai/api/TTS/available-voices).
 
 <Note>
   Use the `Language` enum from `pipecat.transcriptions.language` for STT services (`GnaniSTTService`, `GnaniHttpSTTService`). TTS voice selection primarily drives language for synthesis.
@@ -400,11 +400,11 @@ TTS uses the same BCP-47 `-IN` suffixed codes as STT (e.g. `hi-IN`, `en-IN`, `ta
 
 ## Further Reading
 
-* [STT REST API](/api/STT/speech-to-text) — file-based transcription reference
-* [STT Realtime API](/api/STT/stt-websocket) — WebSocket protocol reference
-* [TTS REST API](/api/TTS/tts-inference) — synchronous synthesis reference
-* [TTS Streaming (SSE)](/api/TTS/tts-sse) — SSE synthesis reference
-* [TTS Realtime API](/api/TTS/tts-websocket) — WebSocket TTS reference
+* [STT REST API](https://docs.gnani.ai/api/STT/speech-to-text) — file-based transcription reference
+* [STT Realtime API](https://docs.gnani.ai/api/STT/stt-websocket) — WebSocket protocol reference
+* [TTS REST API](https://docs.gnani.ai/api/TTS/tts-inference) — synchronous synthesis reference
+* [TTS Streaming (SSE)](https://docs.gnani.ai/api/TTS/tts-sse) — SSE synthesis reference
+* [TTS Realtime API](https://docs.gnani.ai/api/TTS/tts-websocket) — WebSocket TTS reference
 * [`gnani-vachana` on PyPI](https://pypi.org/project/gnani-vachana/) — core SDK
 * [`pipecat-gnani` on PyPI](https://pypi.org/project/pipecat-gnani/) — this plugin
 * [Pipecat Docs](https://docs.pipecat.ai/) — Pipecat framework reference

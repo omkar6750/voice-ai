@@ -3,8 +3,7 @@
 Status: Accepted  
 Date: 2026-09-27  
 Related: [PLAN-0015](../plan/PLAN-0015-provider-model-configuration.md),
-[ADR-0004](ADR-0004-provider-boundaries.md),
-[ADR-0005](ADR-0005-runtime-configuration.md),
+[ADR-0003](ADR-0003-provider-adapters.md),
 [ADR-0006](ADR-0006-versioned-configuration.md)
 
 ## Context

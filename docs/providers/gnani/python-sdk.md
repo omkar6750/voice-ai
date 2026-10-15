@@ -114,7 +114,7 @@ Each API has one class per transport. Pick by latency requirement, not by prefer
     नमस्ते, आप कैसे हैं?
     ```
 
-    Continue to [Speech-to-Text →](/python-sdk/speech-to-text)
+    Continue to [Speech-to-Text →](https://docs.gnani.ai/python-sdk/speech-to-text)
   </Tab>
 
   <Tab title="Text-to-Speech">
@@ -134,7 +134,7 @@ Each API has one class per transport. Pick by latency requirement, not by prefer
 
     `output.wav` is written to disk, and the same bytes are returned so you can stream or upload them instead.
 
-    Continue to [Text-to-Speech →](/python-sdk/text-to-speech)
+    Continue to [Text-to-Speech →](https://docs.gnani.ai/python-sdk/text-to-speech)
   </Tab>
 </Tabs>
 
@@ -216,9 +216,9 @@ client = GnaniSTTClient(base_url="https://api.vachana.ai")
 </CardGroup>
 
 * [`gnani-vachana` on PyPI](https://pypi.org/project/gnani-vachana/) — releases and changelog
-* [STT REST API](/api/STT/speech-to-text) · [STT Realtime API](/api/STT/stt-websocket) — underlying HTTP reference
-* [TTS REST](/api/TTS/tts-inference) · [TTS SSE](/api/TTS/tts-sse) · [TTS Realtime](/api/TTS/tts-websocket) — underlying HTTP reference
-* [LiveKit Plugin](/livekit/introduction) · [Pipecat Plugin](/pipecat/introduction) — framework integrations built on these same APIs
+* [STT REST API](https://docs.gnani.ai/api/STT/speech-to-text) · [STT Realtime API](https://docs.gnani.ai/api/STT/stt-websocket) — underlying HTTP reference
+* [TTS REST](https://docs.gnani.ai/api/TTS/tts-inference) · [TTS SSE](https://docs.gnani.ai/api/TTS/tts-sse) · [TTS Realtime](https://docs.gnani.ai/api/TTS/tts-websocket) — underlying HTTP reference
+* [LiveKit Plugin](https://docs.gnani.ai/livekit/introduction) · [Pipecat Plugin](https://docs.gnani.ai/pipecat/introduction) — framework integrations built on these same APIs
 
 
 This documentation is built and hosted on [Mintlify](https://mintlify.com), a developer documentation platform.

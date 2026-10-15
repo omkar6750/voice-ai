@@ -319,7 +319,7 @@ GnaniTTSClient.supported_voices("timbre-v2.5")
 ```
 
 <Tip>
-  Preview voices before integrating — open the [Gnani TTS playground](https://app.gnani.ai/voice/text-to-speech) and filter by language, gender, and persona. Full descriptions are in the [voice catalog](/api/TTS/available-voices).
+  Preview voices before integrating — open the [Gnani TTS playground](https://app.gnani.ai/voice/text-to-speech) and filter by language, gender, and persona. Full descriptions are in the [voice catalog](https://docs.gnani.ai/api/TTS/available-voices).
 </Tip>
 
 ### Language and speed
@@ -342,7 +342,7 @@ Accepted `language` values: `auto`, `hi-IN`, `en-IN`, `ta-IN`, `te-IN`, `kn-IN`,
 
 ## Voice cloning
 
-Generate a speaker embedding with the [voice-clone embeddings endpoint](/api/VC/voice-clone-embeddings), then pass it as `SpeakerEmbedding`. When present, `voice` is ignored.
+Generate a speaker embedding with the [voice-clone embeddings endpoint](https://docs.gnani.ai/api/VC/voice-clone-embeddings), then pass it as `SpeakerEmbedding`. When present, `voice` is ignored.
 
 ```python theme={null}
 from gnani.tts import GnaniTTSClient, SpeakerEmbedding
@@ -403,11 +403,11 @@ All except `ValueError` inherit from `GnaniTTSError`.
 
 ## Further Reading
 
-* [Python SDK overview](/python-sdk/introduction) — installation, auth, client selection
-* [Python SDK — Speech-to-Text](/python-sdk/speech-to-text)
-* [Available Voices](/api/TTS/available-voices) — full catalog with personas
-* [TTS REST](/api/TTS/tts-inference) · [TTS SSE](/api/TTS/tts-sse) · [TTS Realtime](/api/TTS/tts-websocket) — endpoint references
-* [Text Formatting](/api/TTS/tts-input-formating) — pauses, numbers, and pronunciation control
+* [Python SDK overview](https://docs.gnani.ai/python-sdk/introduction) — installation, auth, client selection
+* [Python SDK — Speech-to-Text](https://docs.gnani.ai/python-sdk/speech-to-text)
+* [Available Voices](https://docs.gnani.ai/api/TTS/available-voices) — full catalog with personas
+* [TTS REST](https://docs.gnani.ai/api/TTS/tts-inference) · [TTS SSE](https://docs.gnani.ai/api/TTS/tts-sse) · [TTS Realtime](https://docs.gnani.ai/api/TTS/tts-websocket) — endpoint references
+* [Text Formatting](https://docs.gnani.ai/api/TTS/tts-input-formating) — pauses, numbers, and pronunciation control
 
 
 This documentation is built and hosted on [Mintlify](https://mintlify.com), a developer documentation platform.

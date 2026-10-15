@@ -11,7 +11,9 @@ Pipecat runtime, SIM7600 telephony, PostgreSQL, and a Vite dashboard.
   [ADR-0006](docs/adr/ADR-0006-versioned-configuration.md),
   [ADR-0007](docs/adr/ADR-0007-exchanges-and-integration-secrets.md), and
   [PLAN-0003](docs/plan/PLAN-0003-configurable-runtime.md).
-- Read the relevant code and tests before editing. Follow [.tessl/RULES.md](.tessl/RULES.md).
+- Read the relevant code and tests before editing. Consult the current
+  [decision index](docs/architecture/decision-index.md), and
+  [regression guide](docs/testing/regression-tests.md).
 
 ## Toolchain
 
@@ -40,8 +42,11 @@ Pipecat runtime, SIM7600 telephony, PostgreSQL, and a Vite dashboard.
   never receive provider keys, encrypted secrets, or runtime credentials.
 - Runtime ingestion/control writes use `X-Voice-Runtime-Token` with
   `VOICE_RUNTIME_SERVICE_TOKEN`; this token is separate from dashboard access and stays server-side.
-- Provider credentials belong in developer/deployment environment configuration.
-- Dashboard action secrets are write-only Fernet-encrypted values.
+- Provider credentials are organization-owned encrypted database records selected
+  by stage. Deployment owns vault keys, Clerk/storage credentials and runtime
+  tokens; development compatibility is not the production model.
+- Secret writes are write-only. The vault uses scoped AES-GCM encryption and
+  retains legacy Fernet reads for existing records.
 - `contracts/` and published configuration revisions are authoritative for configurable agents.
   Published versions are immutable; drafts use revisions/concurrency checks.
 - `scripts/demo_call.py` is tested reference material. Do not edit it unless the user explicitly asks.
@@ -77,6 +82,8 @@ debugging. Real modem/provider checks require hardware and API keys.
 Run the narrowest relevant tests and lint checks, inspect the diff, and report any
 unverified hardware/provider behavior. Preserve unrelated user changes.
 
-# Agent Rules <!-- tessl-managed -->
+## Communication
 
-@.tessl/RULES.md follow the [instructions](.tessl/RULES.md)
+Use clear technical English by default: name the component performing each action,
+explain cause and effect, define unfamiliar terms, and distinguish verified facts
+from assumptions. See [CLAUDE.md](CLAUDE.md) for the compact writing guidance.

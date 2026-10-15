@@ -92,7 +92,7 @@ Accepted file extensions: `.wav`, `.mp3`, `.flac`, `.ogg`, `.m4a`, `.aac`. Anyth
 </CodeGroup>
 
 <Note>
-  ITN is currently supported for `hi-IN` and `en-IN` only. See [ITN reference](/api/STT/speech-to-text#inverse-text-normalization-itn).
+  ITN is currently supported for `hi-IN` and `en-IN` only. See [ITN reference](https://docs.gnani.ai/api/STT/speech-to-text#inverse-text-normalization-itn).
 </Note>
 
 ***
@@ -405,10 +405,10 @@ All six inherit from `GnaniSTTError`.
 
 ## Further Reading
 
-* [Python SDK overview](/python-sdk/introduction) — installation, auth, client selection
-* [Python SDK — Text-to-Speech](/python-sdk/text-to-speech)
-* [STT REST API](/api/STT/speech-to-text) — endpoint reference
-* [STT Realtime API](/api/STT/stt-websocket) — WebSocket protocol reference
+* [Python SDK overview](https://docs.gnani.ai/python-sdk/introduction) — installation, auth, client selection
+* [Python SDK — Text-to-Speech](https://docs.gnani.ai/python-sdk/text-to-speech)
+* [STT REST API](https://docs.gnani.ai/api/STT/speech-to-text) — endpoint reference
+* [STT Realtime API](https://docs.gnani.ai/api/STT/stt-websocket) — WebSocket protocol reference
 
 
 This documentation is built and hosted on [Mintlify](https://mintlify.com), a developer documentation platform.

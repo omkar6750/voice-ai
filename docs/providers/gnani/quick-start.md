@@ -39,7 +39,7 @@ Before you begin, ensure you have:
 
         * `<API_KEY>`: Your Gnani Prisma v2.5 API key
         * `/path/to/your/audio.wav`: Path to your audio file
-        * `hi-IN`: Language code (see [Language Codes](/api/STT/speech-to-text#language-codes))
+        * `hi-IN`: Language code (see [Language Codes](https://docs.gnani.ai/api/STT/speech-to-text#language-codes))
 
         ### Expected STT Response
 
@@ -56,7 +56,7 @@ Before you begin, ensure you have:
       </Tab>
 
       <Tab title="Realtime">
-        Stream live audio over WebSocket. See [STT Realtime](/api/STT/stt-websocket) for the full protocol, headers, and PCM requirements.
+        Stream live audio over WebSocket. See [STT Realtime](https://docs.gnani.ai/api/STT/stt-websocket) for the full protocol, headers, and PCM requirements.
 
         **Endpoint**
 
@@ -92,7 +92,7 @@ Before you begin, ensure you have:
 
     <Tabs>
       <Tab title="REST">
-        Have your input text ready. Choose a voice from the [Voice Catalog](/api/TTS/available-voices).
+        Have your input text ready. Choose a voice from the [Voice Catalog](https://docs.gnani.ai/api/TTS/available-voices).
 
         ### Your First Text-to-Speech Call
 
@@ -174,7 +174,7 @@ Before you begin, ensure you have:
       </Tab>
 
       <Tab title="Realtime">
-        Connect over WebSocket for lowest latency. See [TTS Realtime](/api/TTS/tts-websocket) for message types and `audio_config` options.
+        Connect over WebSocket for lowest latency. See [TTS Realtime](https://docs.gnani.ai/api/TTS/tts-websocket) for message types and `audio_config` options.
 
         **Endpoint**
 
@@ -326,10 +326,10 @@ Before you begin, ensure you have:
 
 ## Next Steps
 
-* **Speech-to-Text**: [STT REST](/api/STT/speech-to-text) and [STT Realtime](/api/STT/stt-websocket)
-* **Text-to-Speech**: [REST](/api/TTS/tts-inference), [Streaming (SSE)](/api/TTS/tts-sse), and [Realtime](/api/TTS/tts-websocket)
-* **Voice Cloning**: [VC Embeddings](/api/VC/voice-clone-embeddings), [REST](/api/VC/vc-inference), [Streaming](/api/VC/vc-sse), and [Realtime](/api/VC/vc-websocket)
-* **Batch transcription**: [Batch STT Introduction](/api/STTBatch/Introduction)
+* **Speech-to-Text**: [STT REST](https://docs.gnani.ai/api/STT/speech-to-text) and [STT Realtime](https://docs.gnani.ai/api/STT/stt-websocket)
+* **Text-to-Speech**: [REST](https://docs.gnani.ai/api/TTS/tts-inference), [Streaming (SSE)](https://docs.gnani.ai/api/TTS/tts-sse), and [Realtime](https://docs.gnani.ai/api/TTS/tts-websocket)
+* **Voice Cloning**: [VC Embeddings](https://docs.gnani.ai/api/VC/voice-clone-embeddings), [REST](https://docs.gnani.ai/api/VC/vc-inference), [Streaming](https://docs.gnani.ai/api/VC/vc-sse), and [Realtime](https://docs.gnani.ai/api/VC/vc-websocket)
+* **Batch transcription**: [Batch STT Introduction](https://docs.gnani.ai/api/STTBatch/Introduction)
 
 
 This documentation is built and hosted on [Mintlify](https://mintlify.com), a developer documentation platform.

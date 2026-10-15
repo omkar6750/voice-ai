@@ -150,6 +150,24 @@ configurations are not rewritten; no database migration or saved-agent edits.
 See ADR-0058 and docs/deployment/PROMPT-FALLBACKS.md. Real provider/modem
 acceptance remains operator-run.
 
-## 2026-10-09 — Call release evidence
+## 2026-10-09 â€” Call release evidence
 
 Isolated call-outcome layer retains observed/redacted modem URCs in diagnostic evidence, freezes CEER before remote-disconnect cleanup, keeps missing registration readings unknown, and exposes busy/no-answer/rejection/voicemail outcomes. Phone-only Pipecat voicemail detection uses the existing main credential with a bounded five-second fail-open; browser/text skip it. No agent rows, real calls or messages changed. See ADR-0059. Hardware/carrier acceptance remains operator-run.
+
+
+## 2026-10-15 Documentation and Tessl cleanup
+
+Reviewed the current checkout at 42f7b10. Added docs/README.md, an applicability index for all 46 prior ADRs and 14 RFCs,
+twelve incident records with exact existing test links, and the regression-writing
+guide. The system design documents and dead-code review remain local and are
+excluded from this commit at the user request. ADR-0060/0061/0062 retrospectively record implemented
+cleanup ordering, voicemail isolation and structured composer booking evidence.
+No new RFC, runtime behavior, saved agent, database mutation or deployment.
+
+Removed Tessl repository assets, linked skills, MCP entries, user-local CLI/data
+and user PATH entry at the user request. Independent skills remain. Three unused
+module candidates are documented and retained after automatic approval rejected
+deletion without stronger runtime verification. Existing historical/SDK compatibility
+remains active. CLAUDE.md links current docs and applies clear technical writing
+by default. See docs/issues/verification.md for actual checks and two existing
+regression expectation mismatches; do not claim a fully green suite.
