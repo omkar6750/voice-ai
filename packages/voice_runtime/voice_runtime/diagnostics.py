@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 import math
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -155,7 +156,11 @@ def provider_error_diagnostic(
         else None,
         retryable=retryable,
         provider_request_id=redact_api_keys(request_id)[:255]
-        if is_development() and isinstance(request_id, str)
+        if isinstance(request_id, str)
+        and (
+            is_development()
+            or (provider == "sarvam" and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", request_id))
+        )
         else None,
         http_status=status_code,
         retry_after_seconds=_retry_after(retry_after_seconds),
@@ -255,7 +260,7 @@ def provider_exception_diagnostic(exc: BaseException, *, provider: str, operatio
             retryable=True,
         )
     # Development retains provider request IDs for support and correlation.
-    if is_development() or provider in {"gnani", "isoquant"}:
+    if is_development() or provider in {"gnani", "isoquant", "sarvam"}:
         headers = getattr(response, "headers", {}) or {}
         request_id = headers.get("x-request-id") or headers.get("request-id")
         if (
@@ -267,6 +272,14 @@ def provider_exception_diagnostic(exc: BaseException, *, provider: str, operatio
     if type(operation) is str and operation in {"llm", "stt", "tts", "classifier", "embedding"}:
         diagnostic["metadata"]["operation"] = operation
     diagnostic["metadata"]["error_category"] = error_category(exc)
+    if provider == "sarvam":
+        exception_type = type(exc).__name__
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,79}", exception_type):
+            diagnostic["metadata"]["exception_type"] = exception_type
+        close_code = getattr(getattr(exc, "rcvd", None), "code", None)
+        if type(close_code) is int and 1000 <= close_code <= 4999:
+            diagnostic["metadata"]["websocket_close_code"] = close_code
+            diagnostic["metadata"]["websocket_close_reason"] = "provider_connection_closed"
     return diagnostic
 
 

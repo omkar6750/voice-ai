@@ -12,6 +12,10 @@ implementation, not live deployment or hardware acceptance.
 
 ## Operational references
 
+- [Sarvam v4 and readiness acceptance](deployment/SARVAM-V4-ACCEPTANCE.md),
+  [readiness/adapter decision](adr/ADR-0065-runtime-readiness-and-sarvam-v4.md) and
+  [Storage authorization follow-up](adr/ADR-0064-storage-and-organization-authorization.md).
+
 - [New-organization demo](adr/ADR-0063-new-organization-demo.md): selected example,
   tenant-owned seeding, included evidence and setup requirements.
 - [Runtime split](deployment/RUNTIME-SPLIT.md), [text tests](deployment/TEXT-TESTS.md)

@@ -663,7 +663,10 @@ class NativePipelineHost(
             )
         tts_config = snapshot["tts"]
         vad_config = snapshot["vad"]
-        if text_output:
+        if text_output or (
+            snapshot.get("stt", {}).get("provider") == "sarvam"
+            and snapshot["stt"].get("realtime", {}).get("turn_timing") == "server_only"
+        ):
             vad = None
         else:
             # Sarvam Realtime owns turn boundaries for both supported models. Pipecat
@@ -855,6 +858,33 @@ class NativePipelineHost(
 
             self.observer.context_event_consumer = context_event_consumer
         from voice_runtime.execution.voicemail import AnswerDetectionObserver
+
+        if stt is not None and hasattr(stt, "diagnostic_event"):
+
+            def stt_event(event, state):
+                tracker.diagnostic(
+                    severity="info",
+                    category="provider_connection",
+                    source="provider",
+                    code=f"sarvam_{event}",
+                    message=f"Sarvam STT {event.replace('_', ' ')}",
+                    provider_request_id=state.get("provider_request_id"),
+                    metadata={
+                        "provider": "sarvam",
+                        "operation": "stt",
+                        "model": snapshot["stt"]["model"],
+                        **state,
+                    },
+                )
+
+            stt.diagnostic_event = stt_event
+
+            @stt.event_handler("on_usable_changed")
+            async def stt_unusable(_service, usable):
+                if not usable and not self.termination.closing:
+                    self.termination.request("pipeline_failure")
+                    self.errors.append("Speech recognition connection became unusable")
+                    self._end_task = asyncio.create_task(self.worker.cancel())
 
         self.worker = PipelineWorker(
             pipeline,

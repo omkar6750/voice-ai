@@ -235,6 +235,12 @@ def build_user_aggregator_params(snapshot: dict, vad) -> LLMUserAggregatorParams
         vad_analyzer=vad,
         user_turn_strategies=strategies,
         user_idle_timeout=limits["idle_timeout_secs"],
+        **(
+            {"user_turn_stop_timeout": stt["realtime"]["turn_stop_timeout_seconds"]}
+            if stt.get("provider") == "sarvam"
+            and stt.get("realtime", {}).get("turn_stop_timeout_seconds") is not None
+            else {}
+        ),
     )
 
 

@@ -185,6 +185,7 @@ class EvidenceObserver(BaseObserver):
             else:
                 diagnostic = provider_error_diagnostic(
                     provider=provider,
+                    status_code=getattr(processor, "diagnostic_state", {}).get("http_status"),
                     body=frame.error,
                     request_id=getattr(processor, "_request_id", None),
                 )
@@ -194,6 +195,14 @@ class EvidenceObserver(BaseObserver):
             )
             if processor is not None and hasattr(processor, "is_usable"):
                 diagnostic["metadata"]["processor_is_usable"] = bool(processor.is_usable)
+            if provider == "sarvam":
+                state = getattr(processor, "diagnostic_state", {})
+                diagnostic["metadata"].update(state)
+                diagnostic["metadata"]["model"] = self.models.get(operation_name)
+                diagnostic["provider_request_id"] = state.get(
+                    "provider_request_id"
+                ) or diagnostic.get("provider_request_id")
+                diagnostic["http_status"] = state.get("http_status", diagnostic.get("http_status"))
             active = (
                 getattr(self, f"{operation_name}_operation", None)
                 if operation_name in self.providers
@@ -361,6 +370,8 @@ class EvidenceObserver(BaseObserver):
             code="final_transcription_missing",
             message="No finalized transcription was received for a caller turn",
             detail="The STT operation remained open when another turn started or the pipeline ended.",
+            metadata={"provider": self.providers["stt"], "operation": "stt",
+                **getattr(self.stt, "diagnostic_state", {})},
         )
         self.stt_operation = None
         self._mark("stt_missing_final")

@@ -1,10 +1,13 @@
 from pipecat.services.cartesia.tts import CartesiaTTSService, GenerationConfig
-from pipecat.services.sarvam.stt import SarvamRealtimeSTTService
-from pipecat.services.sarvam.tts import SarvamTTSService
 from voice_shared.dev_visibility import register_api_keys
 
 from voice_runtime.execution.credential_keys import stage_api_key
 from voice_runtime.execution.gnani import build_gnani_stt, build_gnani_tts
+from voice_runtime.execution.sarvam_stt import (
+    DiagnosticSarvamRealtimeSTTService as SarvamRealtimeSTTService,
+)
+from voice_runtime.execution.sarvam_tts import BulbulV4TTSService
+from voice_runtime.execution.sarvam_tts import DiagnosticSarvamTTSService as SarvamTTSService
 
 
 def build_speech_services(settings, snapshot: dict, sample_rate: int):
@@ -37,6 +40,7 @@ def build_speech_services(settings, snapshot: dict, sample_rate: int):
             endpointing="vad",
             prefix_padding_ms=realtime.get("prefix_padding_ms"),
             should_interrupt=snapshot.get("call_limits", {}).get("interruptions_enabled", True),
+            keepalive_timeout=30,
         )
     else:
         raise ValueError(f"Unsupported STT provider: {stt_config['provider']}")
@@ -45,13 +49,22 @@ def build_speech_services(settings, snapshot: dict, sample_rate: int):
     if tts_config["provider"] == "gnani":
         tts = build_gnani_tts(stage_api_key(settings, "tts", "gnani"), tts_config, sample_rate)
     elif tts_config["provider"] == "sarvam":
-        tts = SarvamTTSService(
+        service = (
+            BulbulV4TTSService if tts_config["model"] == "bulbul:v4-flash" else SarvamTTSService
+        )
+        sarvam_settings = {
+            key: value
+            for key, value in (tts_config.get("sarvam") or {}).items()
+            if value is not None
+        }
+        tts = service(
             api_key=stage_api_key(settings, "tts", "sarvam"),
             settings=SarvamTTSService.Settings(
                 model=tts_config["model"],
                 voice=tts_config["voice"],
                 language=tts_config["language"],
                 pace=tts_config["pace"],
+                **sarvam_settings,
             ),
             sample_rate=sample_rate,
         )

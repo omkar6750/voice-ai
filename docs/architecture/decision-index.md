@@ -58,6 +58,8 @@ Accepted historical records retain their original text. This index supplies curr
 | [ADR-0061](../adr/ADR-0061-isolated-voicemail-context-and-speech.md) | Retrospective record of classifier context isolation, idempotent delivery and held-speech invalidation. |
 | [ADR-0062](../adr/ADR-0062-composer-booking-evidence.md) | Retrospective clarification of the existing structured booking input; partially supersedes ADR-0050. |
 | [ADR-0063](../adr/ADR-0063-new-organization-demo.md) | New organizations receive a credential-free starter adaptation and an explicitly redacted historical example with tenant-owned IDs. |
+| [ADR-0064](../adr/ADR-0064-storage-and-organization-authorization.md) | Keep server Storage credentials separate from Clerk organization authorization; restricted-role RLS remains a follow-up. |
+| [ADR-0065](../adr/ADR-0065-runtime-readiness-and-sarvam-v4.md) | Read-only runtime admission polling, pinned v4 compatibility and opt-in server-only turn timing. |
 
 ## RFC applicability
 

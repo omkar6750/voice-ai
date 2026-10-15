@@ -369,9 +369,14 @@ async def health():
 
 @app.get("/v1/status", dependencies=[Depends(authenticate)])
 async def status(request: Request):
+    manager = request.app.state.manager
     return {
         "boot_id": str(request.app.state.manager.boot_id),
         **request.app.state.manager.metrics(),
+        "admission_enabled": manager.settings.local or manager.settings.hosted_calls_enabled,
+        "admission_available": manager.capacity.allows(
+            sum(s.state != "ended" for s in manager.sessions.values())
+        ),
     }
 
 

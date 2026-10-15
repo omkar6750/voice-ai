@@ -128,6 +128,7 @@ def test_saaras_uses_realtime_server_vad_and_codemix(monkeypatch, model):
         endpointing="vad",
         prefix_padding_ms=80,
         should_interrupt=False,
+        keepalive_timeout=30,
     )
     assert stt is realtime.construct.return_value
 
