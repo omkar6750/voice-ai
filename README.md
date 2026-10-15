@@ -11,6 +11,25 @@ separate transport adapter; live Twilio acceptance remains unverified.
 Speech-to-text (STT) recognizes caller audio; the language model chooses replies
 and tools; text-to-speech (TTS) generates the agent's audio.
 
+## Demo access for reviewers
+
+Open the [dashboard](https://omkars-voice-ai.netlify.app/) and choose **Sign up**
+for your first visit. These test credentials work **only while Clerk test mode
+is enabled**:
+
+| Field | Example |
+|---|---|
+| Email (use a unique prefix) | `reviewer-yourname+clerk_test@example.com` |
+| Email/SMS verification code | `424242` |
+| Optional test phone | `+15555550100` |
+
+Verification codes are not emailed or sent by SMS for test addresses/numbers.
+For later visits, use **Sign in** with the same address. Organization access
+still follows membership; test sign-in does not grant access to the owner's org.
+These are public test values, not private credentials. Use them only for demo
+data. Clerk discourages enabling test mode on a production instance.
+See [Clerk's test-mode documentation](https://clerk.com/docs/guides/development/testing/test-emails-and-phones).
+
 ## Capabilities
 
 - **Agent authoring:** node prompts, task messages, transitions, conversation

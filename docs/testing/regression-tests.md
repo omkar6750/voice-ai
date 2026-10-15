@@ -54,6 +54,18 @@ different unresolved failure, such as precise TTS playback truncation.
 
 ## Choosing the test layer
 
+Organization provisioning is covered by
+[`test_organization_seed.py`](../../tests/integration/test_organization_seed.py).
+It uses an isolated migrated PostgreSQL database and creates its own organizations,
+including when no legacy tenant exists. It checks that seeding works without
+production provider keys, survives registration retries without duplicates, preserves
+existing v1 catalogs and settings, and creates independently linked run evidence
+for each organization. It also checks that the starter remains an inactive draft,
+production publication rejects missing credentials, and draft activation is blocked.
+The corresponding
+[fixture tests](../../tests/unit/test_organization_demo.py) check private-field
+exclusion and the starter's terminating graph without executing providers.
+
 | Layer | Use it for | Replace |
 |---|---|---|
 | Pure contract/function | Prompt parsing, role normalization, schemas, required URLs | Nothing external |

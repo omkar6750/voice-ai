@@ -57,6 +57,7 @@ Accepted historical records retain their original text. This index supplies curr
 | [ADR-0060](../adr/ADR-0060-independent-cleanup-and-operator-stop.md) | Retrospective record of independent cleanup, operator stop fencing and PCM shutdown ordering. |
 | [ADR-0061](../adr/ADR-0061-isolated-voicemail-context-and-speech.md) | Retrospective record of classifier context isolation, idempotent delivery and held-speech invalidation. |
 | [ADR-0062](../adr/ADR-0062-composer-booking-evidence.md) | Retrospective clarification of the existing structured booking input; partially supersedes ADR-0050. |
+| [ADR-0063](../adr/ADR-0063-new-organization-demo.md) | New organizations receive a credential-free starter adaptation and an explicitly redacted historical example with tenant-owned IDs. |
 
 ## RFC applicability
 

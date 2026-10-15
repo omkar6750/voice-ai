@@ -322,6 +322,16 @@ export function RunDetailPage() {
                 </Button>
               </div>
             </header>
+            {run.resolved_config?._demo != null && (
+              <p className="mt-4 rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
+                Demo example: this redacted historical conversation is linked to
+                a starter adaptation of its agent. Timings are from the original
+                call. Private recordings, external-action evidence and raw
+                provider payloads are excluded. The starter agent begins as an
+                inactive draft. Add your own provider credentials, then publish
+                and activate it before making calls.
+              </p>
+            )}
             <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 border-y py-3 text-xs">
               <span>
                 Duration <strong>{duration(durationMs)}</strong>

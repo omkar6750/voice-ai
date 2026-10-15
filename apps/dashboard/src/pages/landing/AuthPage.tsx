@@ -50,6 +50,51 @@ export default function AuthPage({ mode }: { mode: "sign-in" | "sign-up" }) {
             Configure agents, test conversations and inspect the evidence. Your
             team's workspace is one step away.
           </p>
+          <aside
+            aria-labelledby="demo-access-title"
+            className="mt-8 max-w-sm border-t border-border pt-6"
+          >
+            <p className="font-mono text-xs uppercase tracking-widest text-primary">
+              Test mode only
+            </p>
+            <h2 id="demo-access-title" className="mt-2 text-lg font-medium">
+              Trying the demo?
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              {mode === "sign-in" ? (
+                <>
+                  First visit?{" "}
+                  <Link
+                    to={clerkUrls.signUp}
+                    className="font-medium text-primary underline underline-offset-4"
+                  >
+                    Create an account
+                  </Link>
+                  . Returning? Use the same test email you signed up with.
+                </>
+              ) : (
+                "Use a unique test email to create your demo account."
+              )}
+            </p>
+            <dl className="mt-4 space-y-4 text-sm">
+              <div>
+                <dt className="text-muted-foreground">Test email format</dt>
+                <dd className="mt-1 break-all font-mono text-foreground select-all">
+                  yourname+clerk_test@example.com
+                </dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Verification code</dt>
+                <dd className="mt-1 font-mono text-xl tracking-widest text-foreground select-all">
+                  424242
+                </dd>
+              </div>
+            </dl>
+            <p className="mt-4 text-xs leading-5 text-muted-foreground">
+              With Clerk test mode enabled, no verification email is sent. Enter
+              this code when asked. Use demo data only.
+            </p>
+          </aside>
         </div>
         <div className="flex justify-center">
           {mode === "sign-in" ? (

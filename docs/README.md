@@ -12,6 +12,8 @@ implementation, not live deployment or hardware acceptance.
 
 ## Operational references
 
+- [New-organization demo](adr/ADR-0063-new-organization-demo.md): selected example,
+  tenant-owned seeding, included evidence and setup requirements.
 - [Runtime split](deployment/RUNTIME-SPLIT.md), [text tests](deployment/TEXT-TESTS.md)
   and [MCP access](deployment/MCP-ACCESS.md).
 - [Deployment acceptance](deployment/ACCEPTANCE.md) is a dated checklist. Its old

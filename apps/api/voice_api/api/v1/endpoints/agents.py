@@ -214,6 +214,14 @@ async def publish_agent(
     if row.revision != body.revision:
         raise HTTPException(409, "Draft changed; reload before publishing")
     await validate_agent_bindings(session, row)
+    # Seeded drafts intentionally have no credentials. Recheck at publication,
+    # even if the draft was never saved through sync_bindings, or its selected
+    # credentials were removed after its last edit.
+    from voice_api.core.config import get_settings
+    from voice_api.services.provider_credentials import resolve_references
+
+    if config.credential_refs or get_settings().env != "dev":
+        await resolve_references(session, config.model_dump(mode="json"), strict=True)
     row.status = "published"
     row.published_at = datetime.now(UTC)
     await session.commit()
