@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import type { components } from "@/generated/api";
 import { waitForRuntime } from "./runtime-readiness";
 import { PipecatClient } from "@pipecat-ai/client-js";
 import {
@@ -116,14 +117,27 @@ export function TestAgentModal({
   });
   const agents = agentsQuery.data?.agents ?? [];
   const [selectedAgentId, setSelectedAgentId] = useState("");
+  const [selectedVersionId, setSelectedVersionId] = useState("");
+  const versionsQuery = useQuery({
+    queryKey: ["test-agent-versions", selectedAgentId],
+    queryFn: () =>
+      api<components["schemas"]["AgentVersionSummariesResponse"]>(
+        `/agents/${selectedAgentId}/versions?view=summary`,
+      ),
+    enabled: open && Boolean(selectedAgentId),
+  });
   const contacts = contactsQuery.data?.contacts ?? [];
   const connections = integrationsQuery.data?.connections ?? [];
   const optionsLoading =
     agentsQuery.isPending ||
+    (Boolean(selectedAgentId) && versionsQuery.isPending) ||
     contactsQuery.isPending ||
     integrationsQuery.isPending;
   const optionsError =
-    agentsQuery.error ?? contactsQuery.error ?? integrationsQuery.error;
+    agentsQuery.error ??
+    versionsQuery.error ??
+    contactsQuery.error ??
+    integrationsQuery.error;
 
   // Context Mode: contact | custom | none
   const [contextMode, setContextMode] = useState<"contact" | "custom" | "none">(
@@ -274,6 +288,7 @@ export function TestAgentModal({
       if (userEndedRef.current) return;
       const agent = agents.find((a) => a.id === selectedAgentId);
       const agentVersionId =
+        selectedVersionId ||
         agent?.active_version_id ||
         agent?.published_version_id ||
         agent?.latest_version_id ||
@@ -501,7 +516,10 @@ export function TestAgentModal({
                 <NativeSelect
                   className="w-full"
                   value={selectedAgentId}
-                  onChange={(e) => setSelectedAgentId(e.target.value)}
+                  onChange={(e) => {
+                    setSelectedAgentId(e.target.value);
+                    setSelectedVersionId("");
+                  }}
                   disabled={optionsLoading || agents.length === 0}
                 >
                   {optionsLoading ? (
@@ -523,6 +541,28 @@ export function TestAgentModal({
                     })
                   )}
                 </NativeSelect>
+              </label>
+
+              <label className="grid gap-1 text-sm font-medium">
+                Agent version
+                <NativeSelect
+                  value={selectedVersionId}
+                  disabled={optionsLoading}
+                  onChange={(event) => setSelectedVersionId(event.target.value)}
+                >
+                  <NativeSelectOption value="">
+                    Active version (default)
+                  </NativeSelectOption>
+                  {versionsQuery.data?.versions.map((version) => (
+                    <NativeSelectOption key={version.id} value={version.id}>
+                      v{version.version} · {version.status} · revision{" "}
+                      {version.revision}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+                <span className="text-xs font-normal text-muted-foreground">
+                  Testing a saved draft does not publish or activate it.
+                </span>
               </label>
 
               {/* Caller Identity & Context Tabs */}
