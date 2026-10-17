@@ -597,12 +597,13 @@ export function ModelsPanel({
                       })
                     }
                   >
-                    <option value="local">Local VAD timing</option>
-                    <option value="server_only">Server-only endpointing</option>
+                    <option value="local">Server endpointing + Silero timing</option>
+                    <option value="server_only">Server endpointing only</option>
                   </NativeSelect>
                   <FieldDescription>
-                    Server-only skips Silero; local VAD latency metrics are
-                    unavailable.
+                    Sarvam detects when speech ends in both modes. The first also
+                    runs Silero for Pipecat timing and TTFB metrics; the second
+                    skips Silero, so local VAD metrics are unavailable.
                   </FieldDescription>
                   <Button
                     type="button"

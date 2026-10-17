@@ -1,10 +1,11 @@
-import { useAuth, useOrganization } from "@clerk/react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAuth, useOrganization, useUser } from "@clerk/react";
+import { useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { ApiContext, ApiError, SupportSessionContext, request, useApi } from "./api";
 import { useAppContext } from "./app-context";
 import { PlatformKeepAwake } from "./PlatformKeepAwake";
+import { OrganizationSetup } from "./OrganizationSetup";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { clearQueryCache, persistQueryCache, restoreQueryCache } from "@/lib/query-client";
@@ -47,20 +48,18 @@ function SignedOutRoutes() {
   </Routes>;
 }
 function ProvisionOrganization() {
-  const { orgId, orgRole } = useAuth();
+  const { orgId } = useAuth();
   const { organization } = useOrganization();
-  const api = useApi();
-  const queryClient = useQueryClient();
-  const provision = useMutation({
-    mutationFn: () => api(`/orgs/${orgId}/provision`, { method: "POST", body: JSON.stringify({ name: organization?.name }) }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["app-context"] }),
-  });
-  const { mutate, isPending, isSuccess, isError, error } = provision;
-  useEffect(() => {
-    if (orgId && (orgRole === "org:owner" || orgRole === "org:admin") && organization?.name && !isPending && !isSuccess) mutate();
-  }, [isPending, isSuccess, mutate, orgId, orgRole, organization?.name]);
-  if (isError) return <main className="mx-auto max-w-xl p-8"><p role="alert" className="text-destructive">Organization setup failed. {error.message}</p></main>;
-  return <LoadingPage>Setting up organization…</LoadingPage>;
+  const { isLoaded, user } = useUser();
+  if (!isLoaded || !user || !orgId || !organization?.name) return <LoadingPage>Loading profile…</LoadingPage>;
+  return <OrganizationSetup
+    key={orgId}
+    orgId={orgId}
+    orgName={organization.name}
+    firstName={user.firstName}
+    lastName={user.lastName}
+    saveProfile={(names) => user.update(names)}
+  />;
 }
 
 function AuthenticatedApp() {

@@ -2,20 +2,9 @@ import { SignIn, SignUp } from "@clerk/react";
 import { Link } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { clerkUrls } from "@/app/clerk-config";
+import { clerkAuthAppearance as appearance } from "@/app/clerk-appearance";
 import { Brand, landingTheme } from "./LandingPage";
 import { cn } from "@/lib/utils";
-
-const appearance = {
-  variables: {
-    colorPrimary: "#52a8ff",
-    colorBackground: "#0a0a0a",
-    colorForeground: "#ededed",
-    colorMutedForeground: "#999999",
-    colorInputBackground: "#1f1f1f",
-    colorInputForeground: "#ededed",
-    borderRadius: "0px",
-  },
-};
 
 export default function AuthPage({ mode }: { mode: "sign-in" | "sign-up" }) {
   return (

@@ -1,14 +1,6 @@
 import { CreateOrganization, OrganizationList, OrganizationProfile } from "@clerk/react";
 import { clerkUrls } from "@/app/clerk-config";
-
-const appearance = {
-  variables: {
-    colorPrimary: "#315efb",
-    colorText: "#17223b",
-    colorBackground: "#f8fafc",
-    borderRadius: "0.75rem",
-  },
-};
+import { clerkAppearance as appearance } from "@/app/clerk-appearance";
 
 export function OrganizationListPage() {
   return <main className="mx-auto flex min-h-svh max-w-3xl items-center justify-center p-6"><OrganizationList hidePersonal afterSelectOrganizationUrl={clerkUrls.afterSignIn} afterCreateOrganizationUrl={clerkUrls.organizationProfile} appearance={appearance} /></main>;

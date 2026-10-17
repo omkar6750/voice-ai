@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { App } from "./app/App";
 import { clerkUrls } from "./app/clerk-config";
+import { clerkAppearance } from "./app/clerk-appearance";
 import { queryClient } from "./lib/query-client";
 import "./styles.css";
 
@@ -19,6 +20,7 @@ createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <ClerkProvider
         publishableKey={publishableKey}
+        appearance={clerkAppearance}
         signInUrl={clerkUrls.signIn}
         signUpUrl={clerkUrls.signUp}
         afterSignOutUrl="/"
